@@ -1,0 +1,36 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "integration",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "integration/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../packages/contracts"
+    },
+    {
+      "path": "../packages/runtime"
+    },
+    {
+      "path": "../packages/features"
+    },
+    {
+      "path": "../packages/channel-wechat"
+    },
+    {
+      "path": "../apps/server"
+    }
+  ]
+}

@@ -1,0 +1,118 @@
+{
+  "documents": [
+    {
+      "kind": "app.notes",
+      "version": 1,
+      "scope": "conversation",
+      "history": "rewindable",
+      "fork": "asOf",
+      "initial": {
+        "todos": [],
+        "memos": [],
+        "applied": {}
+      }
+    },
+    {
+      "kind": "app.index",
+      "version": 1,
+      "scope": "session",
+      "initial": {
+        "items": []
+      }
+    },
+    {
+      "kind": "app.reminders",
+      "version": 1,
+      "scope": "conversation",
+      "fork": "initial",
+      "initial": {
+        "items": [],
+        "applied": {}
+      }
+    },
+    {
+      "kind": "app.delegations",
+      "version": 1,
+      "scope": "conversation",
+      "fork": "initial",
+      "initial": {
+        "items": []
+      }
+    },
+    {
+      "kind": "app.meta",
+      "version": 1,
+      "scope": "session",
+      "initial": {
+        "boots": 0,
+        "lastBootAt": null
+      }
+    },
+    {
+      "kind": "app.v3.schedules",
+      "version": 1,
+      "scope": "conversation",
+      "fork": "initial",
+      "initial": {
+        "items": [],
+        "applied": {}
+      }
+    },
+    {
+      "kind": "app.v3.parents",
+      "version": 1,
+      "scope": "session",
+      "initial": {
+        "children": {}
+      }
+    },
+    {
+      "kind": "app.v3.background",
+      "version": 1,
+      "scope": "conversation",
+      "fork": "initial",
+      "initial": {
+        "items": [],
+        "applied": {}
+      }
+    },
+    {
+      "kind": "app.memory",
+      "version": 1,
+      "scope": "session",
+      "initial": {
+        "items": [],
+        "applied": {}
+      }
+    },
+    {
+      "kind": "app.skills",
+      "version": 1,
+      "scope": "session",
+      "initial": {
+        "items": [],
+        "applied": {}
+      }
+    },
+    {
+      "kind": "app.wechat.state",
+      "version": 1,
+      "scope": "session",
+      "initial": {
+        "bindings": {},
+        "cursors": {},
+        "outbox": []
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "name": "app.v3.schedule",
+      "version": 1
+    },
+    {
+      "name": "app.v3.background-agent",
+      "version": 1
+    }
+  ]
+}

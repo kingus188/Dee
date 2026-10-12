@@ -1,0 +1,44 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/contracts"
+    },
+    {
+      "path": "packages/runtime"
+    },
+    {
+      "path": "packages/runtime/tsconfig.test.json"
+    },
+    {
+      "path": "packages/features"
+    },
+    {
+      "path": "packages/features/tsconfig.test.json"
+    },
+    {
+      "path": "packages/channel-wechat"
+    },
+    {
+      "path": "packages/channel-wechat/tsconfig.test.json"
+    },
+    {
+      "path": "apps/web"
+    },
+    {
+      "path": "apps/web/tsconfig.test.json"
+    },
+    {
+      "path": "apps/server"
+    },
+    {
+      "path": "apps/server/tsconfig.test.json"
+    },
+    {
+      "path": "tests"
+    },
+    {
+      "path": "scripts"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "name": "pi-durable-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "基于 Pi Durable 的网页版个人 Agent：断点恢复、记事本、子 Agent、定时计划、任务中心和微信通道",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -b && node .build/scripts/build.js",
+    "check": "tsc -b && node .build/scripts/check-boundaries.js",
+    "test": "npm run build && node --experimental-vm-modules --test packages/*/dist-tests/*.test.js apps/*/dist-tests/*.test.js tests/dist/*.test.js",
+    "start": "npm run build && node apps/server/dist/main.js",
+    "dev": "npm run build && sh scripts/dev.sh"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  },
+  "workspaces": [
+    "packages/contracts",
+    "packages/runtime",
+    "packages/features",
+    "packages/channel-wechat",
+    "apps/web",
+    "apps/server"
+  ]
+}
