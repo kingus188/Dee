@@ -30,6 +30,8 @@ flowchart LR
 
 ## 开发命令
 
+Node.js 最低版本为 22.19，与 Pi SDK 的运行要求一致。开发依赖固定 TypeScript 6.0.3；模块边界检查使用其 JavaScript Compiler API，升级 TypeScript 7 前需迁移该脚本。`@types/node` 保持 22.x，与部署使用的 Node 主版本一致。
+
 在仓库根目录执行：
 
 ```bash

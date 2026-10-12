@@ -34,7 +34,7 @@ export function initializeTaskCenter() {
     toggle.setAttribute("aria-expanded", String(state));
     if (state) refresh();
   }
-  toggle.addEventListener("click", () => open(panel.hidden));
+  toggle.addEventListener("click", () => open(Boolean(panel.hidden)));
   $("v3-close").addEventListener("click", () => open(false));
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) open(false); });
   $("v3-export").addEventListener("click", () => {

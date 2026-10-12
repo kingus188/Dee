@@ -4,7 +4,7 @@
 
 ## 准备环境
 
-- Node.js **22.13 或以上**、npm、Git；推荐 macOS / Linux。Windows 建议使用 WSL2。
+- Node.js **22.19 或以上**、npm、Git；推荐 macOS / Linux。Windows 建议使用 WSL2。
 - **首次演示不需要 API Key**，也不需要 Docker、Redis、PostgreSQL 或云服务器。
 - `LLM_API=faux` 是模拟模型，不会访问真实 LLM 接口，也不会为任意任务生成智能答案。
 

@@ -11,7 +11,7 @@ docker compose logs --tail=100 pi-durable-assistant
 
 | 现象 | 常见原因 | 最小排查动作 |
 | --- | --- | --- |
-| `npm ci` 失败 | Node 版本过旧、依赖源不可访问 | `node -v`（至少 22.13）、核对 npm 网络及锁文件 |
+| `npm ci` 失败 | Node 版本过旧、依赖源不可访问 | `node -v`（至少 22.19）、核对 npm 网络及锁文件 |
 | 本地没有启动 | 端口占用，或真实模型变量不完整 | 先试 `LLM_API=faux npm run dev`；必要时指定 `PORT=3001` |
 | `Missing LLM_BASE_URL` 或模型参数错误 | `.env` 未正确加载；faux 与真实模型混淆 | 检查 `LLM_API` 类型和 `LLM_MODEL`、`LLM_BASE_URL`；本地用 `set -a; . ./.env; set +a` |
 | 生产启动失败或 HTTP 401 | `DEMO_PASSWORD` 缺失、错误，或反向代理未传 `Authorization` | 填强密码、用 `curl -u demo` 检查，保留代理鉴权请求头 |

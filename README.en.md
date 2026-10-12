@@ -31,9 +31,11 @@ Unlike a disposable chatbot session, this project wraps the Pi Durable runtime i
 | Notes search | Optional read-only search of an allowlisted Obsidian vault, with path and line citations. Nothing is written back |
 | Conversation list | Archive or remove a chat from the menu. Archive also stops that chat's unfinished reminders, schedules and background jobs. Removal drops the menu row only |
 
-**Tech stack:** Node.js 22+, TypeScript with native ESM, Pi Durable 1.1.0, SQLite, Docker Compose. Compiled with `tsc`; no frontend framework, bundler or external database server required.
+**Tech stack:** Node.js 22.19+, TypeScript with native ESM, Pi Durable 1.1.0, SQLite, Docker Compose. Compiled with `tsc`; no frontend framework, bundler or external database server required.
 
 ## Quick start — no API key
+
+Requires Node.js 22.19 or newer.
 
 ```bash
 git clone https://github.com/kingus188/pi-durable-assistant.git

@@ -40,7 +40,7 @@
 
 ## 3 分钟本地体验（不需要 API Key）
 
-需要 **Node.js ≥ 22.13**、npm 和 Git：
+需要 **Node.js ≥ 22.19**、npm 和 Git：
 
 ```bash
 git clone https://github.com/kingus188/pi-durable-assistant.git
