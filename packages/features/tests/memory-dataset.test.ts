@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { decideMemoryInTx, editMemoryInTx, normalizeMemoryText, proposeMemoryInTx, selectMemoryForPrompt } from "@assistant/features";
-import { mustAccept, normalizeCases, promptCases, scenarios, secretsMustReject } from "./memory-dataset.js";
+import { decideMemoryInTx, editMemoryInTx, normalizeMemoryText, normalizeSkill, proposeMemoryInTx, selectMemoryForPrompt } from "@assistant/features";
+import { mustAccept, normalizeCases, promptCases, scenarios, secretsMustReject, skillSecretCases } from "./memory-dataset.js";
 import type { Step } from "./memory-dataset.js";
 
 type Doc = { items: { id: string; status: string; text: string }[]; applied: Record<string, string> };
@@ -66,4 +66,9 @@ test("数据集：提示词记忆选择", () => {
 	for (const item of promptCases) {
 		assert.deepEqual(selectMemoryForPrompt(item.items, item.budget).map((entry) => entry.text), item.expect, item.name);
 	}
+});
+
+test("数据集：技能的名称、说明、正文都不能包含凭据；正常技能放行", () => {
+	for (const skill of skillSecretCases) assert.throws(() => normalizeSkill(skill), /技能里不能包含/);
+	assert.equal(normalizeSkill({ name: "部署", description: "发布前", body: "先跑 pnpm test，再核对 token 用量" }).name, "部署");
 });

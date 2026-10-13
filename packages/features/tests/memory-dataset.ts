@@ -10,6 +10,17 @@ export const secretsMustReject = [
 	"API_KEY=abcdef123456",
 	"密码：abc12345",
 	"密钥 = a1b2c3d4e5",
+	"PASSWORD ： abc12345",
+	"password:\nhunter2hunter2",
+	"export OPENAI_API_KEY=sk-abcdefghijklmnopqrstuv",
+	"secret=abcdef",
+];
+
+// 技能的名称、说明、正文都要检查，凭据可能出现在任何一处。
+export const skillSecretCases = [
+	{ name: "部署", description: "发布前", body: "先设置 token: abcdef123456 再发布" },
+	{ name: "部署", description: "密码：abc12345", body: "步骤" },
+	{ name: "部署", description: "发布前", body: "第一步\n第二步\npassword:\nhunter2hunter2" },
 ];
 
 // 普通偏好和事实，含与密钥相关的词但不含凭据，必须放行。

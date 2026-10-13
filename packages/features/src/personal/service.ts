@@ -54,6 +54,7 @@ export function normalizeSkill(input: { name?: unknown; description?: unknown; b
 	if (!name || name.length > SKILL_NAME_MAX || /[/\n\r]/.test(name)) throw new Error(`技能名称必须是 1～${SKILL_NAME_MAX} 字，且不能包含斜杠`);
 	if (!description || description.length > SKILL_DESC_MAX) throw new Error(`技能说明必须是 1～${SKILL_DESC_MAX} 字`);
 	if (!body || body.length > SKILL_BODY_MAX) throw new Error(`技能正文必须是 1～${SKILL_BODY_MAX} 字`);
+	if (SECRET_PATTERN.test(`${name}\n${description}\n${body}`)) throw new Error("技能里不能包含密码、密钥或令牌");
 	return { name, description, body };
 }
 
