@@ -105,7 +105,7 @@ return defineExtension({
 			const doc = await input.read.snapshot(MemoryDoc, renderContext);
 			const items = selectMemoryForPrompt(doc?.items);
 			if (items.length === 0) return undefined;
-			return ["已确认的长期记忆（未出现在这里的内容都还没批准）：", ...items.map((item) => `- ${item.text}`)].join("\n");
+			return ["已确认的长期记忆（未出现在这里的内容都还没批准；日期是记下的时间，可能已过时，与用户当前说法冲突时以当前为准）：", ...items.map((item) => `- ${item.text}（${new Date(item.createdAt).toISOString().slice(0, 10)}）`)].join("\n");
 		}),
 		section("skills", async (input, renderContext) => {
 			const doc = await input.read.snapshot(SkillsDoc, renderContext);
