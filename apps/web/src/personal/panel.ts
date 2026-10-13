@@ -8,6 +8,7 @@ export function personalCards(data: PersonalData): ConversationCard[] {
       const path = "/api/personal/" + group + "/" + encodeURIComponent(item.id);
       const actions: CardAction[] = [];
       if (item.status === "pending") actions.push({ label: group === "memory" ? "确认记住" : "批准技能", kind: "request", path: path + "/approve" });
+      if (group === "memory" && "text" in item && item.status !== "rejected") actions.push({ label: "修改", kind: "edit", path: path + "/edit", text: item.text });
       if (item.status !== "rejected") actions.push({ label: item.status === "approved" ? "撤回" : "暂不保存", kind: "request", path: path + "/reject" });
       cards.push({
         key: group + ":" + item.id, group,

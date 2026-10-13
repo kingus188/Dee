@@ -1,19 +1,4 @@
-import { el } from "../ui/elements.js";
 import type { CardGroup, ConversationCard } from "../chat/cards.js";
-
-export function createConversationCardLayout() {
-  const toolbar = document.getElementById("conversation-card-tools")!;
-  const groups: [CardGroup, string][] = [["tasks", "任务与提醒"], ["memory", "记忆"], ["skills", "技能"], ["notes", "聊天记录"]];
-  for (const [group, label] of groups) {
-    const button = el("button", label);
-    button.type = "button";
-    button.dataset.cardGroup = group;
-    button.setAttribute("aria-pressed", "false");
-    button.setAttribute("aria-controls", "conversation-cards");
-    toolbar.append(button);
-  }
-  return { toolbar, container: document.getElementById("conversation-cards")! };
-}
 
 export function emptyCard(group: CardGroup): ConversationCard {
   const examples = {

@@ -14,6 +14,7 @@ try {
   await cp(join(root, "pnpm-lock.yaml"), join(stage, "pnpm-lock.yaml"));
   await cp(join(root, "pnpm-workspace.yaml"), join(stage, "pnpm-workspace.yaml"));
   await cp(join(root, "LICENSE"), join(stage, "LICENSE"));
+  await cp(join(root, "apps/desktop/assets"), join(stage, "apps/desktop/assets"), { recursive: true });
   for (const workspace of workspacePaths()) {
     await mkdir(join(stage, workspace), { recursive: true });
     await cp(join(root, workspace, "package.json"), join(stage, workspace, "package.json"));
@@ -26,6 +27,7 @@ try {
   const outputs = await packager({
     dir: stage, out: join(root, "dist/desktop"), name: "Pi Durable Assistant",
     executableName: "Pi Durable Assistant", appBundleId: "com.pi-durable.assistant",
+    icon: join(root, "apps/desktop/assets/icon"),
     appVersion: manifest.version, electronVersion: desktop.devDependencies.electron,
     asar: true, prune: false, overwrite: true,
   });

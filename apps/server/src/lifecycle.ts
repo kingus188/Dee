@@ -9,6 +9,7 @@ export async function startServer(config: AppConfig, host = config.password ? "0
   let closing: Promise<void> | undefined;
   function close() {
     return closing ??= (async () => {
+      server.closeSockets();
       const stopped = new Promise<void>((resolve, reject) => {
         if (!server.listening) return resolve();
         server.close(error => error ? reject(error) : resolve());

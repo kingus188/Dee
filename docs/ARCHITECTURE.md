@@ -1,15 +1,15 @@
 # 多应用、多模块开发约定
 
-项目使用 pnpm workspaces 和 TypeScript project references。源码分为三个应用、四个私有包，保留原生 ESM、HTTP/JSON/SSE 和 Pi Durable 1.1.0。根目录命令统一执行构建、依赖检查与回归测试。
+项目使用 pnpm workspaces 和 TypeScript project references。源码分为三个应用、四个私有包，使用 ESM、React、HTTP/WebSocket 和 Pi Durable 1.1.0。根目录命令统一执行构建、依赖检查与回归测试。
 
 ## 应用与包
 
 | 位置 / 包名 | 职责 |
 | --- | --- |
-| `apps/server` / `@assistant/server` | `main.ts` 读取配置并启动、关闭；`application/` 编排会话、消息、任务和个人资料；`http/` 负责路由、鉴权、SSE 与静态资源 |
+| `apps/server` / `@assistant/server` | `main.ts` 读取配置并启动、关闭；`application/` 编排会话、消息、任务和个人资料；`http/` 负责路由、鉴权、WebSocket、兼容 SSE 与静态资源 |
 | `apps/desktop` / `@assistant/desktop` | Electron 桌面入口，复用本地服务与网页，提供独立数据目录和桌面打包 |
-| `apps/web` / `@assistant/web` | 原生 TypeScript 界面；聊天、附件、会话列表、任务中心、个人资料与界面组件分别组织 |
-| `packages/contracts` / `@assistant/contracts` | 可序列化的 HTTP/SSE 数据类型，浏览器和服务端共同使用；无 Node 或 SDK 依赖 |
+| `apps/web` / `@assistant/web` | React 界面，由 esbuild 打包；聊天、附件、会话列表、任务中心、个人资料与界面组件分别组织 |
+| `packages/contracts` / `@assistant/contracts` | 可序列化的 HTTP/WebSocket 数据类型，浏览器和服务端共同使用；无 Node 或 SDK 依赖 |
 | `packages/runtime` / `@assistant/runtime` | 模型目录、会话索引、Harness 与 SQLite 生命周期；不注册具体助手功能 |
 | `packages/features` / `@assistant/features` | 笔记、网页阅读、附件、计划、提醒、子 Agent、记忆、技能和只读知识检索 |
 | `packages/channel-wechat` / `@assistant/channel-wechat` | 微信入站验证、会话绑定、回复游标与发送队列 |
@@ -27,7 +27,7 @@ flowchart LR
   Wechat --> Runtime
 ```
 
-图中表示代码依赖。Web 实际通过 HTTP/SSE 与服务端通信。生产部署由服务端同源提供 Web 构建产物；同一数据库仍由一个后端运行时负责调度。新增 CLI 等客户端时，可以新增应用，通过协议接入已有服务。
+图中表示代码依赖。Web 的 JSON 请求和对话快照通过同源 WebSocket `/api/socket` 与服务端通信；静态资源、图片与导出文件仍通过 HTTP 获取。原有 HTTP/SSE 接口保留兼容。生产部署由服务端同源提供 Web 构建产物；同一数据库仍由一个后端运行时负责调度。新增 CLI 等客户端时，可以新增应用，通过协议接入已有服务。
 
 ## 开发命令
 
@@ -66,7 +66,7 @@ pnpm --filter @assistant/web test
 ## 必须保持的边界
 
 1. 跨包通过 `@assistant/*` 公开入口导入，禁止引用其他包的 `src/` 或 `dist/`。
-2. `contracts` 仅提供类型；Web 的外部包引用仅允许这些类型，运行时代码保持浏览器原生相对模块导入。
+2. `contracts` 仅提供类型；Web 除这些类型外只依赖 React 和 React DOM；TSX 与浏览器运行时代码由 esbuild 打包。依赖检查仍禁止引用服务端实现。
 3. 服务端只使用 Node 类型环境；Web 使用 DOM 类型环境；不能通过共享全局类型掩盖依赖错误。
 4. 环境变量在服务端入口读取。模型凭据、通知目标、知识库目录和微信配置以参数传递，不在功能包内读取进程环境。
 5. 跨功能用例放在 `apps/server/src/application/`。例如，归档会话要先检查微信绑定，再停止计划、提醒和后台任务，最后更新会话列表。
@@ -88,3 +88,5 @@ pnpm --filter @assistant/web test
 Docker 构建阶段安装开发依赖并编译；运行阶段只安装生产依赖并保留七个工作区的包描述、服务端所需产物与 pnpm workspace 链接；Electron 二进制不进入服务端镜像。微信外部 wx-bot 构建继续位于 `deploy/wechat/`。
 
 本次组织结构调整不升级 Pi SDK、不更换数据库、不更换 UI 框架。真实模型、真实微信、浏览器交互和实际 Docker 部署需要分别验收。
+
+React 对话与 WebSocket 协议细节见 [Web 对话](WEB_CHAT.md)。

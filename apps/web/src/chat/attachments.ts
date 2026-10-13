@@ -1,9 +1,5 @@
 import type { PendingAttachment } from "../types.js";
-import { showToast } from "../ui/toast.js";
-import { escapeHtml, formatFileSize } from "../ui/format.js";
-import type { AppState } from "../state.js";
 
-export function createChatAttachments(state: AppState) {
 // --- 附件校验与格式化常量 ---
 const TEXT_EXTENSIONS = new Set([
     'txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml', 'xml', 'html', 'htm', 'css',
@@ -34,7 +30,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
     return btoa(binary);
 }
 
-async function processAttachmentFile(file: File): Promise<PendingAttachment | {
+export async function processAttachmentFile(file: File): Promise<PendingAttachment | {
     error: string;
 }> {
     const rawName = cleanAttachmentName(file.name);
@@ -161,148 +157,4 @@ async function processAttachmentFile(file: File): Promise<PendingAttachment | {
         size: file.size,
         data: base64,
     };
-}
-
-async function handleFilesSelected(fileList: FileList | File[]) {
-    const files = Array.from(fileList);
-    if (!files.length)
-        return;
-    if (state.pendingAttachments.length + files.length > 5) {
-        showToast('一次最多上传 5 个附件', 'warning');
-        return;
-    }
-    let currentTotalBytes = state.pendingAttachments.reduce((sum, a) => sum + (a.size || 0), 0);
-    for (const file of files) {
-        if (state.pendingAttachments.length >= 5) {
-            showToast('一次最多上传 5 个附件', 'warning');
-            break;
-        }
-        try {
-            const res = await processAttachmentFile(file);
-            if ('error' in res) {
-                showToast(res.error, 'warning');
-                continue;
-            }
-            if (currentTotalBytes + res.size > 10 * 1024 * 1024) {
-                showToast('附件总大小不能超过 10MB', 'warning');
-                continue;
-            }
-            currentTotalBytes += res.size;
-            state.pendingAttachments.push(res);
-        }
-        catch (err) {
-            showToast((err instanceof Error ? err.message : String(err)) || '处理文件失败', 'warning');
-        }
-    }
-    renderPendingAttachments();
-    updateSendButtonState();
-}
-
-function removePendingAttachment(index: number) {
-    if (index >= 0 && index < state.pendingAttachments.length) {
-        const item = state.pendingAttachments[index];
-        if (item.previewUrl && item.previewUrl.startsWith('blob:')) {
-            URL.revokeObjectURL(item.previewUrl);
-        }
-        state.pendingAttachments.splice(index, 1);
-        renderPendingAttachments();
-        updateSendButtonState();
-    }
-}
-
-function renderPendingAttachments() {
-    const container = document.getElementById('attachments-preview')!;
-    if (!container)
-        return;
-    if (state.pendingAttachments.length === 0) {
-        container.style.display = 'none';
-        container.innerHTML = '';
-        return;
-    }
-    container.style.display = 'flex';
-    let html = '';
-    state.pendingAttachments.forEach((item, index) => {
-        if (item.kind === 'image') {
-            html += `
-            <div class="pending-chip pending-image-chip">
-              <img src="${escapeHtml(item.previewUrl)}" class="pending-thumb" alt="${escapeHtml(item.name)}">
-              <div class="pending-meta">
-                <span class="pending-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
-                <span class="pending-size">${escapeHtml(formatFileSize(item.size))}</span>
-              </div>
-              <button type="button" class="btn-remove-pending" onclick="removePendingAttachment(${index})" title="移除此附件" aria-label="移除">×</button>
-            </div>
-          `;
-        }
-        else {
-            html += `
-            <div class="pending-chip pending-text-chip">
-              <span class="pending-file-icon">📄</span>
-              <div class="pending-meta">
-                <span class="pending-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
-                <span class="pending-size">${escapeHtml(formatFileSize(item.size))}</span>
-              </div>
-              <button type="button" class="btn-remove-pending" onclick="removePendingAttachment(${index})" title="移除此附件" aria-label="移除">×</button>
-            </div>
-          `;
-        }
-    });
-    container.innerHTML = html;
-}
-
-function updateSendButtonState() {
-    const textarea = (document.getElementById('chat-textarea') as HTMLTextAreaElement);
-    const btnSend = (document.getElementById('btn-send') as HTMLButtonElement);
-    if (!btnSend)
-        return;
-    const text = (textarea ? textarea.value : '').trim();
-    const canSend = (text.length > 0 || state.pendingAttachments.length > 0) && !state.isSending;
-    btnSend.disabled = !canSend;
-}
-
-function triggerFileInput() {
-    const fileInput = (document.getElementById('file-input') as HTMLInputElement);
-    if (fileInput) {
-        fileInput.value = '';
-        fileInput.click();
-    }
-}
-
-function setupDragAndDrop() {
-    const chatColumn = document.querySelector<HTMLElement>('.chat-column');
-    const dropOverlay = document.getElementById('drop-overlay')!;
-    if (!chatColumn || !dropOverlay)
-        return;
-    let dragCounter = 0;
-    chatColumn.addEventListener('dragenter', (e) => {
-        e.preventDefault();
-        if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files')) {
-            dragCounter++;
-            dropOverlay.style.display = 'flex';
-        }
-    });
-    chatColumn.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        if (e.dataTransfer) {
-            e.dataTransfer.dropEffect = 'copy';
-        }
-    });
-    chatColumn.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        dragCounter--;
-        if (dragCounter <= 0) {
-            dragCounter = 0;
-            dropOverlay.style.display = 'none';
-        }
-    });
-    chatColumn.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        dragCounter = 0;
-        dropOverlay.style.display = 'none';
-        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            await handleFilesSelected(e.dataTransfer.files);
-        }
-    });
-}
-return { updateSendButtonState, setupDragAndDrop, handleFilesSelected, triggerFileInput, removePendingAttachment };
 }

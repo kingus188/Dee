@@ -41,6 +41,15 @@ curl -u demo:YOUR_PASSWORD http://127.0.0.1:3300/api/info
 先由现有 TLS 配置提供 `https://assistant.example.com`（证书、域名均为占位符），再在其 HTTPS server 内配置：
 
 ```nginx
+location /api/socket {
+    proxy_pass http://127.0.0.1:3300;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 1h;
+}
+
 location / {
     proxy_pass http://127.0.0.1:3300;
     proxy_http_version 1.1;
@@ -51,7 +60,7 @@ location / {
 }
 ```
 
-反向代理应保留 `Authorization` 请求头。Basic Auth 必须配合 TLS，不能让公网明文传输口令。某些 CDN、企业代理有连接超时或缓存策略，SSE 断线自动重连可用，但不能代替真正的请求稳定性。
+反向代理应保留 `Authorization` 请求头。Basic Auth 必须配合 TLS，不能让公网明文传输口令。某些 CDN、企业代理有连接超时或缓存策略，WebSocket 断线自动重连可用，但不能代替真正的请求稳定性。
 
 ## 3. 可选：启动微信
 
@@ -105,7 +114,7 @@ docker compose ps
 部署完至少执行：
 
 - `docker compose ps` 中服务为运行状态，`/api/info` 在提供凭据后可以返回信息。
-- 浏览器创建一轮真实模型对话，确认 SSE 流、工具调用、任务中心正常。
+- 浏览器创建一轮真实模型对话，确认 WebSocket 对话、工具调用、任务中心正常。
 - 创建 1 个提醒、1 个后台任务，重启主服务后查看它们的持久状态；**不要通过 `down -v` 验证恢复**。
 - 需要手机推送时用真实目标检查 `NOTIFY_MODE=all`；主分支普通 Webhook 没有持久重试保障。
 - 至少在隔离环境验证一次备份可以恢复。没有这一步，不能把它视为生产级数据可靠性。

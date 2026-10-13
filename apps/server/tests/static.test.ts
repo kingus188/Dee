@@ -12,6 +12,9 @@ test("多模块静态资源可加载，路径穿越与目录外符号链接被�
  const dir = await mkdtemp(join(tmpdir(), "pi-static-"));
  await mkdir(join(dir, "public/chat"), { recursive: true });
  await writeFile(join(dir, "public/chat/render.js"), "export const ready = true;");
+ await writeFile(join(dir, "public/icon.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+ const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+ await writeFile(join(dir, "public/orb.png"), png);
  await writeFile(join(dir, "private.js"), "private content");
  await symlink(join(dir, "private.js"), join(dir, "public/link.js"));
  const serve = createStaticHandler(pathToFileURL(join(dir, "public/") ));
@@ -26,6 +29,11 @@ test("多模块静态资源可加载，路径穿越与目录外符号链接被�
    const asset = await fetch(origin + "/chat/render.js");
    assert.equal(asset.status, 200); assert.match(asset.headers.get("content-type")!, /javascript/);
    assert.equal(await asset.text(), "export const ready = true;");
+   const icon = await fetch(origin + "/icon.svg");
+   assert.equal(icon.headers.get("content-type"), "image/svg+xml");
+   const image = await fetch(origin + "/orb.png");
+   assert.equal(image.headers.get("content-type"), "image/png");
+   assert.deepEqual(Buffer.from(await image.arrayBuffer()), png);
    for (const path of ["/%2e%2e%2fprivate.js", "/link.js", "/main.js.map", "/main.d.ts"]) assert.equal((await fetch(origin + path)).status, 404, path);
    assert.equal((await fetch(origin + "/%ZZ.js")).status, 400);
  } finally { await new Promise<void>(r => server.close(() => r())); await rm(dir, { recursive: true, force: true }); }

@@ -9,10 +9,12 @@
       "DOM",
       "DOM.Iterable"
     ],
-    "types": []
+    "types": [],
+    "jsx": "react-jsx"
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "src/**/*.tsx"
   ],
   "references": [
     {

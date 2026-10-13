@@ -3,97 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-  <title>小 D · 个人助手</title>
+  <meta name="theme-color" content="#f3f6ff">
+  <title>小 D · 你的个人智能助手</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/tasks.css">
+  <link rel="stylesheet" href="/workspace.css">
+  <link rel="stylesheet" href="/chat.css">
 </head>
 <body>
-
-  <!-- 断线重连顶部横条 -->
-  <div id="reconnect-banner" class="reconnect-banner">
-    <div class="reconnect-spinner"></div>
-    <span>与服务器断开，正在重连…</span>
-  </div>
-
-  <div class="app-layout">
-    <main class="chat-column">
-      <header class="contact-header" id="mascot-card" data-state="idle">
-        <div class="contact-avatar">
-          <svg class="mascot-svg" id="mascot-svg" viewBox="0 0 100 100" aria-hidden="true"></svg>
-        </div>
-        <div class="contact-info">
-          <h1>小 D</h1>
-          <p id="mascot-text" role="status">我在，随时可以开始</p>
-        </div>
-      </header>
-
-      <!-- 拖拽上传遮罩 -->
-      <div class="drop-overlay" id="drop-overlay" style="display: none;">
-        <div class="drop-overlay-box">
-          <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
-          </svg>
-          <div class="drop-overlay-text">拖放文件到此处上传</div>
-          <div class="drop-overlay-sub">支持图片（PNG/JPEG/WebP/GIF）与文本类文件</div>
-        </div>
-      </div>
-
-      <!-- 消息流容器 -->
-      <section class="messages-container" id="messages-container" aria-label="与小 D 的对话">
-        <div id="message-history" aria-live="polite"></div>
-        <div id="conversation-cards" aria-label="对话卡片"></div>
-        <p id="card-feedback" role="status" aria-live="polite"></p>
-      </section>
-
-      <!-- 底部输入区 -->
-      <footer class="input-container">
-        <div class="input-box-wrapper">
-          <div class="attachments-preview" id="attachments-preview" style="display: none;"></div>
-          <textarea
-            class="chat-textarea"
-            id="chat-textarea"
-            placeholder="和小 D 聊聊…"
-            aria-label="给小 D 发消息"
-            rows="1"
-          ></textarea>
-          <input
-            type="file"
-            id="file-input"
-            class="file-input-hidden"
-            multiple
-            accept="image/png,image/jpeg,image/webp,image/gif,text/*,.txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.css,.js,.mjs,.cjs,.ts,.tsx,.jsx,.py,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.hpp,.cs,.rb,.php,.sh,.zsh,.bash,.sql,.toml,.ini,.conf,.log,.srt,.vtt"
-          >
-          <div class="composer-toolbar">
-            <details class="chat-more" id="chat-more">
-              <summary aria-label="更多聊天功能" title="添加附件或查看对话卡片">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-              </summary>
-              <div class="chat-more-menu">
-                <button type="button" onclick="triggerFileInput()">添加图片或文件</button>
-                <nav class="conversation-card-tools" id="conversation-card-tools" aria-label="在聊天中查看"></nav>
-              </div>
-            </details>
-            <span class="inbox-badge" id="inbox-badge" role="status"></span>
-            <div class="composer-actions">
-              <button type="button" class="btn-abort" id="btn-abort" onclick="abortCurrentTask()">停止回复</button>
-              <button type="button" class="btn-send" id="btn-send" onclick="submitMessage()" aria-label="发送消息" title="发送消息（Enter）" disabled>
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
-              </button>
-            </div>
-          </div>
-        </div>
-
-      </footer>
-    </main>
-
-
-  </div>
-
-  <!-- 全局轻提示 Toast 容器 -->
+  <div id="root"></div>
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
-
   <script type="module" src="/app.js"></script>
 </body>
 </html>

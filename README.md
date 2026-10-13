@@ -97,12 +97,12 @@ docker compose ps
 
 ## 开发与扩展
 
-技术栈：**TypeScript / 原生浏览器界面 / Node.js / Pi Durable 1.1.0 / SQLite / SSE**。使用 pnpm workspaces 和 `tsc`，无需前端框架、打包器或独立数据库服务。
+技术栈：**TypeScript / React / Node.js / Pi Durable 1.1.0 / SQLite / WebSocket**。使用 pnpm workspaces、`tsc` 和 esbuild；网页构建已包含在现有 build 命令中，无需独立数据库服务。
 
 | 目录 | 职责 |
 | --- | --- |
 | `apps/web` | 小 D 的数字形象、对话和交互界面 |
-| `apps/server` | 服务启动、鉴权、HTTP/SSE 和应用用例 |
+| `apps/server` | 服务启动、鉴权、HTTP/WebSocket 和应用用例 |
 | `packages/contracts` | 前后端共同使用的协议类型 |
 | `packages/runtime` | 模型接入、会话与持久化运行时 |
 | `packages/features` | 记忆、技能、笔记、知识检索、提醒和任务 |

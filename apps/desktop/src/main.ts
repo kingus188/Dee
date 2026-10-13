@@ -2,10 +2,12 @@ import { app, BrowserWindow, dialog, session, shell } from "electron";
 import type { WebContents } from "electron";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { readConfig, startServer } from "@assistant/server";
-import { isAppUrl, isExternalUrl } from "./policy.js";
+import { isAppConnection, isAppUrl, isExternalUrl } from "./policy.js";
 
 app.setName("Pi Durable Assistant");
+const icon = fileURLToPath(new URL("../assets/icon.png", import.meta.url));
 let service: Awaited<ReturnType<typeof startServer>> | undefined;
 let window: BrowserWindow | undefined;
 let quitting = false;
@@ -37,7 +39,7 @@ async function openWindow() {
   if (window) { window.show(); window.focus(); return; }
   const current = new BrowserWindow({
     title: "小 D · 个人数字人助手", width: 1200, height: 820, minWidth: 720, minHeight: 560,
-    show: false, backgroundColor: "#f7f7f8",
+    show: false, backgroundColor: "#f7f7f8", icon,
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false, partition: "desktop" },
   });
   window = current;
@@ -66,6 +68,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   const startup = app.whenReady().then(async () => {
     if (quitting) return;
+    app.dock?.setIcon(icon);
     const env = process.env;
     const config = readConfig({ ...env, NODE_ENV: "production" });
     config.port = 0;
@@ -79,13 +82,13 @@ if (!app.requestSingleInstanceLock()) {
     desktopSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     desktopSession.setPermissionCheckHandler(() => false);
     desktopSession.webRequest.onBeforeSendHeaders((details, callback) => {
-      if (isAppUrl(details.url, origin)) details.requestHeaders.Authorization = `Basic ${Buffer.from("demo:" + config.password).toString("base64")}`;
+      if (isAppConnection(details.url, origin)) details.requestHeaders.Authorization = `Basic ${Buffer.from("demo:" + config.password).toString("base64")}`;
       callback({ requestHeaders: details.requestHeaders });
     });
     desktopSession.webRequest.onHeadersReceived((details, callback) => {
       const headers = details.responseHeaders ?? {};
-      // Existing web controls use inline event handlers; keep inline script blocks disabled.
-      if (isAppUrl(details.url, origin)) headers["Content-Security-Policy"] = ["default-src 'self'; script-src 'self'; script-src-attr 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'"];
+      // Explicitly allow the local WebSocket origin across Chromium CSP implementations.
+      if (isAppUrl(details.url, origin)) headers["Content-Security-Policy"] = [`default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ${origin.replace(/^http/, "ws")}; object-src 'none'; frame-src 'none'; base-uri 'none'`];
       callback({ responseHeaders: headers });
     });
     await openWindow();

@@ -11,17 +11,19 @@ export function verifyDesktopPackage(directory: string) {
   // Resolve through the desktop entry, including the packaged workspace links.
   execFileSync(executable, ["--experimental-import-meta-resolve", "--input-type=module", "-e", `
     import assert from "node:assert/strict";
-    import { mkdtemp, rm } from "node:fs/promises";
+    import { mkdtemp, rm, readFile } from "node:fs/promises";
     import { tmpdir } from "node:os";
     import { join } from "node:path";
     import { pathToFileURL } from "node:url";
     const entry = pathToFileURL(process.argv[1]);
+    const icon = await readFile(new URL("../assets/icon.png", entry));
+    assert.equal(icon.subarray(1, 4).toString(), "PNG", "Packaged desktop icon");
     const { readConfig, startServer } = await import(import.meta.resolve("@assistant/server", entry.href));
     const dataDir = await mkdtemp(join(tmpdir(), "pi-desktop-smoke-"));
     let service;
     try {
       service = await startServer(readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: dataDir, PORT: "0", NOTIFY_MODE: "off" }), "127.0.0.1", new URL("../../web/dist/", entry));
-      for (const path of ["/", "/app.js", "/style.css", "/tasks.css", "/api/info"]) {
+      for (const path of ["/", "/app.js", "/style.css", "/tasks.css", "/workspace.css", "/assets/icons.svg", "/assets/orb-reference.png", "/api/info"]) {
         assert.equal((await fetch(service.origin + path)).status, 200, path);
       }
       console.log("Desktop package entry, service and assets: PASS");

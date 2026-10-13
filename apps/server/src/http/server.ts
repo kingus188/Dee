@@ -4,10 +4,13 @@ import { HttpError } from "../errors.js";
 import { authorized, secureMatch } from "./auth.js";
 import { readBody, sendJson } from "./io.js";
 import { createRouter } from "./router.js";
+import { createApi } from "../application/api.js";
+import { attachWebSocket } from "./socket.js";
 export function createHttpServer(context: AppContext, webRoot: URL) {
  const { wechat, config, redact, exitIfFatal } = context;
- const route = createRouter(context, webRoot);
-return createServer(async (req, res) => {
+ const api = createApi(context);
+ const route = createRouter(context, webRoot, api);
+ const server = createServer(async (req, res) => {
   // 微信 webhook 独立令牌；绝不绕过普通网页/API 的 Basic Auth。
   if (req.method === "POST" && req.url?.split("?")[0] === "/channels/wechat/incoming") {
     const bearer = req.headers.authorization || "";
@@ -38,5 +41,5 @@ return createServer(async (req, res) => {
 		exitIfFatal(error);
 	}
 });
-
+ return Object.assign(server, { closeSockets: attachWebSocket(server, context, api) });
 }

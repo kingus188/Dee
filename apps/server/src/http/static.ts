@@ -4,13 +4,13 @@ import { resolve, sep, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HttpError } from "../errors.js";
 
-const mime: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" };
+const mime: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml", ".png": "image/png" };
 export function createStaticHandler(root: URL) {
   const directory = fileURLToPath(root);
   return async (path: string, res: ServerResponse) => {
     let decoded: string;
     try { decoded = decodeURIComponent(path); } catch { throw new HttpError(400, "路径编码不合法"); }
-    const aliases: Record<string, string> = { "/": "/index.html", "/app.js": "/main.js", "/v3.js": "/tasks/center.js" };
+    const aliases: Record<string, string> = { "/": "/index.html", "/v3.js": "/app.js" };
     decoded = aliases[decoded] ?? decoded;
     const type = mime[extname(decoded)];
     if (!type || decoded.includes("\\") || decoded.includes("\0")) return false;
@@ -20,7 +20,7 @@ export function createStaticHandler(root: URL) {
       const actual = await realpath(file);
       if (!actual.startsWith((await realpath(directory)) + sep)) return false;
       const body = await readFile(actual);
-      res.writeHead(200, { "content-type": type + "; charset=utf-8", "cache-control": "no-store" });
+      res.writeHead(200, { "content-type": type.startsWith("image/") ? type : type + "; charset=utf-8", "cache-control": "no-store" });
       res.end(body);
       return true;
     } catch (error) {

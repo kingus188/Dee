@@ -1,0 +1,81 @@
+/* Conversation tokens and geometry from Gina index.css, UserMessageBubble and ResponseCard. */
+#root { height: 100%; min-width: 0; }
+.chat-column[data-view="chat"] {
+  --chat-background: oklch(0.98 0.003 265);
+  --chat-foreground: oklch(0.185 0.01 270);
+  --chat-muted: color-mix(in srgb, var(--chat-foreground) 58%, var(--chat-background));
+  --chat-soft: oklch(from var(--chat-foreground) l c h / 0.05);
+  --bg-surface: var(--chat-background);
+  --bg-subtle: var(--chat-soft);
+  --text-main: var(--chat-foreground);
+  --text-muted: var(--chat-muted);
+  --assistant-text: var(--chat-foreground);
+  --border: oklch(from var(--chat-foreground) l c h / 0.08);
+  background: var(--chat-background);
+  color: var(--chat-foreground);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+#workspace[data-view="chat"]::before { display: none; }
+#workspace[data-view="chat"] .messages-container { max-width: 900px; padding: 24px 32px 40px; }
+#workspace[data-view="chat"] #message-history { gap: 32px; }
+.chat-turn { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.chat-turn .user-row { flex-direction: column; align-items: flex-end; gap: 12px; }
+.user-bubble { max-width: 80%; padding: 14px 20px; border-radius: 16px; background: var(--chat-soft); color: var(--chat-foreground); overflow-wrap: anywhere; min-width: 0; }
+.user-text-body { white-space: pre-wrap; font-size: 14px; line-height: 1.75; }
+.user-attachments-grid { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: 80%; }
+.msg-image-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; }
+.msg-file-card { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 8px; background: var(--chat-soft); font-size: 12px; }
+.msg-file-card > .icon { width: 20px; height: 20px; }
+.msg-file-card small { display: block; color: var(--text-muted); font-size: 10px; }
+.chat-turn .assistant-row { max-width: none; width: 100%; }
+.response-card { position: relative; min-width: 0; gap: 0; width: 100%; }
+.response-card .assistant-bubble { padding: 8px 16px 8px 22px; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-size: 14px; line-height: 1.75; }
+.response-copy { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; margin-left: 16px; min-height: 36px; align-self: flex-start; background: transparent; border: 0; border-radius: 4px; font-size: 12px; color: var(--text-muted); }
+.response-copy:hover { background: var(--bg-subtle); color: var(--text-main); }
+.response-copy .icon { width: 12px; height: 12px; }
+.response-card > .cursor-blink { margin: 0 0 8px 22px; }
+.turn-activities { color: var(--text-muted); font-size: 13px; }
+.turn-activities > summary { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px; border-radius: 8px; cursor: pointer; list-style: none; }
+.turn-activities > summary::-webkit-details-marker, .note-summary > summary::-webkit-details-marker { display: none; }
+.turn-activities > summary:hover { background: var(--chat-soft); }
+.turn-activities > summary .icon { width: 12px; height: 12px; transition: transform .15s; }
+.turn-activities[open] > summary .icon { transform: rotate(90deg); }
+.activity-count { padding: 2px 6px; border-radius: 4px; background: var(--chat-background); color: var(--chat-foreground); font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 1px oklch(from var(--chat-foreground) l c h / 0.06), 0 1px 1px -0.5px rgb(0 0 0 / 6%), 0 3px 3px -1.5px rgb(0 0 0 / 6%); }
+.turn-activity-list { padding: 0 12px 4px; max-height: 360px; overflow-y: auto; }
+.turn-activity { display: flex; gap: 8px; align-items: flex-start; min-height: 24px; line-height: 1.7; overflow-wrap: anywhere; }
+.activity-status { display: flex; align-items: center; width: 12px; min-height: 28px; flex-shrink: 0; }
+.activity-status .icon { width: 12px; height: 12px; }
+.activity-error { color: var(--danger); }
+.activity-completed { color: var(--success); }
+.activity-spinner { width: 10px; height: 10px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+.turn-activity > details { flex: 1; min-width: 0; }
+.turn-activity summary { cursor: pointer; min-height: 28px; display: flex; align-items: center; }
+.turn-activity pre, .turn-thinking { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-width: 100%; }
+.turn-activity pre { max-height: 240px; overflow: auto; padding: 10px 12px; background: var(--chat-soft); border-radius: 8px; }
+.turn-thinking, .turn-intermediate { padding: 4px 16px 4px 22px; color: var(--text-muted); }
+.turn-intermediate { font-size: 13px; }
+#workspace[data-view="chat"] .conversation-card { max-width: 100%; border-radius: 8px; padding: 16px 20px; box-shadow: none; background: transparent; }
+#workspace[data-view="chat"] .notes-card { padding: 0; border: 0; }
+.notes-card > details { margin: 0; }
+.note-summary > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 44px; padding: 8px 12px; border-radius: 8px; list-style: none; font-size: 13px; }
+.note-summary > summary:hover { background: var(--chat-soft); }
+.note-summary > summary .icon { width: 14px; height: 14px; }
+.note-summary > summary > .icon:last-child { margin-left: auto; transition: transform .15s; }
+.note-summary[open] > summary > .icon:last-child { transform: rotate(180deg); }
+.note-meta { color: var(--text-muted); font-size: 11px; }
+.note-content { padding: 8px 22px 16px; }
+.note-content .conversation-card-text { font-size: 13px; }
+.note-content .conversation-card-actions { margin-top: 8px; }
+.input-box-wrapper[data-dragging="true"] { border-color: var(--primary); }
+.input-box-wrapper .inbox-badge { display: inline-block; }
+@media (max-width: 600px) {
+  #workspace[data-view="chat"] .messages-container { padding: 12px 16px 24px; }
+  .user-bubble { max-width: 88%; padding: 10px 16px; }
+  .response-card .assistant-bubble { padding-left: 12px; padding-right: 8px; }
+  .response-copy { margin-left: 6px; min-height: 44px; }
+  .turn-activity summary { min-height: 40px; }
+}
+@media (prefers-color-scheme: dark) {
+  .chat-column[data-view="chat"] { --chat-background: oklch(0.145 0.015 270); --chat-foreground: oklch(0.95 0.01 270); }
+}
+@media (prefers-reduced-motion: reduce) { .turn-activities > summary .icon, .note-summary > summary > .icon:last-child { transition: none; } }

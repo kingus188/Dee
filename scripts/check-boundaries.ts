@@ -29,7 +29,7 @@ const packageGraph: Graph = new Map(), fileGraph: Graph = new Map();
 const errors: string[] = [];
 async function files(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true });
-  return (await Promise.all(entries.map(e => e.isDirectory() ? files(resolve(dir, e.name)) : e.name.endsWith(".ts") ? [resolve(dir, e.name)] : []))).flat();
+  return (await Promise.all(entries.map(e => e.isDirectory() ? files(resolve(dir, e.name)) : /\.tsx?$/.test(e.name) ? [resolve(dir, e.name)] : []))).flat();
 }
 for (const workspace of workspacePaths()) {
   const folder = resolve(root, workspace), src = resolve(folder, "src");
@@ -40,13 +40,15 @@ for (const workspace of workspacePaths()) {
     if (workspace === "packages/contracts" || (dependency.startsWith("@assistant/") && allowed[workspace] && !allowed[workspace].includes(dependency))) errors.push(pkg.name + ": 禁止依赖 " + dependency);
   }
   packageGraph.set(pkg.name, new Set([...dependencies].filter(n => n.startsWith("@assistant/"))));
-  for (const file of await files(src)) {
-    const code = await readFile(file, "utf8"), parsed = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true);
+  const sourceFiles = new Set(await files(src));
+  for (const file of sourceFiles) {
+    const code = await readFile(file, "utf8"), parsed = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
     const edges = new Set<string>(); fileGraph.set(file, edges);
     const fail = (message: string) => errors.push(relative(root, file) + ": " + message);
     function check(specifier: string, typeOnly: boolean) {
       if (specifier.startsWith(".")) {
-        const target = resolve(dirname(file), specifier).replace(/\.js$/, ".ts");
+        let target = resolve(dirname(file), specifier).replace(/\.js$/, ".ts");
+        if (!sourceFiles.has(target)) target = target.replace(/\.ts$/, ".tsx");
         const rel = relative(src, target);
         if (rel.startsWith("..") || isAbsolute(rel)) fail("禁止跨包相对路径 " + specifier);
         edges.add(target);
@@ -56,7 +58,7 @@ for (const workspace of workspacePaths()) {
           if (workspace === "apps/web" || workspace === "packages/contracts") fail("浏览器协议边界禁止 Node 模块");
         } else if (!dependencies.has(name) && !(workspace === "apps/desktop" && name === "electron" && pkg.devDependencies?.electron)) fail("未声明依赖 " + specifier);
         if (name.startsWith("@assistant/") && specifier !== name) fail("只能使用包公开入口 " + specifier);
-        if (workspace === "apps/web" && (name !== "@assistant/contracts" || !typeOnly)) fail("网页外部依赖仅允许协议类型");
+        if (workspace === "apps/web" && !["react", "react-dom"].includes(name) && (name !== "@assistant/contracts" || !typeOnly)) fail("网页仅允许 React 和协议类型依赖");
       }
     }
     function visit(node: ts.Node) {

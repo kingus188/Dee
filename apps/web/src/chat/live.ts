@@ -4,10 +4,6 @@ import type { BrowserLive, RunningTool } from "../types.js";
 function extractLiveInfo(live: BrowserLive | undefined) {
     if (!live)
         return null;
-    if (!window.__liveLogged && Object.keys(live).length) {
-        window.__liveLogged = true;
-        console.log('pi.live 实时结构:', live);
-    }
     let text = '';
     let thinking = '';
     const runningTools: RunningTool[] = [];

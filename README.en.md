@@ -97,12 +97,12 @@ Future work focuses on identity, expression and sustained collaboration. These a
 
 ## Development
 
-**TypeScript / native browser UI / Node.js / Pi Durable 1.1.0 / SQLite / SSE.** The project uses pnpm workspaces and `tsc`, without a frontend framework, bundler or separate database server.
+**TypeScript / React / Node.js / Pi Durable 1.1.0 / SQLite / WebSocket.** The project uses pnpm workspaces, `tsc` and esbuild. The existing build command includes the web bundle; no separate database server is required.
 
 | Directory | Responsibility |
 | --- | --- |
 | `apps/web` | Xiao D's avatar, conversation interface and interactions |
-| `apps/server` | Startup, authentication, HTTP/SSE and application use cases |
+| `apps/server` | Startup, authentication, HTTP/WebSocket and application use cases |
 | `packages/contracts` | Shared frontend/backend protocol types |
 | `packages/runtime` | Model integration, sessions and the durable runtime |
 | `packages/features` | Memory, skills, notes, knowledge search, reminders and tasks |
