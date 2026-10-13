@@ -10,20 +10,20 @@
   "scripts": {
     "build": "tsc -b && node .build/scripts/build.js",
     "check": "tsc -b && node .build/scripts/check-boundaries.js",
-    "test": "npm run build && node --experimental-vm-modules --test packages/*/dist-tests/*.test.js apps/*/dist-tests/*.test.js tests/dist/*.test.js",
-    "start": "npm run build && node apps/server/dist/main.js",
-    "dev": "npm run build && sh scripts/dev.sh"
+    "test": "pnpm run build && node --experimental-vm-modules --test packages/*/dist-tests/*.test.js apps/*/dist-tests/*.test.js tests/dist/*.test.js",
+    "start": "pnpm run build && node apps/server/dist/main.js",
+    "dev": "pnpm run build && sh scripts/dev.sh",
+    "desktop": "pnpm run build && pnpm --filter @assistant/desktop start",
+    "desktop:package": "pnpm run build && node .build/scripts/desktop-package.js"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "@electron/packager": "20.3.0",
+    "@assistant/contracts": "workspace:*",
+    "@assistant/runtime": "workspace:*",
+    "@assistant/features": "workspace:*",
+    "@assistant/channel-wechat": "workspace:*"
   },
-  "workspaces": [
-    "packages/contracts",
-    "packages/runtime",
-    "packages/features",
-    "packages/channel-wechat",
-    "apps/web",
-    "apps/server"
-  ]
+  "packageManager": "pnpm@12.9.1"
 }

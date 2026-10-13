@@ -12,7 +12,7 @@
 | 管理 UI | 独立抽屉，可在网页右下角打开 | `apps/web/src/tasks/center.ts` |
 | 通知 | 通用 JSON Webhook 或飞书机器人；`errors`/`all`/`off` | `notifyEvent` |
 | 成果导出 | 当前会话的用户和助手文本导出为 Markdown | `export.md` |
-| 回归测试 | TypeScript 严格类型检查、单测、HTTP、安全与崩溃恢复测试 | `npm run check`、`npm test` |
+| 回归测试 | TypeScript 严格类型检查、单测、HTTP、安全与崩溃恢复测试 | `pnpm run check`、`pnpm test` |
 
 兼容性约束：继续使用 Node ESM、SQLite、Pi Durable **1.1.0**；保留 v1/v2 的聊天、记事本、Fork、前台子 Agent 和多端 SSE 功能；未引入前端框架或新的 npm 运行时依赖。
 
@@ -46,10 +46,10 @@
 本地（Node ≥22.19）：
 
 ~~~bash
-npm ci
-npm run check
-npm test
-LLM_API=faux npm run dev
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm test
+LLM_API=faux pnpm run dev
 ~~~
 
 浏览器访问 http://localhost:3000 ，新建会话，右下角打开「任务中心」。

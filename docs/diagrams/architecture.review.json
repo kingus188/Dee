@@ -1,0 +1,25 @@
+{
+  "diagram_type": "architecture",
+  "visual_review": "passed",
+  "correction_rounds": 0,
+  "artifact_sha256": "67614564923337d3dcd63e3f90c12687c9ab6d8fe08756c6f290d4edc377d1bd",
+  "inspected_screenshots": [
+    "architecture.visual-check.1440x900.light.png",
+    "architecture.visual-check.1440x900.dark.png",
+    "architecture.visual-check.2048x1320.light.png",
+    "architecture.visual-check.2048x1320.dark.png"
+  ],
+  "containment": "4 desktop sizes passed",
+  "repository_checks": {
+    "npm run check": "passed",
+    "npm test": {
+      "passed": 29,
+      "failed": 0
+    }
+  },
+  "not_verified": [
+    "live model service",
+    "live WeChat channel",
+    "production deployment"
+  ]
+}

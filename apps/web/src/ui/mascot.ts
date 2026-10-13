@@ -23,23 +23,23 @@ const ROBOT_SVG_CONTENT = `
         <circle cx="50" cy="13" r="10" stroke="var(--purple)" stroke-width="1.5" stroke-dasharray="4 2" fill="none" class="d-wave-pulse" />
 
         <!-- 天线 -->
-        <line x1="50" y1="15" x2="50" y2="25" stroke="#6366f1" stroke-width="3" stroke-linecap="round" />
+        <line x1="50" y1="15" x2="50" y2="25" stroke="#7ba18d" stroke-width="3" stroke-linecap="round" />
         <circle cx="50" cy="13" r="4.5" fill="#f59e0b" class="d-antenna-tip" />
 
         <!-- 左右耳 -->
-        <rect x="19" y="38" width="6" height="14" rx="3" fill="#6366f1" />
-        <rect x="75" y="38" width="6" height="14" rx="3" fill="#6366f1" />
+        <rect x="19" y="38" width="6" height="14" rx="3" fill="#7ba18d" />
+        <rect x="75" y="38" width="6" height="14" rx="3" fill="#7ba18d" />
 
         <!-- 脑袋外框 -->
-        <rect x="23" y="25" width="54" height="42" rx="14" fill="#4f46e5" />
+        <rect x="23" y="25" width="54" height="42" rx="14" fill="#54866e" />
         <!-- 面部深色视窗屏 -->
-        <rect x="29" y="31" width="42" height="30" rx="8" fill="#1e1b4b" />
+        <rect x="29" y="31" width="42" height="30" rx="8" fill="#233c32" />
 
         <!-- 1. 空闲表情（眨眼微笑） -->
         <g class="d-expr-idle">
-          <rect x="36" y="39" width="6" height="11" rx="3" fill="#38bdf8" class="d-eye-blink" />
-          <rect x="58" y="39" width="6" height="11" rx="3" fill="#38bdf8" class="d-eye-blink" />
-          <path d="M46 52 Q50 55 54 52" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" fill="none" />
+          <rect x="36" y="39" width="6" height="11" rx="3" fill="#d1ebd4" class="d-eye-blink" />
+          <rect x="58" y="39" width="6" height="11" rx="3" fill="#d1ebd4" class="d-eye-blink" />
+          <path d="M46 52 Q50 55 54 52" stroke="#d1ebd4" stroke-width="2" stroke-linecap="round" fill="none" />
         </g>
 
         <!-- 2. 断线表情（× 眼睛，波浪哭嘴） -->
@@ -65,16 +65,16 @@ const ROBOT_SVG_CONTENT = `
 
         <!-- 5. 用工具表情（坚定眼神） -->
         <g class="d-expr-tool">
-          <circle cx="39" cy="44" r="4.5" fill="#38bdf8" />
-          <circle cx="61" cy="44" r="4.5" fill="#38bdf8" />
-          <path d="M46 52 L54 52" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" />
+          <circle cx="39" cy="44" r="4.5" fill="#d1ebd4" />
+          <circle cx="61" cy="44" r="4.5" fill="#d1ebd4" />
+          <path d="M46 52 L54 52" stroke="#d1ebd4" stroke-width="2" stroke-linecap="round" />
         </g>
 
         <!-- 6. 思考中表情（旋转圈圈眼） -->
         <g class="d-expr-thinking">
-          <circle cx="39" cy="44" r="5" stroke="#a855f7" stroke-width="2.5" stroke-dasharray="8 4" fill="none" class="d-eye-spin" />
-          <circle cx="61" cy="44" r="5" stroke="#a855f7" stroke-width="2.5" stroke-dasharray="8 4" fill="none" class="d-eye-spin" />
-          <path d="M47 52 Q50 50 53 52" stroke="#a855f7" stroke-width="2" stroke-linecap="round" fill="none" />
+          <circle cx="39" cy="44" r="5" stroke="#bcd8c3" stroke-width="2.5" stroke-dasharray="8 4" fill="none" class="d-eye-spin" />
+          <circle cx="61" cy="44" r="5" stroke="#bcd8c3" stroke-width="2.5" stroke-dasharray="8 4" fill="none" class="d-eye-spin" />
+          <path d="M47 52 Q50 50 53 52" stroke="#bcd8c3" stroke-width="2" stroke-linecap="round" fill="none" />
         </g>
 
         <!-- 7. 有提醒表情（开心圆眼，抱闹钟） -->
@@ -86,31 +86,31 @@ const ROBOT_SVG_CONTENT = `
 
         <!-- 8. 出错表情（难过眼睛，委屈瘪嘴，眼角带泪光） -->
         <g class="d-expr-error">
-          <path d="M35 39 L42 42" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" />
-          <path d="M65 39 L58 42" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" />
-          <ellipse cx="39" cy="45" rx="3.5" ry="4" fill="#38bdf8" />
-          <ellipse cx="61" cy="45" rx="3.5" ry="4" fill="#38bdf8" />
+          <path d="M35 39 L42 42" stroke="#d1ebd4" stroke-width="2" stroke-linecap="round" />
+          <path d="M65 39 L58 42" stroke="#d1ebd4" stroke-width="2" stroke-linecap="round" />
+          <ellipse cx="39" cy="45" rx="3.5" ry="4" fill="#d1ebd4" />
+          <ellipse cx="61" cy="45" rx="3.5" ry="4" fill="#d1ebd4" />
           <circle cx="40" cy="44" r="1.2" fill="#ffffff" />
           <circle cx="62" cy="44" r="1.2" fill="#ffffff" />
-          <path d="M46 53 Q50 49 54 53" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" fill="none" />
-          <circle cx="35" cy="50" r="1.5" fill="#38bdf8" />
+          <path d="M46 53 Q50 49 54 53" stroke="#d1ebd4" stroke-width="2" stroke-linecap="round" fill="none" />
+          <circle cx="35" cy="50" r="1.5" fill="#d1ebd4" />
         </g>
 
         <!-- 身体躯干 -->
-        <rect x="33" y="68" width="34" height="24" rx="8" fill="#6366f1" />
-        <rect x="42" y="74" width="16" height="12" rx="4" fill="#4338ca" />
-        <circle cx="50" cy="80" r="3" fill="#38bdf8" />
+        <rect x="33" y="68" width="34" height="24" rx="8" fill="#7ba18d" />
+        <rect x="42" y="74" width="16" height="12" rx="4" fill="#386750" />
+        <circle cx="50" cy="80" r="3" fill="#d1ebd4" />
 
         <!-- 左臂 -->
-        <path d="M32 72 Q24 78 24 86" stroke="#6366f1" stroke-width="5" stroke-linecap="round" fill="none" />
+        <path d="M32 72 Q24 78 24 86" stroke="#7ba18d" stroke-width="5" stroke-linecap="round" fill="none" />
 
         <!-- 右臂（正常） -->
-        <path d="M68 72 Q76 78 76 86" stroke="#6366f1" stroke-width="5" stroke-linecap="round" fill="none" class="d-normal-arm" />
+        <path d="M68 72 Q76 78 76 86" stroke="#7ba18d" stroke-width="5" stroke-linecap="round" fill="none" class="d-normal-arm" />
 
         <!-- 工具道具（举扳手） -->
         <g class="d-prop-tool">
           <g class="d-arm-wrench">
-            <path d="M68 72 Q78 66 82 54" stroke="#6366f1" stroke-width="5.5" stroke-linecap="round" fill="none" />
+            <path d="M68 72 Q78 66 82 54" stroke="#7ba18d" stroke-width="5.5" stroke-linecap="round" fill="none" />
             <path d="M82 54 L90 46 M87 43 A4 4 0 1 1 93 49" stroke="#f59e0b" stroke-width="3" stroke-linecap="round" fill="none" />
           </g>
         </g>
@@ -125,18 +125,15 @@ const ROBOT_SVG_CONTENT = `
         </g>
 
         <!-- 底座轮轴 -->
-        <rect x="37" y="93" width="26" height="6" rx="3" fill="#312e81" />
+        <rect x="37" y="93" width="26" height="6" rx="3" fill="#386750" />
       </g>
     `;
 
 // 初始化内联 SVG
 function setupMascotSvgs() {
     const desktopSvg = document.getElementById('mascot-svg')!;
-    const mobileSvg = document.getElementById('mobile-mascot-svg')!;
     if (desktopSvg)
         desktopSvg.innerHTML = ROBOT_SVG_CONTENT;
-    if (mobileSvg)
-        mobileSvg.innerHTML = ROBOT_SVG_CONTENT;
 }
 
 // =========================================================
@@ -154,15 +151,12 @@ const TOOL_NAME_MAP: Record<string, string> = {
 
 function updateMascotState() {
     const mascotCard = document.getElementById('mascot-card')!;
-    const mobileMascot = document.getElementById('mobile-mascot')!;
     const textEl = document.getElementById('mascot-text')!;
-    const mobileTextEl = document.getElementById('mobile-mascot-text')!;
-    const tagEl = document.getElementById('mascot-status-tag')!;
     if (!mascotCard)
         return;
     let state = 'idle';
-    let bubbleText = '有事叫我～';
-    let tagText = '空闲中';
+    let bubbleText = '我在，随时可以开始';
+
     const view = appState.currentViewData;
     const liveInfo = view ? extractLiveInfo(view.live) : null;
     const runningTools = liveInfo ? liveInfo.runningTools : [];
@@ -186,15 +180,14 @@ function updateMascotState() {
     // 1. 断线（优先级最高）
     if (appState.isDisconnected) {
         state = 'disconnected';
-        bubbleText = '我挂了……等我一下';
-        tagText = '断线中';
+        bubbleText = '连接断开了，正在重新连接';
+
     }
     // 2. 刚恢复（持续 4 秒）
     else if (appState.isRecovered && Date.now() < appState.recoveredUntil) {
         state = 'recovered';
-        const bootsNum = appState.serverInfo?.boots || appState.previousBoots || 1;
-        bubbleText = `我回来了！第 ${bootsNum} 次启动，接着干`;
-        tagText = '刚恢复';
+        bubbleText = '我回来了，可以继续了';
+
     }
     // 3. 等待中（live.tools 里有 wait_seconds 在跑）
     else if (hasWaitSeconds) {
@@ -210,27 +203,27 @@ function updateMascotState() {
         if (!remainStr && waitTool && waitTool.args && waitTool.args.seconds) {
             remainStr = `还剩 ${waitTool.args.seconds} 秒`;
         }
-        bubbleText = remainStr ? `小睡一下，${remainStr}` : '小睡一下，还剩 12 秒';
-        tagText = '等待中';
+        bubbleText = remainStr ? `小睡一下，${remainStr}` : '正在等待任务继续';
+
     }
     // 4. 用工具（live.tools 里有其他工具在跑）
     else if (otherRunningTool) {
         state = 'tool';
         const name = otherRunningTool.name;
         bubbleText = TOOL_NAME_MAP[name] || `正在使用 ${name}……`;
-        tagText = '调用工具';
+
     }
     // 5. 思考中（busy 且没有工具在跑）
     else if (isBusy) {
         state = 'thinking';
         bubbleText = '思考中……';
-        tagText = '思考中';
+
     }
     // 6. 出错（当前会话最后一条是错误、且不忙时）
     else if (isLastError) {
         state = 'error';
         bubbleText = '模型那边出错了……';
-        tagText = '出错';
+
     }
     // 7. 有提醒（空闲且有 scheduled 提醒）
     else if (view && Array.isArray(view.reminders) && view.reminders.some(r => r.status === 'scheduled')) {
@@ -245,44 +238,20 @@ function updateMascotState() {
         else {
             bubbleText = `即将提醒你${earliest.text}`;
         }
-        tagText = '有提醒';
+
     }
     // 8. 空闲（默认 fallback）
     else {
         state = 'idle';
-        bubbleText = '有事叫我～';
-        tagText = '空闲中';
+        bubbleText = '我在，随时可以开始';
+
     }
     // 应用状态属性与文案
     mascotCard.setAttribute('data-state', state);
-    if (mobileMascot)
-        mobileMascot.setAttribute('data-state', state);
     if (textEl)
         textEl.textContent = bubbleText;
-    if (mobileTextEl)
-        mobileTextEl.textContent = bubbleText;
-    if (tagEl)
-        tagEl.textContent = tagText;
+
 }
 
-// --- 移动端小 D 气泡弹窗切换 ---
-function toggleMobileMascotBubble(e?: Event) {
-    if (e)
-        e.stopPropagation();
-    const popup = document.getElementById('mobile-mascot-popup')!;
-    if (popup) {
-        popup.classList.toggle('show');
-    }
-}
-
-document.addEventListener('click', (e) => {
-    const popup = document.getElementById('mobile-mascot-popup')!;
-    const mobileMascot = document.getElementById('mobile-mascot')!;
-    if (popup && popup.classList.contains('show')) {
-        if (!mobileMascot || !mobileMascot.contains(e.target as Node | null)) {
-            popup.classList.remove('show');
-        }
-    }
-});
-return { updateMascotState, setupMascotSvgs, toggleMobileMascotBubble };
+return { updateMascotState, setupMascotSvgs };
 }

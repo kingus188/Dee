@@ -1,4 +1,3 @@
-import type { Usage } from "../types.js";
 
 function formatFileSize(bytes: number | null | undefined) {
     if (bytes === null || bytes === undefined || isNaN(bytes))
@@ -49,25 +48,6 @@ function formatShortTime(timestamp: string | number) {
     return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function formatListTime(timestamp: string | number) {
-    if (!timestamp)
-        return '';
-    const d = new Date(timestamp);
-    if (isNaN(d.getTime()))
-        return '';
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    const now = new Date();
-    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startThat = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    const dayDiff = Math.round((startToday.getTime() - startThat.getTime()) / 86400000);
-    if (dayDiff === 0)
-        return `今天 ${hm}`;
-    if (dayDiff === 1)
-        return `昨天 ${hm}`;
-    return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
 function formatDuration(ms: number) {
     if (ms <= 0)
         return '0 秒';
@@ -102,22 +82,4 @@ function getLastNonEmptyLine(output: unknown) {
     return lines.length > 0 ? lines[lines.length - 1] : '';
 }
 
-function formatUsageTokens(usage: Usage | null) {
-    if (!usage)
-        return '0';
-    if (usage.models) {
-        const all = Object.values(usage.models);
-        usage = {
-            input: all.reduce((n, u) => n + (u.input || 0), 0),
-            output: all.reduce((n, u) => n + (u.output || 0), 0),
-        };
-    }
-    const input = usage.input || usage.inputTokens || 0;
-    const output = usage.output || usage.outputTokens || 0;
-    const total = usage.totalTokens || (input + output);
-    if (input || output) {
-        return `入 ${input} · 出 ${output}`;
-    }
-    return `${total}`;
-}
-export { escapeHtml, formatFileSize, formatTime, formatListTime, getLastNonEmptyLine, formatDuration, formatUsageTokens, formatToolArgs, generateUuid };
+export { escapeHtml, formatFileSize, formatTime, getLastNonEmptyLine, formatDuration, formatToolArgs, generateUuid };

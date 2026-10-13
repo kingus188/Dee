@@ -1,0 +1,304 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Pi Durable Assistant 架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1320,
+      760
+    ],
+    "repository": {
+      "url": "https://github.com/kingus188/pi-durable-assistant",
+      "revision": "51b34158d9054f07476e819cffa578008137644c"
+    }
+  },
+  "components": [
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "Web 界面",
+      "sublabel": "聊天 · 附件 · 任务中心",
+      "pos": [
+        40,
+        330
+      ],
+      "size": [
+        220,
+        90
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/main.ts"
+        },
+        {
+          "path": "apps/web/src/api/events.ts"
+        }
+      ]
+    },
+    {
+      "id": "application",
+      "type": "backend",
+      "label": "应用服务",
+      "sublabel": "HTTP / SSE · 微信适配",
+      "pos": [
+        370,
+        330
+      ],
+      "size": [
+        220,
+        90
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/http/server.ts"
+        },
+        {
+          "path": "apps/server/src/application/index.ts"
+        },
+        {
+          "path": "packages/channel-wechat/src/index.ts"
+        }
+      ]
+    },
+    {
+      "id": "durable",
+      "type": "backend",
+      "label": "Pi Durable 运行时",
+      "sublabel": "Harness · 会话 · 任务恢复",
+      "pos": [
+        700,
+        330
+      ],
+      "size": [
+        220,
+        90
+      ],
+      "sources": [
+        {
+          "path": "packages/runtime/src/runtime.ts"
+        }
+      ]
+    },
+    {
+      "id": "model",
+      "type": "external",
+      "label": "模型服务",
+      "sublabel": "兼容 API · 本地 faux 可替代",
+      "pos": [
+        1030,
+        330
+      ],
+      "size": [
+        220,
+        90
+      ],
+      "sources": [
+        {
+          "path": "packages/runtime/src/models.ts"
+        }
+      ]
+    },
+    {
+      "id": "wechat",
+      "type": "external",
+      "label": "微信 / wx-bot",
+      "sublabel": "可选 iLink 桥接",
+      "pos": [
+        370,
+        90
+      ],
+      "size": [
+        220,
+        90
+      ],
+      "sources": [
+        {
+          "path": "compose.yaml"
+        },
+        {
+          "path": "packages/channel-wechat/src/index.ts"
+        }
+      ]
+    },
+    {
+      "id": "storage",
+      "type": "database",
+      "label": "SQLite",
+      "sublabel": "agent.sqlite · 持久状态",
+      "pos": [
+        700,
+        90
+      ],
+      "size": [
+        220,
+        90
+      ],
+      "sources": [
+        {
+          "path": "packages/runtime/src/runtime.ts"
+        },
+        {
+          "path": "packages/runtime/src/documents.ts"
+        }
+      ]
+    },
+    {
+      "id": "features",
+      "type": "backend",
+      "label": "助手能力",
+      "sublabel": "任务 · 子 Agent · 记忆 · 技能",
+      "pos": [
+        700,
+        570
+      ],
+      "size": [
+        220,
+        90
+      ],
+      "sources": [
+        {
+          "path": "packages/features/src/assistant.ts"
+        },
+        {
+          "path": "packages/features/src/tasks/index.ts"
+        },
+        {
+          "path": "packages/features/src/personal/extension.ts"
+        }
+      ]
+    },
+    {
+      "id": "knowledge",
+      "type": "external",
+      "label": "Obsidian 笔记",
+      "sublabel": "可选 · 白名单内只读",
+      "pos": [
+        1030,
+        570
+      ],
+      "size": [
+        220,
+        90
+      ],
+      "sources": [
+        {
+          "path": "packages/features/src/knowledge/index.ts"
+        }
+      ]
+    },
+    {
+      "id": "notifications",
+      "type": "external",
+      "label": "Webhook / 飞书",
+      "sublabel": "可选 · 尽力发送",
+      "pos": [
+        370,
+        570
+      ],
+      "size": [
+        220,
+        90
+      ],
+      "sources": [
+        {
+          "path": "packages/features/src/tasks/notifications.ts"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "web-api",
+      "from": "browser",
+      "to": "application",
+      "label": "HTTP / SSE",
+      "variant": "emphasis"
+    },
+    {
+      "id": "app-runtime",
+      "from": "application",
+      "to": "durable",
+      "label": "提交 / 订阅",
+      "variant": "emphasis"
+    },
+    {
+      "id": "model-call",
+      "from": "durable",
+      "to": "model",
+      "label": "模型请求",
+      "variant": "emphasis"
+    },
+    {
+      "id": "wechat-hook",
+      "from": "wechat",
+      "to": "application",
+      "label": "入站 Webhook",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        480,
+        254
+      ]
+    },
+    {
+      "id": "durable-store",
+      "from": "durable",
+      "to": "storage",
+      "label": "读写 / 恢复",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "invoke-feature",
+      "from": "durable",
+      "to": "features",
+      "label": "执行工具 / 任务",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        810,
+        494
+      ]
+    },
+    {
+      "id": "knowledge-read",
+      "from": "features",
+      "to": "knowledge",
+      "label": "只读检索"
+    },
+    {
+      "id": "notify-send",
+      "from": "features",
+      "to": "notifications",
+      "label": "HTTP POST"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "一个后端进程",
+      "items": [
+        "应用编排 runtime、features 和 channel-wechat；Web 由同源服务提供。",
+        "contracts 仅共享接口类型，不是独立运行服务。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "持久化与恢复",
+      "items": [
+        "会话、任务检查点、记忆与技能通过 Harness 保存到 SQLite。",
+        "微信回复通过持久队列发送给 wx-bot；通用通知没有可靠 Outbox。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "范围与边界",
+      "items": [
+        "依据当前本地源码；Web 使用可配置 Basic Auth，微信使用独立 Bearer。",
+        "记忆与技能候选需批准；笔记只读。受控文件写入尚未交付。"
+      ]
+    }
+  ]
+}

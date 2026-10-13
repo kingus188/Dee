@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -b",
     "check": "tsc -b",
-    "test": "npm run check"
+    "test": "pnpm run check"
   },
   "dependencies": {},
   "exports": {

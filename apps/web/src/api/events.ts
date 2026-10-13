@@ -1,6 +1,6 @@
 import type { AppState, AppActions } from "../state.js";
 
-export function createApiEvents(state: AppState, getActions: () => Pick<AppActions, "hideReconnectBanner" | "fetchServerInfo" | "fetchConversations" | "showReconnectBanner" | "renderView">) {
+export function createApiEvents(state: AppState, getActions: () => Pick<AppActions, "hideReconnectBanner" | "fetchServerInfo" | "showReconnectBanner" | "renderView">) {
 // --- SSE 连接与数据渲染 ---
 function connectSse(conversationId: string | number) {
     if (state.currentEventSource) {
@@ -13,7 +13,6 @@ function connectSse(conversationId: string | number) {
     es.onopen = () => {
         getActions().hideReconnectBanner();
         getActions().fetchServerInfo();
-        getActions().fetchConversations();
     };
     es.onerror = () => {
         // 切换会话时旧连接被关掉，也会触发 error。那不是断线。
@@ -22,6 +21,7 @@ function connectSse(conversationId: string | number) {
         getActions().showReconnectBanner();
     };
     es.addEventListener('view', (e) => {
+        if (state.currentEventSource !== es) return;
         try {
             const data = JSON.parse(e.data);
             state.currentViewData = data;

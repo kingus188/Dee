@@ -73,7 +73,7 @@ test("记忆、技能和知识库接口", { timeout: 30000 }, async () => {
 		assert.equal(again.item.id, created.item.id);
 		await post(app.origin, "/api/personal/memory/" + created.item.id + "/reject");
 		const skill = await post(app.origin, "/api/personal/skills", {
-			name: "发布前检查", description: "准备部署时", body: "先跑 npm test。", requestId: "skill-1",
+			name: "发布前检查", description: "准备部署时", body: "先跑 pnpm test。", requestId: "skill-1",
 		});
 		assert.equal(skill.item.status, "approved");
 		const duplicate = await fetch(app.origin + "/api/personal/skills", {

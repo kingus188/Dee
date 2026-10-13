@@ -6,9 +6,9 @@
   "scripts": {
     "build": "tsc -b && node --experimental-strip-types ../../scripts/build.ts web",
     "check": "tsc -b tsconfig.json tsconfig.test.json",
-    "test": "npm run build && tsc -b tsconfig.test.json && node --experimental-vm-modules --test dist-tests/*.test.js"
+    "test": "pnpm run build && tsc -b tsconfig.test.json && node --experimental-vm-modules --test dist-tests/*.test.js"
   },
   "dependencies": {
-    "@assistant/contracts": "0.1.0"
+    "@assistant/contracts": "workspace:*"
   }
 }

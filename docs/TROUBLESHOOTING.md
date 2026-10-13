@@ -1,6 +1,6 @@
 # 故障排查
 
-适用于 **当前主分支 `main`**。请先运行 `npm run check`、`npm test`；如果是 Docker 部署，优先查看 `docker compose ps` 与**已脱敏**日志：
+适用于 **当前主分支 `main`**。请先运行 `pnpm run check`、`pnpm test`；如果是 Docker 部署，优先查看 `docker compose ps` 与**已脱敏**日志：
 
 ```bash
 docker compose ps
@@ -11,8 +11,8 @@ docker compose logs --tail=100 pi-durable-assistant
 
 | 现象 | 常见原因 | 最小排查动作 |
 | --- | --- | --- |
-| `npm ci` 失败 | Node 版本过旧、依赖源不可访问 | `node -v`（至少 22.19）、核对 npm 网络及锁文件 |
-| 本地没有启动 | 端口占用，或真实模型变量不完整 | 先试 `LLM_API=faux npm run dev`；必要时指定 `PORT=3001` |
+| `pnpm install --frozen-lockfile` 失败 | Node 版本过旧、依赖源不可访问 | `node -v`（至少 22.19）、核对 pnpm 网络及锁文件 |
+| 本地没有启动 | 端口占用，或真实模型变量不完整 | 先试 `LLM_API=faux pnpm run dev`；必要时指定 `PORT=3001` |
 | `Missing LLM_BASE_URL` 或模型参数错误 | `.env` 未正确加载；faux 与真实模型混淆 | 检查 `LLM_API` 类型和 `LLM_MODEL`、`LLM_BASE_URL`；本地用 `set -a; . ./.env; set +a` |
 | 生产启动失败或 HTTP 401 | `DEMO_PASSWORD` 缺失、错误，或反向代理未传 `Authorization` | 填强密码、用 `curl -u demo` 检查，保留代理鉴权请求头 |
 | 浏览器打不开 Docker 端口 | 默认仅绑定 VPS 的 `127.0.0.1:3300` | 在 VPS 本机测试；远程用 HTTPS 反向代理，不要把 3300 直接暴露公网 |
@@ -35,10 +35,10 @@ docker compose logs --tail=100 pi-durable-assistant
 
 ```bash
 node --version
-npm ci
-npm run check
-npm test
-LLM_API=faux npm run dev
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm test
+LLM_API=faux pnpm run dev
 ```
 
 Docker：
@@ -58,7 +58,7 @@ docker compose --profile wechat logs --tail=100 wx-bot
 
 ## 提 Issue 时提供什么
 
-请使用模板说明：当前 `main` 或 PR 分支、操作系统、Node 与 Docker 版本、预期行为、实际行为、最短复现步骤、`npm run check` 与 `npm test` 结果、脱敏日志。不要直接公开 `.env`、Docker 数据卷、聊天历史、JWT、微信 token 或任何 API 密钥。
+请使用模板说明：当前 `main` 或 PR 分支、操作系统、Node 与 Docker 版本、预期行为、实际行为、最短复现步骤、`pnpm run check` 与 `pnpm test` 结果、脱敏日志。不要直接公开 `.env`、Docker 数据卷、聊天历史、JWT、微信 token 或任何 API 密钥。
 
 ## 需要知道的边界
 

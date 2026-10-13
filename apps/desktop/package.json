@@ -1,0 +1,19 @@
+{
+  "name": "@assistant/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b tsconfig.json tsconfig.test.json",
+    "test": "pnpm run check && node --test dist-tests/*.test.js",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@assistant/server": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "44.7.0"
+  }
+}

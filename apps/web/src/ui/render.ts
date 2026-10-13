@@ -27,26 +27,5 @@ function patchChildren(target: HTMLElement, staging: HTMLElement) {
         prev[i].remove();
 }
 
-// 面板渲染函数先画到离屏节点，微任务里统一打补丁到页面
-const pendingPatches: [
-    HTMLElement,
-    HTMLElement
-][] = [];
-
-function stagingFor(id: string) {
-    const real = document.getElementById(id);
-    if (!real)
-        return null;
-    const staging = document.createElement(real.tagName);
-    if (pendingPatches.length === 0)
-        queueMicrotask(flushPatches);
-    pendingPatches.push([real, staging]);
-    return staging;
-}
-
-function flushPatches() {
-    for (const [real, staging] of pendingPatches.splice(0))
-        patchChildren(real, staging);
-}
-return { stagingFor, patchChildren };
+return { patchChildren };
 }

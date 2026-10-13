@@ -32,7 +32,7 @@
 **无模型的本地演示：**
 
 ```bash
-LLM_API=faux npm run dev
+LLM_API=faux pnpm run dev
 ```
 
 **接实际模型：**

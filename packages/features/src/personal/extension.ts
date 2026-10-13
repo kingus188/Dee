@@ -16,7 +16,7 @@ return defineExtension({
 		defineTool({
 			name: "propose_memory",
 			replay: "safe",
-			description: "提交一条跨会话长期记忆候选。不会立即生效，必须等用户在任务中心批准。只提交稳定事实或偏好，不要提交整段聊天。",
+			description: "提交一条跨会话长期记忆候选。不会立即生效，必须等用户在对话卡片中批准。只提交稳定事实或偏好，不要提交整段聊天。",
 			parameters: Type.Object({ text: Type.String() }),
 			execute: async (args, api, context) => {
 				const item = await api.commit((tx) => proposeMemoryInTx(tx, {

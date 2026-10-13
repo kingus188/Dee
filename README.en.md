@@ -1,114 +1,140 @@
-# Pi Durable Assistant
+# Xiao D · Personal Digital Companion
 
-**A self-hosted, durable AI assistant** powered by [Pi Durable](https://github.com/earendil-works/pi), with crash recovery, long-running tasks, background subagents, scheduled jobs, SQLite persistence, a web chat interface, and an optional WeChat iLink bridge.
+**A familiar face, a memory of your preferences, and an assistant that keeps working.**
 
-[简体中文 README](README.md) · [Getting started](docs/GETTING_STARTED.md) · [Configuration](docs/CONFIGURATION.md) · [Deployment](docs/DEPLOYMENT.md)
+Xiao D is a self-hosted personal AI companion with an animated avatar. Give it a task through conversation, see its working state, approve what it remembers, and let longer tasks run in the background.
 
+The project, **Pi Durable Assistant**, is built on [Pi Durable](https://github.com/earendil-works/pi). The avatar communicates activity; the durable Agent runtime handles execution. Work can continue after you close the browser, and recoverable tasks resume from persisted state after a server restart.
+
+[简体中文](README.md) · [Getting started](docs/GETTING_STARTED.md) · [Configuration](docs/CONFIGURATION.md) · [Architecture](docs/ARCHITECTURE.md)
+
+[![Node.js](https://img.shields.io/badge/Node.js-22.19%2B-43853d?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![CI](https://github.com/kingus188/pi-durable-assistant/actions/workflows/v3-ci.yml/badge.svg)](https://github.com/kingus188/pi-durable-assistant/actions/workflows/v3-ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-![Pi Durable Assistant web interface with conversations and task status](docs/screenshot.png)
+> An experimental, single-user application. Today, interaction uses text and a two-dimensional animated avatar. Real-time voice, lip synchronization and photorealistic video avatars are not implemented.
 
-> **Status: experimental, single-user project.** Not an official Pi Durable product. The `main` branch does not include all open feature PRs. Back up your SQLite volume and restrict access before using a VPS.
+## What Xiao D is becoming
 
-## What does it do?
+A personal digital companion should be recognizable, make its activity understandable, and help you pick up where you left off.
 
-Unlike a disposable chatbot session, this project wraps the Pi Durable runtime in a browser-based personal assistant. Task and conversation state is committed to persistent storage, so recoverable work can resume after a process restart.
+- **Visible activity.** Expressions and short status messages reflect thinking, tool use, waiting, disconnection and recovery. Animation follows application state.
+- **Memory you control.** Preferences, stable facts and reusable procedures can carry across conversations. Assistant-proposed memories and skills require approval before use.
+- **Work that continues.** Reminders, recurring plans and background tasks have persistent records. The server can keep working while you are away from the browser.
+- **A personal space you manage.** Conversations, memory and task state are stored in your instance. You can stop tasks, manage memories, archive conversations and export chat text.
 
-| Feature | On `main` |
+## Things to try
+
+These examples require a real model. Results depend on the selected model and the relevant configuration.
+
+| You might say | Current capability |
 | --- | --- |
-| Crash recovery | Persistent Durable tasks, checkpoints and conversation state |
-| Web chat | Multiple conversations, forking, live SSE updates and usage display |
-| Subagents | Foreground `delegate` and background `delegate_background` |
-| Scheduled jobs | One-off or fixed-minute recurring tasks; pause, resume and cancel |
-| Memory notes | Persistent `todo` and `memo` tools |
-| Attachments | Browser uploads for PNG/JPEG/WebP/GIF images and UTF-8 text/code files |
-| WeChat | Optional iLink bridge for text and voice-transcription text, with its own outbox |
-| Notifications | Optional generic Webhook or Feishu text bot; **best-effort on main** |
-| Export | Visible user/assistant messages to Markdown |
-| Long-term memory | `propose_memory` stays pending until approved in the task center. Text you enter there applies immediately. Stored only in local SQLite |
-| Skills | Approved skills expose only a name and trigger in the prompt. The model reads the full text with `read_skill` |
-| Notes search | Optional read-only search of an allowlisted Obsidian vault, with path and line citations. Nothing is written back |
-| Conversation list | Archive or remove a chat from the menu. Archive also stops that chat's unfinished reminders, schedules and background jobs. Removal drops the menu row only |
+| “Remember that I prefer short answers with bullet points.” | Propose a long-term memory for your approval |
+| “Remind me to stretch in ten minutes.” | Create a persistent reminder that returns to the conversation |
+| “Save these ideas, then help me make a to-do list.” | Keep notes and todos for the current conversation |
+| “Read this public webpage and summarize it in the background.” | Retrieve public webpage text and delegate suitable work to a background Agent |
+| “Find the decision about this project in my notes, with sources.” | Search configured, allowlisted Obsidian folders with file and line citations |
+| “Save these steps as a skill for similar work later.” | Propose a reusable procedure for approval; this does not retrain the model |
 
-**Tech stack:** Node.js 22.19+, TypeScript with native ESM, Pi Durable 1.1.0, SQLite, Docker Compose. Compiled with `tsc`; no frontend framework, bundler or external database server required.
+The web interface supports multiple conversations, conversation forks, streamed responses, and image/text attachments. An optional WeChat iLink bridge handles text and voice-transcription text provided by WeChat. Generic Webhooks and Feishu bots can deliver task notifications.
 
-## Quick start — no API key
+## Try it locally
 
-Requires Node.js 22.19 or newer.
+Requires **Node.js ≥ 22.19**, pnpm 12.9.1 and Git.
 
 ```bash
 git clone https://github.com/kingus188/pi-durable-assistant.git
 cd pi-durable-assistant
-npm ci
-npm run check
-LLM_API=faux npm run dev
+corepack enable
+pnpm install --frozen-lockfile
+LLM_API=faux pnpm run dev
 ```
 
-Open **http://127.0.0.1:3000**, create a conversation, and open **Task Center** at the bottom-right.
+Open **http://127.0.0.1:3000**, create a conversation and send a message to see Xiao D's state changes and task execution.
 
-`faux` is a deterministic local test script: **it does not behave like a real LLM**. It exists to demonstrate tasks, UI and restart recovery without spending tokens.
+`faux` needs no API key. It runs a fixed script for exploring the interface and recovery behavior. **It does not understand arbitrary instructions or perform the real tasks listed above.**
 
-## Connect a real model
+### Connect a real model
 
 ```bash
 cp .env.example .env
-# Set LLM_API, LLM_BASE_URL, LLM_API_KEY and LLM_MODEL in .env
+# Set LLM_API, LLM_BASE_URL, LLM_API_KEY and LLM_MODEL in an editor
 set -a
 . ./.env
 set +a
-npm run dev
+pnpm run dev
 ```
 
-Supported API protocol types: `openai-completions`, `openai-responses` and `anthropic-messages`. Compatibility and usage charges depend on your provider or proxy; don't assume all models support the same API. Never commit `.env`, API credentials or WeChat sessions.
+Supported API protocols are `openai-completions`, `openai-responses` and `anthropic-messages`. Model availability, image understanding, costs and data handling depend on your provider. Knowledge search, notifications and WeChat need separate configuration; see [Configuration](docs/CONFIGURATION.md).
 
-## Self-host with Docker Compose
+## Keep Xiao D running
+
+Background work needs a running server, or a process manager that restarts it after an exit. The included Docker Compose setup persists SQLite data and restarts the service automatically.
 
 ```bash
 cp .env.example .env
-# Set DEMO_PASSWORD and real model configuration
+# Configure a real model and a strong DEMO_PASSWORD
 docker compose up -d --build
 docker compose ps
 ```
 
-The container is published only at **127.0.0.1:3300** by default. For remote access, configure an HTTPS reverse proxy and retain HTTP Basic Auth (`demo` username). SQLite and WeChat session data live in persistent Docker volumes: **do not run `docker compose down -v` as an upgrade command**.
+The default address is **http://127.0.0.1:3300**. For remote access, use an HTTPS reverse proxy and retain authentication; the HTTP Basic Auth username is `demo`. Back up volumes before upgrading. **Do not use `docker compose down -v` to upgrade**, as it removes persistent data.
 
-See [deployment and backup guidance](docs/DEPLOYMENT.md), [troubleshooting](docs/TROUBLESHOOTING.md), and the [WeChat iLink guide](docs/WECHAT.md) (Chinese).
+See [Deployment and backups](docs/DEPLOYMENT.md). The [WeChat iLink guide](docs/WECHAT.md) covers the additional `wx-bot` container and QR-code login. Detailed guides are primarily in Chinese.
 
-## Important limitations
+## Current boundaries
 
-- The assistant is a single-user application, not a multi-tenant service.
-- Fixed-minute recurring jobs are **not timezone-aware cron expressions**.
-- Browser uploads support up to 5 files: 5 MiB per image, 200 KiB per text file, 10 MiB total. WeChat media is **not actually parsed**; only text or transcribed voice text is supported there.
-- Generic Webhook / Feishu delivery in `main` is best-effort; it has no persistent retry queue. WeChat has a separate delivery queue.
-- The following features are **open PRs, not released on main**: workspace approval ([#5](https://github.com/xiaomoBoy/pi-durable-assistant/pull/5)) and generic durable Outbox ([#6](https://github.com/xiaomoBoy/pi-durable-assistant/pull/6)). Read-only note search is on `main` and does not depend on the unmerged [#4](https://github.com/xiaomoBoy/pi-durable-assistant/pull/4).
-- Simulated CI tests do not validate real LLM accounts, WeChat login, mobile browsers or production disaster recovery.
+- **Avatar and voice:** SVG/CSS animation is available. Real-time voice conversation, voice cloning, lip synchronization, Live2D and 3D model integration are not implemented.
+- **Memory and data:** Self-hosting stores conversations and memory in your instance. Relevant messages, attachments and retrieved text may still be sent to an external model provider. Never commit `.env`, API keys or WeChat credentials.
+- **Execution and recovery:** Recovery depends on persisted state and the task's recovery semantics. It does not guarantee exactly-once execution of arbitrary external operations. Recurring jobs use fixed-minute intervals, not timezone-aware calendar scheduling.
+- **Delivery:** Generic Webhook and Feishu notifications are best-effort and can be lost. WeChat has its own persistent delivery queue, but duplicates and platform restrictions remain possible. Real WeChat login and production delivery need separate validation.
+- **Attachments and access:** Web uploads allow 5 files, up to 5 MiB per image, 200 KiB per text file and 10 MiB total. WeChat images, videos and files are not parsed. Knowledge search is read-only; arbitrary local file writing and general computer control are not provided.
+- **Scope:** This is a personal application without tenant isolation or enterprise role management. Archiving stops that conversation's unfinished tasks. Removing it from the list does not erase all persisted records.
 
-## Project layout and tests
+## Direction
 
-The repository uses npm workspaces with two applications and four private packages:
+Future work focuses on identity, expression and sustained collaboration. These are **product directions, not shipped features or delivery commitments**.
 
-- `apps/server`: startup, HTTP/SSE, authentication and application use cases.
-- `apps/web`: native TypeScript browser UI, organized by feature.
-- `packages/contracts`: shared HTTP/SSE types without Node or SDK dependencies.
-- `packages/runtime`: models, sessions, Harness and SQLite lifecycle.
-- `packages/features`: assistant tools, tasks, notes, memory, skills and knowledge search.
-- `packages/channel-wechat`: WeChat bindings, inbound processing and the durable reply queue.
+| Direction | Intended experience |
+| --- | --- |
+| Configurable identity | Choose a name, appearance and communication style that remain consistent across conversations |
+| Voice interaction | Speak, hear replies and interrupt while keeping task state coherent |
+| Richer expression | Coordinate expressions, motion and lip movement with conversation and execution events |
+| Reviewable collaboration | Understand memory sources, authorization boundaries and task progress; correct or revoke them |
+| Continuity across channels | Continue work between the web and messaging channels, with better delivery and permission controls |
+
+## Development
+
+**TypeScript / native browser UI / Node.js / Pi Durable 1.1.0 / SQLite / SSE.** The project uses pnpm workspaces and `tsc`, without a frontend framework, bundler or separate database server.
+
+| Directory | Responsibility |
+| --- | --- |
+| `apps/web` | Xiao D's avatar, conversation interface and interactions |
+| `apps/server` | Startup, authentication, HTTP/SSE and application use cases |
+| `packages/contracts` | Shared frontend/backend protocol types |
+| `packages/runtime` | Model integration, sessions and the durable runtime |
+| `packages/features` | Memory, skills, notes, knowledge search, reminders and tasks |
+| `packages/channel-wechat` | WeChat message handling and the persistent delivery queue |
+| `tests/integration` | Cross-module API and recovery verification |
 
 ```bash
-npm ci
-npm run check
-npm test
-LLM_API=faux npm run dev
+pnpm run check
+pnpm --recursive --workspace-concurrency=1 run build
+pnpm test
 ```
 
-Builds follow TypeScript project references. `check` also enforces dependency boundaries and detects cycles. Each workspace has its own build/check/test commands, for example `npm test --workspace @assistant/features`. Web builds copy HTML/CSS into `apps/web/dist/`; production starts with `node apps/server/dist/main.js` after building. `dev` restarts exited processes but does not watch source files. Docker compiles in a build stage and installs only production dependencies in its runtime stage.
+`pnpm start` and `pnpm run dev` build first. `dev` restarts exited processes but does not watch source files; rebuild after editing. See [Architecture and development](docs/ARCHITECTURE.md) for workspace commands and dependency boundaries.
 
-Existing SQLite documents, task versions and HTTP/SSE paths are preserved. See [Architecture and development](docs/ARCHITECTURE.md) for package boundaries and migration constraints.
+Automated tests cover simulated local models, APIs, persistence and recovery. They do not replace real-model, browser, WeChat or production deployment validation.
 
+## Further reading
 
-For the full usage guide, environment variables, recovery caveats and release status, see the [Chinese README](README.md) and linked documents. Report reproducible bugs with versions, steps and sanitized logs.
+[Getting started](docs/GETTING_STARTED.md) · [Configuration](docs/CONFIGURATION.md) · [Deployment](docs/DEPLOYMENT.md) · [WeChat](docs/WECHAT.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [v3 design record](docs/V3_PLAN.md) · [Knowledge requirements](docs/KNOWLEDGE_FEATURE_REQUIREMENTS.md)
 
-Based on [xiaomoBoy/pi-durable-assistant](https://github.com/xiaomoBoy/pi-durable-assistant), retaining the original MIT license and copyright notice. Historical PR links refer to that project.
+Some guides describe the earlier Task Center interface and historical designs. Follow the interface in your running version; planned features are not evidence of implemented capabilities.
 
-**License:** [MIT](LICENSE). Not affiliated with the official Pi Durable or WeChat teams.
+## License and acknowledgements
+
+Based on [xiaomoBoy/pi-durable-assistant](https://github.com/xiaomoBoy/pi-durable-assistant), now maintained as an independent repository with the original copyright notice retained. [Pi Durable](https://github.com/earendil-works/pi) provides the persistence runtime.
+
+Licensed under [MIT](LICENSE). This is not an official product of Pi Durable, WeChat or any model provider.

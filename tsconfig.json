@@ -39,6 +39,12 @@
     },
     {
       "path": "scripts"
+    },
+    {
+      "path": "apps/desktop"
+    },
+    {
+      "path": "apps/desktop/tsconfig.test.json"
     }
   ]
 }

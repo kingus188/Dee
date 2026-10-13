@@ -3,99 +3,61 @@ import { generateUuid } from "../ui/format.js";
 import { showToast } from "../ui/toast.js";
 import type { AppState, AppActions } from "../state.js";
 
-export function createChatComposer(state: AppState, getActions: () => Pick<AppActions, "updateSendButtonState" | "createNewConversation" | "clearPendingAttachments" | "fetchConversations">) {
-function insertExamplePrompt(text: string) {
-    const textarea = (document.getElementById('chat-textarea') as HTMLTextAreaElement);
-    if (textarea) {
-        textarea.value = text;
-        textarea.style.height = 'auto';
-        textarea.style.height = Math.min(textarea.scrollHeight, 140) + 'px';
-        textarea.focus();
-    }
+export function createChatComposer(state: AppState, getActions: () => Pick<AppActions, "updateSendButtonState" | "connectDirectChat" | "removePendingAttachment">) {
+  function insertExamplePrompt(text: string) {
+    const textarea = document.getElementById("chat-textarea") as HTMLTextAreaElement;
+    textarea.value = text;
+    textarea.style.height = "auto";
+    textarea.style.height = textarea.scrollHeight + "px";
+    textarea.focus();
     getActions().updateSendButtonState();
-}
+  }
 
-// 忙碌状态控制
-function updateBusyControls(isBusy: boolean, inboxCount: number) {
-    const steerToggle = document.getElementById('steer-toggle')!;
-    const btnAbort = (document.getElementById('btn-abort') as HTMLButtonElement);
-    const inboxBadge = document.getElementById('inbox-badge')!;
-    if (steerToggle) {
-        steerToggle.style.display = isBusy ? 'inline-flex' : 'none';
-    }
-    if (btnAbort) {
-        btnAbort.style.display = isBusy ? 'inline-flex' : 'none';
-    }
-    if (inboxBadge) {
-        if (inboxCount > 0) {
-            inboxBadge.textContent = `排队中：${inboxCount} 条`;
-            inboxBadge.style.display = 'inline-block';
-        }
-        else {
-            inboxBadge.style.display = 'none';
-        }
-    }
-}
+  function updateBusyControls(isBusy: boolean, inboxCount: number) {
+    document.getElementById("btn-abort")!.style.display = isBusy ? "inline-flex" : "none";
+    const badge = document.getElementById("inbox-badge")!;
+    badge.textContent = inboxCount > 0 ? "收到，马上接着说" : "";
+    badge.style.display = inboxCount > 0 ? "inline-block" : "none";
+  }
 
-// --- 消息发送与交互 ---
-async function submitMessage() {
-    if (state.isSending)
-        return;
-    const textarea = (document.getElementById('chat-textarea') as HTMLTextAreaElement);
-    const text = (textarea ? textarea.value : '').trim();
-    if (!text && state.pendingAttachments.length === 0)
-        return;
-    if (!state.currentConversationId) {
-        await getActions().createNewConversation();
-        if (!state.currentConversationId)
-            return;
-    }
-    const steerCheckbox = (document.getElementById('steer-checkbox') as HTMLInputElement);
-    const mode = steerCheckbox && steerCheckbox.checked ? 'steer' : 'followUp';
-    const requestId = generateUuid();
-    const btnSend = (document.getElementById('btn-send') as HTMLButtonElement);
+  async function submitMessage() {
+    if (state.isSending) return;
+    const textarea = document.getElementById("chat-textarea") as HTMLTextAreaElement;
+    const text = textarea.value.trim();
+    if (!text && state.pendingAttachments.length === 0) return;
+    const sentAttachments = [...state.pendingAttachments];
+    const attachments = sentAttachments.map(({ name, mimeType, data }) => ({ name, mimeType, data }));
+    const button = document.getElementById("btn-send") as HTMLButtonElement;
     state.isSending = true;
-    if (btnSend) {
-        btnSend.disabled = true;
-        btnSend.textContent = '发送中…';
-    }
-    const attachmentsPayload = state.pendingAttachments.map(att => ({
-        name: att.name,
-        mimeType: att.mimeType,
-        data: att.data,
-    }));
+    button.disabled = true;
+    button.ariaBusy = "true";
+    button.ariaLabel = "正在发送";
     try {
-        await sendMessage(state.currentConversationId, { text, requestId, mode, attachments: attachmentsPayload });
-        // 成功后清空输入框与待发送附件
-        if (textarea) {
-            textarea.value = '';
-            textarea.style.height = 'auto';
-        }
-        getActions().clearPendingAttachments();
-        getActions().fetchConversations();
+      await getActions().connectDirectChat();
+      if (state.currentConversationId === null) throw new Error("还没有连接上小 D");
+      // 新消息在当前工具轮结束后加入回复，用户不必选择插话或新话题。
+      await sendMessage(state.currentConversationId, { text, requestId: generateUuid(), mode: "steer", attachments });
+      if (textarea.value.trim() === text) {
+        textarea.value = "";
+        textarea.style.height = "auto";
+      }
+      for (let i = state.pendingAttachments.length - 1; i >= 0; i--) {
+        if (sentAttachments.includes(state.pendingAttachments[i])) getActions().removePendingAttachment(i);
+      }
+    } catch (error) {
+      showToast("发送失败：" + (error instanceof Error ? error.message : String(error)), "error");
+    } finally {
+      state.isSending = false;
+      button.ariaBusy = "false";
+      button.ariaLabel = "发送消息";
+      getActions().updateSendButtonState();
     }
-    catch (err) {
-        showToast('发送失败：' + (err instanceof Error ? err.message : String(err)), 'error');
-        // 出错时保留输入框内容和待发送附件，方便重试
-    }
-    finally {
-        state.isSending = false;
-        if (btnSend) {
-            btnSend.textContent = '发送';
-            getActions().updateSendButtonState();
-        }
-    }
-}
+  }
 
-async function abortCurrentTask() {
-    if (!state.currentConversationId)
-        return;
-    try {
-        await abortConversation(state.currentConversationId);
-    }
-    catch (err) {
-        alert('停止失败：' + (err instanceof Error ? err.message : String(err)));
-    }
-}
-return { updateBusyControls, submitMessage, abortCurrentTask, insertExamplePrompt };
+  async function abortCurrentTask() {
+    if (!state.currentConversationId) return;
+    try { await abortConversation(state.currentConversationId); }
+    catch { showToast("暂时没能停止回复，请重试。", "error"); }
+  }
+  return { updateBusyControls, submitMessage, abortCurrentTask, insertExamplePrompt };
 }

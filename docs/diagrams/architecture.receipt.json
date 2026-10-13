@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/haifeng/project/projects/pi-durable-assistant/docs/diagrams/architecture.archify.json",
+  "output": "/Users/haifeng/project/projects/pi-durable-assistant/docs/diagrams/architecture.html",
+  "specification": {
+    "sha256": "484a7fccce31d09e5af91bbd593b27967a690534cd80f107150b6f11fcbec82f",
+    "bytes": 6212
+  },
+  "artifact": {
+    "sha256": "67614564923337d3dcd63e3f90c12687c9ab6d8fe08756c6f290d4edc377d1bd",
+    "bytes": 715574
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  },
+  "evidence": {
+    "verified": true,
+    "repository": "https://github.com/kingus188/pi-durable-assistant",
+    "revision": "51b34158d9054f07476e819cffa578008137644c",
+    "references": 16
+  }
+}

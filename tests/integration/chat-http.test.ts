@@ -3,35 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ConversationView } from "@assistant/contracts";
-import { freePort, post, launch, stop } from "./helpers.js";
+import { freePort, post, launch, stop, readView } from "./helpers.js";
 
-async function readView(origin: string, id: number, ready: (view: ConversationView) => boolean = () => true) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
-  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-  try {
-    const response = await fetch(origin + `/api/conversations/${id}/events`, { signal: controller.signal });
-    assert.equal(response.status, 200);
-    reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const part = await reader.read();
-      if (part.done) throw new Error("SSE 在期望状态前关闭");
-      buffer += decoder.decode(part.value, { stream: true });
-      let end: number;
-      while ((end = buffer.indexOf("\n\n")) >= 0) {
-        const frame = buffer.slice(0, end); buffer = buffer.slice(end + 2);
-        const line = frame.split("\n").find(value => value.startsWith("data: "));
-        if (line) {
-          const view: ConversationView = JSON.parse(line.slice(6));
-          if (ready(view)) return view;
-        }
-      }
-    }
-  } finally { clearTimeout(timeout); controller.abort(); await reader?.cancel().catch(() => {}); }
-}
 
 test("聊天附件、SSE、重复提交、分叉、停止和导出保持兼容", { timeout: 40000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-chat-"));

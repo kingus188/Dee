@@ -210,17 +210,6 @@ function removePendingAttachment(index: number) {
     }
 }
 
-function clearPendingAttachments() {
-    for (const item of state.pendingAttachments) {
-        if (item.previewUrl && item.previewUrl.startsWith('blob:')) {
-            URL.revokeObjectURL(item.previewUrl);
-        }
-    }
-    state.pendingAttachments = [];
-    renderPendingAttachments();
-    updateSendButtonState();
-}
-
 function renderPendingAttachments() {
     const container = document.getElementById('attachments-preview')!;
     if (!container)
@@ -315,5 +304,5 @@ function setupDragAndDrop() {
         }
     });
 }
-return { updateSendButtonState, clearPendingAttachments, setupDragAndDrop, handleFilesSelected, triggerFileInput, removePendingAttachment };
+return { updateSendButtonState, setupDragAndDrop, handleFilesSelected, triggerFileInput, removePendingAttachment };
 }

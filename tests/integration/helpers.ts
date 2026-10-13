@@ -1,3 +1,4 @@
+import type { ConversationView } from "@assistant/contracts";
 import { fileURLToPath } from "node:url";
 import type { AddressInfo } from "node:net";
 import type { ChildProcess } from "node:child_process";
@@ -49,4 +50,31 @@ export async function stop(child: ChildProcess) {
     child.kill("SIGTERM");
     setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 2000).unref();
   });
+}
+
+export async function readView(origin: string, id: number, ready: (view: ConversationView) => boolean = () => true) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  try {
+    const response = await fetch(origin + `/api/conversations/${id}/events`, { signal: controller.signal });
+    assert.equal(response.status, 200);
+    reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const part = await reader.read();
+      if (part.done) throw new Error("SSE 在期望状态前关闭");
+      buffer += decoder.decode(part.value, { stream: true });
+      let end: number;
+      while ((end = buffer.indexOf("\n\n")) >= 0) {
+        const frame = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+        const line = frame.split("\n").find(value => value.startsWith("data: "));
+        if (line) {
+          const view: ConversationView = JSON.parse(line.slice(6));
+          if (ready(view)) return view;
+        }
+      }
+    }
+  } finally { clearTimeout(timeout); controller.abort(); await reader?.cancel().catch(() => {}); }
 }

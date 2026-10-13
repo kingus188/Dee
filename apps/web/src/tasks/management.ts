@@ -1,88 +1,41 @@
 import type { Management } from "@assistant/contracts";
-import { $, el, fmt, addButton } from "../ui/elements.js";
-import { request } from "../api/request.js";
-import { base } from "./context.js";
-import type { TaskPanelContext } from "./context.js";
-export function createManagementPanel({ run, isCurrent, say }: TaskPanelContext) {
-  async function loadManagement(sequence: number, id: string | null) {
-    const schedules = $("v3-schedules");
-    const reminders = $("v3-reminders");
-    const background = $("v3-background");
-    const owner = String(id || "");
-    if (schedules._owner !== owner) {
-      schedules._owner = reminders._owner = background._owner = owner;
-      schedules._lastData = reminders._lastData = background._lastData = "";
-    }
-    if (!id) {
-      schedules.replaceChildren(el("p", "选择会话后才能管理计划任务", "v3-muted"));
-      reminders.replaceChildren();
-      background.replaceChildren();
-      return;
-    }
-    try {
-      const data = await request<Management>("/api/conversations/" + id + "/management");
-      if (!isCurrent(sequence, id)) return;
-      const schedules = $("v3-schedules");
-   const schedStr = JSON.stringify(data.schedules || []);
-   if (schedules._lastData !== schedStr) { schedules._lastData = schedStr; schedules.replaceChildren();
-      for (const item of data.schedules || []) {
-        const row = el("div", "", "v3-row");
-        row.append(el("p", item.text), el("span", item.status + " · 已执行 " + item.runs + " 次 · 下次 " + fmt(item.nextAt), "v3-muted"));
-        const actions = el("div", "", "v3-actions");
-        if (item.status === "active") addButton(actions, "暂停", () => run(() => request(base() + "/schedules/" + item.id + "/pause", {})));
-        if (item.status === "paused") addButton(actions, "继续", () => run(() => request(base() + "/schedules/" + item.id + "/resume", {})));
-        if (item.status === "active" || item.status === "paused") addButton(actions, "取消", () => run(() => request(base() + "/schedules/" + item.id + "/cancel", {})));
-        row.append(actions); schedules.append(row);
-      }
-      if (!schedules.childElementCount) schedules.append(el("p", "暂无计划任务", "v3-muted")); }
+import type { ConversationCard, CardAction } from "../chat/cards.js";
+import { fmt } from "../ui/elements.js";
 
-      const reminders = $("v3-reminders");
-   const remStr = JSON.stringify(data.reminders || []);
-   if (reminders._lastData !== remStr) { reminders._lastData = remStr; reminders.replaceChildren();
-      for (const item of data.reminders || []) {
-        const row = el("div", "", "v3-row");
-        row.append(el("p", item.text), el("span", item.status + " · " + fmt(item.at), "v3-muted"));
-        if (item.status === "scheduled") addButton(row, "取消提醒", () => run(() => request(base() + "/reminders/" + item.id + "/cancel", {})));
-        reminders.append(row);
-      }
-      if (!reminders.childElementCount) reminders.append(el("p", "暂无提醒", "v3-muted")); }
-
-      const background = $("v3-background");
-   const bgStr = JSON.stringify(data.background || []);
-   if (background._lastData !== bgStr) { background._lastData = bgStr; background.replaceChildren();
-      for (const item of data.background || []) {
-        const row = el("div", "", "v3-row");
-        row.append(el("p", item.text), el("span", item.status, "v3-status"));
-        if (item.result) row.append(el("p", item.result.slice(0, 350), "v3-muted"));
-        const actions = el("div", "", "v3-actions");
-        if (item.conversationId) addButton(actions, "查看对话", () => { location.hash = "#" + item.conversationId; });
-        if (item.status === "running") addButton(actions, "停止", () => run(() => request(base() + "/background/" + item.id + "/stop", {})));
-        row.append(actions); background.append(row);
-      }
-      if (!background.childElementCount) background.append(el("p", "暂无后台任务", "v3-muted")); }
-    } catch (e) {
-      if (isCurrent(sequence, id)) say("读取任务失败：" + (e instanceof Error ? e.message : String(e)));
-    }
-  }
-  $("v3-schedule-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const form = e.currentTarget as HTMLFormElement;
-    const data = Object.fromEntries(new FormData(form));
-    run(() => request(base() + "/schedules", {
-      ...data, minutesFromNow: Number(data.minutesFromNow),
-      everyMinutes: Number(data.everyMinutes), requestId: (typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():"req-"+Date.now()+"-"+Math.random().toString(36).slice(2,10)),
-    }));
-  });
-  $("v3-background-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const form = e.currentTarget as HTMLFormElement;
-    run(async () => {
-      await request(base() + "/background", {
-        text: new FormData(form).get("text"), requestId: (typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():"req-"+Date.now()+"-"+Math.random().toString(36).slice(2,10)),
-      });
-      form.reset();
+export function managementCards(data: Management, conversationId: string): ConversationCard[] {
+  const base = "/api/conversations/" + encodeURIComponent(conversationId);
+  const cards: ConversationCard[] = [];
+  for (const item of data.schedules) {
+    const path = base + "/schedules/" + encodeURIComponent(item.id);
+    const actions: CardAction[] = [];
+    if (item.status === "active") actions.push({ label: "暂停", kind: "request", path: path + "/pause" });
+    if (item.status === "paused") actions.push({ label: "继续", kind: "request", path: path + "/resume" });
+    if (item.status === "active" || item.status === "paused") actions.push({ label: "取消计划", kind: "request", path: path + "/cancel" });
+    const status = { active: "已安排", paused: "已暂停", cancelled: "已取消", completed: "已完成", failed: "执行失败" }[item.status];
+    cards.push({
+      key: "schedule:" + item.id, group: "tasks", title: "计划任务", text: item.text, status,
+      tone: item.status === "failed" ? "error" : item.status === "completed" ? "done" : undefined,
+      meta: [item.status === "active" && item.nextAt ? "下次执行：" + fmt(item.nextAt) : item.status === "paused" ? "暂停期间不会执行" : status,
+        item.everyMinutes ? `每隔 ${item.everyMinutes} 分钟重复` : "仅执行一次", `已执行 ${item.runs} 次`].join(" · "), actions,
     });
-  });
-
-return loadManagement;
+  }
+  for (const item of data.reminders) {
+    cards.push({
+      key: "reminder:" + item.id, group: "tasks", title: "提醒", text: item.text,
+      status: { scheduled: "等待提醒", cancelled: "已取消", fired: "已触发" }[item.status],
+      meta: fmt(item.at), tone: item.status === "fired" ? "done" : undefined,
+      actions: item.status === "scheduled" ? [{ label: "取消提醒", kind: "request", path: base + "/reminders/" + item.id + "/cancel" }] : [],
+    });
+  }
+  for (const item of data.background) {
+    const actions: CardAction[] = [];
+    if (item.status === "running") actions.push({ label: "停止任务", kind: "request", path: base + "/background/" + encodeURIComponent(item.id) + "/stop" });
+    cards.push({
+      key: "background:" + item.id, group: "tasks", title: "后台任务", text: item.text,
+      status: { running: "进行中", cancelled: "已停止", failed: "执行失败", done: "已完成" }[item.status],
+      tone: item.status === "failed" ? "error" : item.status === "done" ? "done" : undefined,
+      meta: "开始于 " + fmt(item.createdAt), details: item.result || undefined, actions,
+    });
+  }
+  return cards;
 }

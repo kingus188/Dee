@@ -4,7 +4,7 @@
 
 ## 准备环境
 
-- Node.js **22.19 或以上**、npm、Git；推荐 macOS / Linux。Windows 建议使用 WSL2。
+- Node.js **22.19 或以上**、pnpm 12.9.1、Git；推荐 macOS / Linux。Windows 建议使用 WSL2。
 - **首次演示不需要 API Key**，也不需要 Docker、Redis、PostgreSQL 或云服务器。
 - `LLM_API=faux` 是模拟模型，不会访问真实 LLM 接口，也不会为任意任务生成智能答案。
 
@@ -14,13 +14,14 @@
 git clone https://github.com/kingus188/pi-durable-assistant.git
 cd pi-durable-assistant
 node --version
-npm ci
-npm run check
-npm test
-LLM_API=faux npm run dev
+corepack enable
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm test
+LLM_API=faux pnpm run dev
 ```
 
-访问 **http://127.0.0.1:3000**。如果端口占用，可改 `PORT=3001 LLM_API=faux npm run dev`，并访问 3001。
+访问 **http://127.0.0.1:3000**。如果端口占用，可改 `PORT=3001 LLM_API=faux pnpm run dev`，并访问 3001。
 
 第一次打开后：
 
@@ -52,7 +53,7 @@ LLM_MODEL=your-provider-model-id
 set -a
 . ./.env
 set +a
-npm run dev
+pnpm run dev
 ```
 
 浏览器创建**新会话**后测试：请它读取一个公开网页、设置提醒、创建后台子 Agent。若出现 401、404、模型不支持或重定向错误，先核查 `LLM_API` 类型与 `LLM_BASE_URL` 是否匹配。**LLM 费用属于模型服务商，不由项目内的零值费率配置承担。**

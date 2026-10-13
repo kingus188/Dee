@@ -6,4 +6,3 @@ export async function readServerInfo(): Promise<ServerInfo> {
         return await res.json();
 
 }
-export const simulateCrash = () => fetch("/api/crash", { method: "POST" });

@@ -6,10 +6,10 @@
   "scripts": {
     "build": "tsc -b",
     "check": "tsc -b tsconfig.json tsconfig.test.json",
-    "test": "npm run check && node --test dist-tests/*.test.js"
+    "test": "pnpm run check && node --test dist-tests/*.test.js"
   },
   "dependencies": {
-    "@assistant/runtime": "0.1.0",
+    "@assistant/runtime": "workspace:*",
     "@earendil-works/chord": "1.1.0",
     "@earendil-works/pi-durable": "1.1.0"
   },

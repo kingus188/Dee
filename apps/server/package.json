@@ -6,16 +6,22 @@
   "scripts": {
     "build": "tsc -b",
     "check": "tsc -b tsconfig.json tsconfig.test.json",
-    "test": "npm run check && node --test dist-tests/*.test.js",
+    "test": "pnpm run check && node --test dist-tests/*.test.js",
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@assistant/contracts": "0.1.0",
-    "@assistant/runtime": "0.1.0",
-    "@assistant/features": "0.1.0",
-    "@assistant/channel-wechat": "0.1.0",
+    "@assistant/contracts": "workspace:*",
+    "@assistant/runtime": "workspace:*",
+    "@assistant/features": "workspace:*",
+    "@assistant/channel-wechat": "workspace:*",
     "@earendil-works/chord": "1.1.0",
     "@earendil-works/pi-ai": "1.1.0",
     "@earendil-works/pi-durable": "1.1.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   }
 }

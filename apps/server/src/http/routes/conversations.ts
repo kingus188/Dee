@@ -1,3 +1,4 @@
+import { openDirectChat } from "../../application/direct-chat.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AppContext } from "../../application/context.js";
 import { HttpError } from "../../errors.js";
@@ -13,6 +14,10 @@ export function createConversationRoutes(context: AppContext, conversations: Ret
  const messages = createMessages(context, conversations);
  return async function route(req: IncomingMessage, res: ServerResponse, url: URL) {
  const path = url.pathname, method = req.method;
+ if (path === "/api/conversations/direct" && method === "POST") {
+   await readBody(req);
+   return sendJson(res, 200, { id: await openDirectChat(context) });
+ }
 	if (path === "/api/conversations") {
 		if (method === "GET") {
 			const index = await harness.snapshot(Index, ctx);
