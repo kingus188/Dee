@@ -41,7 +41,8 @@ Node.js 最低版本为 22.19，与 Pi SDK 的运行要求一致。开发依赖�
 pnpm install --frozen-lockfile
 pnpm run check
 pnpm test
-LLM_API=faux pnpm run dev
+# 已配置并注入真实模型环境变量后启动
+pnpm run dev
 ```
 
 - `pnpm run build`：按依赖顺序编译源码和测试，将网页静态资源复制到 `apps/web/dist/`。

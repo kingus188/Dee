@@ -130,7 +130,7 @@ test("生产鉴权与危险调试入口保护", { timeout: 20000 }, async () => 
   const dir = await mkdtemp(join(tmpdir(), "pi-v3-auth-"));
   let app;
   try {
-    app = await launch(dir, await freePort(), { NODE_ENV: "production", DEMO_PASSWORD: "test-secret" });
+    app = await launch(dir, await freePort(), { NODE_ENV: "production", DEMO_PASSWORD: "test-secret", LLM_API: "openai-completions", LLM_BASE_URL: "http://127.0.0.1:1/v1", LLM_MODEL: "test-unused", ENABLE_CRASH_DEMO: "1" });
     const basic = "Basic " + Buffer.from("demo:test-secret").toString("base64");
     let res = await fetch(app.origin + "/api/info");
     assert.equal(res.status, 401);
@@ -139,7 +139,7 @@ test("生产鉴权与危险调试入口保护", { timeout: 20000 }, async () => 
     res = await fetch(app.origin + "/api/info", { headers: { authorization: basic } });
     assert.equal(res.status, 200);
     res = await fetch(app.origin + "/api/crash", { method: "POST", headers: { authorization: basic } });
-    assert.equal(res.status, 403);
+    assert.equal(res.status, 404);
     res = await fetch(app.origin + "/api/conversations", {
       method: "POST",
       headers: { authorization: basic, origin: "https://another-example.com" },

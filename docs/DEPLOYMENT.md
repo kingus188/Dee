@@ -1,6 +1,6 @@
 # Docker / VPS 部署与数据保护
 
-面向已经完成 [本机演示](GETTING_STARTED.md)、准备在自己的 VPS 上长期运行的用户。当前是单用户 Agent，部署默认以 **Docker Compose + SQLite 命名卷 + HTTPS 反向代理** 为基础。请勿把一次模拟进程恢复测试等同于灾难恢复。
+面向已经完成 [本机配置与运行](GETTING_STARTED.md)、准备在自己的 VPS 上长期运行的用户。当前是单用户 Agent，部署默认以 **Docker Compose + SQLite 命名卷 + HTTPS 反向代理** 为基础。请勿把一次模拟进程恢复测试等同于灾难恢复。
 
 ## 1. 前置检查
 

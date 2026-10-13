@@ -7,14 +7,18 @@ Electron 包装现有网页并在应用进程内启动本地服务，无需另�
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
+# 先在 .env 中填写模型配置，或由系统注入相同环境变量
+set -a
+. ./.env
+set +a
 pnpm run desktop
 ```
 
-没有设置 `LLM_API` 和 `LLM_MODEL` 时使用 `faux` 模拟剧本，界面会显示模型信息。这不能理解任意自然语言。真实模型沿用服务端的 `LLM_API`、`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` 环境变量；模块不自动读取 `.env`。macOS 从 Finder 启动不会继承终端设置的环境变量；当前真实模型需从已配置环境的终端启动应用，尚无桌面设置页。
+桌面版启动必须配置真实模型，不再回退到模拟剧本，显式设置 `LLM_API=faux` 也会被拒绝。模型沿用服务端的 `LLM_API`、`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` 环境变量；模块不自动读取 `.env`。macOS 从 Finder 启动不会继承终端设置的环境变量；当前真实模型需从已配置环境的终端启动应用，尚无桌面设置页。
 
 桌面版数据固定放在 Electron `userData/data` 下，macOS 默认是 `~/Library/Application Support/Pi Durable Assistant/data`。它不读取或迁移仓库的 `data/`，也不使用 `DATA_DIR`、`PORT` 或 `DEMO_PASSWORD`。只允许一个桌面实例使用该目录。
 
-服务仅监听 `127.0.0.1` 的随机端口，每次启动生成临时口令，由主进程给同源请求添加认证。网页没有 Node.js 权限，没有 preload/IPC 接口；HTTP(S) 外链交给系统浏览器，其他协议和跨源导航被拒绝。桌面服务禁用模拟崩溃和微信入口。
+服务仅监听 `127.0.0.1` 的随机端口，每次启动生成临时口令，由主进程给同源请求添加认证。网页没有 Node.js 权限，没有 preload/IPC 接口；HTTP(S) 外链交给系统浏览器，其他协议和跨源导航被拒绝。模拟崩溃接口已移除，桌面服务不启用微信入口。
 
 macOS 关闭窗口后应用与任务继续运行，点击 Dock 可恢复窗口；使用 Cmd+Q 完全退出后，本地服务和后台任务停止。Windows/Linux 关闭最后一个窗口即退出。再次打开应用时由现有持久化运行时恢复可恢复的任务。
 

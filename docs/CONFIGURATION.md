@@ -1,13 +1,13 @@
 # 配置参考（当前 main）
 
-本页基于 `.env.example`、`apps/server/src/config.ts`、`packages/features/src/tasks/index.ts`、`packages/channel-wechat/src/index.ts` 和 `compose.yaml` 的**当前主分支实现**。请先按 [快速开始](GETTING_STARTED.md) 使用 `faux` 确认项目可正常启动，再填写真实凭据。
+本页基于 `.env.example`、`apps/server/src/config.ts`、`packages/features/src/tasks/index.ts`、`packages/channel-wechat/src/index.ts` 和 `compose.yaml` 的**当前主分支实现**。请按 [快速开始](GETTING_STARTED.md) 配置真实模型后启动。产品不提供模拟体验，`faux` 仅允许在自动化测试环境中使用。
 
 ## 环境变量
 
 | 变量 | 默认 / 示例 | 说明 |
 | --- | --- | --- |
-| `LLM_API` | `openai-completions` | 可选 `openai-completions` / `openai-responses` / `anthropic-messages` / `faux` |
-| `LLM_BASE_URL` | 空 | 实际服务商提供的 API 基础地址；faux 不需要 |
+| `LLM_API` | `openai-completions` | 可选 `openai-completions` / `openai-responses` / `anthropic-messages` |
+| `LLM_BASE_URL` | 空 | 实际服务商提供的 API 基础地址，必须配置 |
 | `LLM_API_KEY` | 空 | 实际 API Key，不提交到 Git |
 | `LLM_MODEL` | 空 | 模型 ID，须与 API 类型及服务商匹配 |
 | `LLM_CONTEXT_WINDOW` | `128000` | 提供给模型目录的上下文窗口配置，并非真实配额保证 |
@@ -17,7 +17,6 @@
 | `NOTIFY_WEBHOOK_URL` | 空 | 通用 Webhook 或飞书机器人的完整 URL，含签名时视为敏感凭据 |
 | `NOTIFY_WEBHOOK_KIND` | `generic` | `generic` JSON / `feishu` 文本机器人 |
 | `NOTIFY_MODE` | `errors` | `errors`：仅明确失败的后台任务；`all`：也发成功/提醒/计划触发；`off`：不发送 |
-| `ENABLE_CRASH_DEMO` | `0` | 生产模式是否开放 `POST /api/crash`；正式服务应保持 `0` |
 | `WECHAT_ENABLED` | `0` | 是否启用微信入站转发；需同时启动 `wx-bot` profile |
 | `WECHAT_WEBHOOK_KEY` | 空 | 微信桥到 Node 的入站 Bearer token |
 | `WECHAT_SEND_TOKEN` | 空 | Node 到微信桥本地发送接口的令牌，必须与入站令牌不同 |
@@ -29,13 +28,7 @@
 
 ### 最小可运行配置
 
-**无模型的本地演示：**
-
-```bash
-LLM_API=faux pnpm run dev
-```
-
-**接实际模型：**
+**真实模型配置：**
 
 ```dotenv
 LLM_API=openai-completions
@@ -54,12 +47,13 @@ LLM_API=openai-completions
 LLM_BASE_URL=https://your-provider.example/v1
 LLM_API_KEY=YOUR_OWN_KEY
 LLM_MODEL=your-model-id
-ENABLE_CRASH_DEMO=0
 ```
 
 使用 `docker compose up -d --build`。生产未配置 `DEMO_PASSWORD` 会拒绝启动，不能通过移除鉴权来解决。默认容器映射只绑定到 `127.0.0.1`，需要远程访问时应另外部署 TLS 反向代理。
 
 ## 运行模式与可选通道
+
+`POST /api/crash` 已移除，通过鉴权的同源请求在所有环境返回 404；旧 `ENABLE_CRASH_DEMO` 配置不再生效。自动化测试可以显式使用 `NODE_ENV=test` 和 `LLM_API=faux`，正式服务和桌面应用不使用该模式。
 
 **通知：**不配置 `NOTIFY_WEBHOOK_URL` 时后台任务照常进行，只是不会主动向手机或飞书群发送事件。主分支的 Webhook / 飞书仍是尽力发送：**没有持久通用 Outbox**；出错可能丢失消息。带幂等重试的改造仍在 [PR #6](https://github.com/xiaomoBoy/pi-durable-assistant/pull/6)，不要把未合并功能当作当前能力。Webhook 对端应按 `X-Pi-Event-ID` 去重。
 

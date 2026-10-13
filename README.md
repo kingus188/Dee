@@ -38,25 +38,15 @@
 
 网页支持多会话、会话分叉、流式回复，以及图片和文本附件。可选的微信 iLink 通道用于收发文字及微信提供的语音转写文字。通用 Webhook 和飞书机器人可用于发送任务通知。
 
-## 在本机体验
+## 本机运行
 
-需要 **Node.js ≥ 22.19**、pnpm 12.9.1 和 Git。
+需要 **Node.js ≥ 22.19**、pnpm 12.9.1、Git，以及可用的真实模型服务。
 
 ```bash
 git clone https://github.com/kingus188/pi-durable-assistant.git
 cd pi-durable-assistant
 corepack enable
 pnpm install --frozen-lockfile
-LLM_API=faux pnpm run dev
-```
-
-打开 **http://127.0.0.1:3000**，创建一个会话并发送消息，观察小 D 的状态变化和任务执行过程。
-
-`faux` 不需要 API Key，运行的是固定模拟剧本，适合体验界面和恢复机制。**它不会理解任意自然语言指令，也不会完成上面的真实任务。**
-
-### 接入真实模型
-
-```bash
 cp .env.example .env
 # 用编辑器填写 LLM_API、LLM_BASE_URL、LLM_API_KEY、LLM_MODEL
 set -a
@@ -64,6 +54,8 @@ set -a
 set +a
 pnpm run dev
 ```
+
+打开 **http://127.0.0.1:3000**，直接与小 D 对话。启动前必须完成模型配置；产品不再提供模拟体验或无模型回退。旧模拟会话及未记录模型的历史会话会保留，正式聊天使用新的真实模型会话。
 
 支持 `openai-completions`、`openai-responses` 和 `anthropic-messages` 三类接口。具体模型、图片理解能力、费用和数据处理方式由所选服务商决定。知识库、通知和微信接入需要单独配置，见 [配置说明](docs/CONFIGURATION.md)。
 

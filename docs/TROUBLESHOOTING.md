@@ -12,18 +12,19 @@ docker compose logs --tail=100 pi-durable-assistant
 | 现象 | 常见原因 | 最小排查动作 |
 | --- | --- | --- |
 | `pnpm install --frozen-lockfile` 失败 | Node 版本过旧、依赖源不可访问 | `node -v`（至少 22.19）、核对 pnpm 网络及锁文件 |
-| 本地没有启动 | 端口占用，或真实模型变量不完整 | 先试 `LLM_API=faux pnpm run dev`；必要时指定 `PORT=3001` |
-| `Missing LLM_BASE_URL` 或模型参数错误 | `.env` 未正确加载；faux 与真实模型混淆 | 检查 `LLM_API` 类型和 `LLM_MODEL`、`LLM_BASE_URL`；本地用 `set -a; . ./.env; set +a` |
+| 本地没有启动 | 端口占用，或真实模型变量不完整 | 先核对并注入真实模型配置；端口冲突时指定 `PORT=3001` |
+| `Missing LLM_BASE_URL` 或模型参数错误 | 模型环境变量未正确加载或不完整 | 检查 `LLM_API` 类型和 `LLM_MODEL`、`LLM_BASE_URL`；本地用 `set -a; . ./.env; set +a` |
 | 生产启动失败或 HTTP 401 | `DEMO_PASSWORD` 缺失、错误，或反向代理未传 `Authorization` | 填强密码、用 `curl -u demo` 检查，保留代理鉴权请求头 |
 | 浏览器打不开 Docker 端口 | 默认仅绑定 VPS 的 `127.0.0.1:3300` | 在 VPS 本机测试；远程用 HTTPS 反向代理，不要把 3300 直接暴露公网 |
 | 页面显示「与服务器断开」 | SSE 连接重建、代理/CDN 超时、容器重启 | 看服务日志与反向代理 SSE 超时/缓冲设置；短暂重连不代表任务丢失 |
-| 点击「模拟崩溃」返回 403 | 生产模式默认关闭调试入口 | 正常安全行为；只在隔离演示环境临时开启 `ENABLE_CRASH_DEMO=1` |
+| 旧客户端调用 `/api/crash` 返回 404 | 崩溃演示接口已移除 | 更新客户端；无需再配置 `ENABLE_CRASH_DEMO` |
+| 设置 `LLM_API=faux` 后启动失败 | 产品已停用模拟体验 | 配置真实模型；仅自动化测试可以使用模拟模型 |
 | 任务显示运行中很久 | API 慢、子 Agent 还没完成、上游服务卡住 | 打开任务中心查看子会话/任务状态，结合日志排查，不要直接删除 SQLite |
 | 计划每天发生时间偏移 | 当前是固定分钟间隔，不是时区 Cron | `1440` 表示每隔 24 小时；夏令时变化会影响本地钟点 |
 | 网页关闭后收不到提醒 | `NOTIFY_WEBHOOK_URL` 未配置；默认 `NOTIFY_MODE=errors` | 如需正常提醒也推送，改为 `all` 并测试真实接收端 |
 | 飞书/Webhook 收不到消息 | URL、机器人权限、限流、网络；当前是尽力发送 | 先验证 Webhook 目标；主分支暂无通用持久重试，别误当“保证送达” |
 | 上传失败、提示类型不支持 | 超过 5 个文件、5MiB 图片、200KiB 文本、10MiB 总额，或不支持的格式 | 缩小文件；使用 PNG/JPEG/WebP/GIF 和 UTF-8 文本类文件 |
-| 网页图片上传成功但模型看不到图 | 模型 API 不支持图像，或 `LLM_API=faux` | 选择确实支持多模态的服务商/模型；并核对协议兼容性 |
+| 网页图片上传成功但模型看不到图 | 模型 API 不支持图像 | 选择确实支持多模态的服务商/模型；并核对协议兼容性 |
 | 微信收不到回复 | 未扫码/失效、`WECHAT_ENABLED` 未启用、发送 token 不匹配 | 按 [微信手册](WECHAT.md) 检查 `wx-bot` 状态、允许的发送方和本地接口 |
 | 微信显示 `-14` | iLink 登录过期 | 按 [微信手册](WECHAT.md) 重新 `login primary` |
 | 微信显示 `no context_token` | 没有可用于回复的上下文令牌 | 先从微信主动给 ClawBot 发一条消息；旧阻断消息不自动补发 |
@@ -38,7 +39,6 @@ node --version
 pnpm install --frozen-lockfile
 pnpm run check
 pnpm test
-LLM_API=faux pnpm run dev
 ```
 
 Docker：

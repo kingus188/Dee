@@ -2,7 +2,6 @@ import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModelCatalog, openRuntime, Index } from "@assistant/runtime";
 import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal } from "@assistant/features";
 import { WechatChannel } from "@assistant/channel-wechat";
-import { fauxScript } from "./faux.js";
 import type { AppConfig } from "../config.js";
 import type { AppContext } from "./context.js";
 
@@ -19,7 +18,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
   };
   const notify = createNotifier(config.notifications);
   const tasks = createTaskCenter(notify);
-  const { models, agentModel, label: modelLabel } = await createModelCatalog(config.model, fauxScript);
+  const { models, agentModel, label: modelLabel } = await createModelCatalog(config.model, config.model.api === "faux" ? (await import("./faux.js")).fauxScript : undefined);
   const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel,
     extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge)],
     onReport: error => console.error("Harness 报告：", redact(error instanceof Error ? error.message : error)),

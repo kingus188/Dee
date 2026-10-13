@@ -49,7 +49,8 @@
 pnpm install --frozen-lockfile
 pnpm run check
 pnpm test
-LLM_API=faux pnpm run dev
+# 已配置并注入真实模型环境变量后启动
+pnpm run dev
 ~~~
 
 浏览器访问 http://localhost:3000 ，新建会话，右下角打开「任务中心」。
@@ -62,7 +63,7 @@ cp .env.example .env
 docker compose up -d --build
 ~~~
 
-默认 Docker 对宿主机仅开放 `127.0.0.1:3300`，需要 Nginx HTTPS 反向代理。无密码的本地 Node 开发模式只监听 loopback；`NODE_ENV=production` 时无口令拒绝启动。生产默认禁止模拟崩溃接口，需要演示时才暂时将 `ENABLE_CRASH_DEMO=1`。持久卷不要随意删除，更新前备份。
+默认 Docker 对宿主机仅开放 `127.0.0.1:3300`，需要 Nginx HTTPS 反向代理。无密码的本地 Node 开发模式只监听 loopback；`NODE_ENV=production` 时无口令拒绝启动。模拟崩溃接口已移除，`ENABLE_CRASH_DEMO` 不再生效。持久卷不要随意删除，更新前备份。
 
 通知配置：
 

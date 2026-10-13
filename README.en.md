@@ -38,25 +38,15 @@ These examples require a real model. Results depend on the selected model and th
 
 The web interface supports multiple conversations, conversation forks, streamed responses, and image/text attachments. An optional WeChat iLink bridge handles text and voice-transcription text provided by WeChat. Generic Webhooks and Feishu bots can deliver task notifications.
 
-## Try it locally
+## Run locally
 
-Requires **Node.js ≥ 22.19**, pnpm 12.9.1 and Git.
+Requires **Node.js ≥ 22.19**, pnpm 12.9.1, Git and a configured model service.
 
 ```bash
 git clone https://github.com/kingus188/pi-durable-assistant.git
 cd pi-durable-assistant
 corepack enable
 pnpm install --frozen-lockfile
-LLM_API=faux pnpm run dev
-```
-
-Open **http://127.0.0.1:3000**, create a conversation and send a message to see Xiao D's state changes and task execution.
-
-`faux` needs no API key. It runs a fixed script for exploring the interface and recovery behavior. **It does not understand arbitrary instructions or perform the real tasks listed above.**
-
-### Connect a real model
-
-```bash
 cp .env.example .env
 # Set LLM_API, LLM_BASE_URL, LLM_API_KEY and LLM_MODEL in an editor
 set -a
@@ -64,6 +54,8 @@ set -a
 set +a
 pnpm run dev
 ```
+
+Open **http://127.0.0.1:3000** and talk to Xiao D. Configure a real model before starting; the product no longer offers a simulated demo or a model-free fallback. Previous simulated conversations and legacy conversations without an explicit model remain stored, while real-model chat starts in a separate conversation.
 
 Supported API protocols are `openai-completions`, `openai-responses` and `anthropic-messages`. Model availability, image understanding, costs and data handling depend on your provider. Knowledge search, notifications and WeChat need separate configuration; see [Configuration](docs/CONFIGURATION.md).
 

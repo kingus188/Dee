@@ -67,12 +67,11 @@ if (!app.requestSingleInstanceLock()) {
   const startup = app.whenReady().then(async () => {
     if (quitting) return;
     const env = process.env;
-    const config = readConfig({ ...env, LLM_API: env.LLM_API || (env.LLM_MODEL ? "openai-completions" : "faux") });
+    const config = readConfig({ ...env, NODE_ENV: "production" });
     config.port = 0;
     config.dataDir = join(app.getPath("userData"), "data");
     config.password = randomBytes(32).toString("hex");
     config.production = true;
-    config.enableCrashDemo = false;
     config.wechat.enabled = false;
     service = await startServer(config, "127.0.0.1", new URL("../../web/dist/", import.meta.url));
     const origin = service.origin;

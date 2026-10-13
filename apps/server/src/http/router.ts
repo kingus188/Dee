@@ -27,13 +27,6 @@ export function createRouter(context: AppContext, webRoot: URL) {
      const meta = await harness.snapshot(Meta, ctx);
      return sendJson(res, 200, { model: modelLabel, api: config.model.api, pid: process.pid, startedAt, boots: meta?.boots ?? 0 });
    }
-   if (method === "POST" && path === "/api/crash") {
-     if (config.production && !config.enableCrashDemo) throw new HttpError(403, "生产环境已禁用模拟崩溃");
-     sendJson(res, 200, { ok: true });
-     console.log("收到模拟崩溃请求，200ms 后退出");
-     setTimeout(() => process.exit(1), 200);
-     return;
-   }
    const manage = path.match(/^\/api\/conversations\/(\d+)\/(management|export\.md|schedules|background|reminders)(?:\/([0-9a-f-]+))?(?:\/(pause|resume|cancel|stop))?$/);
    if (manage) return taskRoute(req, res, manage);
    return conversationRoute(req, res, url);

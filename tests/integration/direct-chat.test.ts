@@ -18,6 +18,7 @@ test("固定聊天并发打开不重复创建，更换话题与重启都保留�
     await post(origin, `/api/conversations/${id}/schedules`, { text: "稍后整理资料", minutesFromNow: 60 });
     await post(origin, `/api/conversations/${id}/messages`, { text: "先聊今天的安排", mode: "steer" });
     await readView(origin, id, view => view.entries.some(entry => entry.text === "先聊今天的安排"));
+    await readView(origin, id, view => view.entries.some(entry => entry.kind === "assistant" && entry.text === "演示任务完成。"));
     await post(origin, `/api/conversations/${id}/messages`, { text: "换个话题，晚餐吃什么", mode: "steer" });
     const view = await readView(origin, id, value => value.entries.some(entry => entry.text === "换个话题，晚餐吃什么"));
     assert.ok(view.entries.some(entry => entry.text === "先聊今天的安排"));

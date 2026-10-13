@@ -11,17 +11,19 @@ test("embedded hosts can serve web assets independently of the server package lo
   let service: Awaited<ReturnType<typeof startServer>> | undefined;
   try {
     await writeFile(join(directory, "index.html"), "<h1>Desktop assets</h1>");
-    const config = readConfig({ LLM_API: "faux", DATA_DIR: join(directory, "data"), PORT: "0", NOTIFY_MODE: "off" });
+    const config = readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: join(directory, "data"), PORT: "0", NOTIFY_MODE: "off" });
     service = await startServer(config, "127.0.0.1", pathToFileURL(directory + "/"));
     const response = await fetch(service.origin);
     assert.equal(response.status, 200);
     assert.equal(await response.text(), "<h1>Desktop assets</h1>");
+    assert.equal((await fetch(service.origin + "/api/crash", { method: "POST" })).status, 404);
+    assert.equal((await fetch(service.origin + "/api/info")).status, 200);
   } finally { await service?.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
 test("embedded server authenticates, serves web assets, closes and reopens persisted data", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "pi-desktop-test-"));
-  const config = readConfig({ LLM_API: "faux", DATA_DIR: dataDir, PORT: "0", NODE_ENV: "production", DEMO_PASSWORD: "test-only-password", NOTIFY_MODE: "off" });
+  const config = readConfig({ LLM_API: "openai-completions", LLM_BASE_URL: "http://127.0.0.1:1/v1", LLM_MODEL: "test-unused", DATA_DIR: dataDir, PORT: "0", NODE_ENV: "production", DEMO_PASSWORD: "test-only-password", NOTIFY_MODE: "off" });
   const headers = { authorization: "Basic " + Buffer.from("demo:test-only-password").toString("base64") };
   let running: Awaited<ReturnType<typeof startServer>> | undefined;
   try {
@@ -32,7 +34,7 @@ test("embedded server authenticates, serves web assets, closes and reopens persi
     const page = await fetch(running.origin, { headers });
     assert.equal(page.status, 200);
     assert.match(await page.text(), /\/app\.js/);
-    assert.equal((await fetch(running.origin + "/api/crash", { method: "POST", headers })).status, 403);
+    assert.equal((await fetch(running.origin + "/api/crash", { method: "POST", headers })).status, 404);
     const origin = running.origin;
     await Promise.all([running.close(), running.close()]);
     await assert.rejects(fetch(origin + "/api/info"));
@@ -48,7 +50,7 @@ test("a port conflict releases storage before reporting the startup failure", as
   let first: Awaited<ReturnType<typeof startServer>> | undefined;
   let second: Awaited<ReturnType<typeof startServer>> | undefined;
   try {
-    const config = readConfig({ LLM_API: "faux", DATA_DIR: firstDir, PORT: "0", NOTIFY_MODE: "off" });
+    const config = readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: firstDir, PORT: "0", NOTIFY_MODE: "off" });
     first = await startServer(config);
     await assert.rejects(startServer({ ...config, dataDir: secondDir, port: Number(new URL(first.origin).port) }), { code: "EADDRINUSE" });
     second = await startServer({ ...config, dataDir: secondDir });

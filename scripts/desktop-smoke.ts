@@ -20,7 +20,7 @@ export function verifyDesktopPackage(directory: string) {
     const dataDir = await mkdtemp(join(tmpdir(), "pi-desktop-smoke-"));
     let service;
     try {
-      service = await startServer(readConfig({ LLM_API: "faux", DATA_DIR: dataDir, PORT: "0", NOTIFY_MODE: "off" }), "127.0.0.1", new URL("../../web/dist/", entry));
+      service = await startServer(readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: dataDir, PORT: "0", NOTIFY_MODE: "off" }), "127.0.0.1", new URL("../../web/dist/", entry));
       for (const path of ["/", "/app.js", "/style.css", "/tasks.css", "/api/info"]) {
         assert.equal((await fetch(service.origin + path)).status, 200, path);
       }

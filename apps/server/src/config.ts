@@ -1,8 +1,10 @@
 export function readConfig(env: NodeJS.ProcessEnv) {
+  const api = env.LLM_API || "openai-completions";
+  if (api === "faux" && env.NODE_ENV !== "test") throw new Error("模拟体验已停用，请配置真实模型；faux 仅供自动化测试使用");
   return {
     port: Number(env.PORT || 3000), dataDir: env.DATA_DIR || "./data", password: env.DEMO_PASSWORD || "",
-    production: env.NODE_ENV === "production", enableCrashDemo: env.ENABLE_CRASH_DEMO === "1",
-    model: { api: env.LLM_API || "openai-completions", baseUrl: env.LLM_BASE_URL || "", model: env.LLM_MODEL || "",
+    production: env.NODE_ENV === "production",
+    model: { api, baseUrl: env.LLM_BASE_URL || "", model: env.LLM_MODEL || "",
       apiKey: env.LLM_API_KEY || "", contextWindow: Number(env.LLM_CONTEXT_WINDOW || 128000), maxTokens: Number(env.LLM_MAX_TOKENS || 8192) },
     knowledge: { OBSIDIAN_ROOT: env.OBSIDIAN_ROOT || "", OBSIDIAN_ALLOW: env.OBSIDIAN_ALLOW || "" },
     notifications: { url: env.NOTIFY_WEBHOOK_URL || "", mode: env.NOTIFY_MODE || "errors", kind: env.NOTIFY_WEBHOOK_KIND || "generic" },
