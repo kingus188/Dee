@@ -24,6 +24,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     teamsStore = openTeamsStore(config.dataDir);
     episodeStore = openEpisodeStore(config.dataDir);
     config = { ...config, model: modelSettings.model, wechat: wechatSettings.active };
+    if (config.offline) config = { ...config, wechat: { ...config.wechat, enabled: false }, notifications: { ...config.notifications, mode: "off" } };
     if (config.wechat.enabled && (!config.wechat.webhookKey || !config.wechat.sendToken)) throw new Error("微信启用时必须设置 WECHAT_WEBHOOK_KEY 和 WECHAT_SEND_TOKEN");
     // 默认放在数据目录下；数据目录可能在读配置之后才被宿主改写，所以这里再推导。
     const materialsRoot = config.materialsRoot || join(config.dataDir, "materials");
@@ -41,7 +42,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     const { models, agentModel, label: modelLabel, configured: modelConfigured } = await createModelCatalog(config.model, config.model.api === "faux" ? (await import("./faux.js")).fauxScript : undefined);
     if (config.wechat.enabled && !modelConfigured) throw new Error("启用微信通道前请先保存模型配置");
     const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
-      extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createEpisodes(episodeStore), createTeamsInbox(teamsStore), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender))],
+      extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createEpisodes(episodeStore), createTeamsInbox(teamsStore), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender, config.offline))],
       onReport: error => console.error("Harness 报告：", redact(error instanceof Error ? error.message : error)),
     }, ctx);
     const wechat = config.wechat.enabled ? new WechatChannel({ ...runtime, indexDoc: Index, context: ctx, ...config.wechat }) : null;
