@@ -6,6 +6,7 @@ ARG WXBOT_COMMIT=57ed5f56eedce782e378483f762c7565c45ade5d
 RUN git clone https://github.com/lawrencewzen/wx-bot.git /src && \
     git -C /src checkout --detach "$WXBOT_COMMIT"
 COPY deploy/wechat/patch_upstream.py /tmp/patch_upstream.py
+COPY deploy/wechat/extra /tmp/extra
 RUN python3 /tmp/patch_upstream.py /src && \
     cd /src && go test ./... && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/wx-bot ./cmd/wx-bot

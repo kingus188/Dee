@@ -2,6 +2,7 @@
 严格匹配源码片段；上游变化时构建必须失败，禁止静默生成不兼容镜像。
 """
 from pathlib import Path
+import subprocess
 import sys
 
 root = Path(sys.argv[1])
@@ -139,5 +140,29 @@ for name in ("TestPollerTwoImagesDistinctFiles", "TestPollerHasContextTokenFromC
     part = part.replace("\tcancel()\n", "\tcancel()\n\t<-done\n", 1)
     test_source = test_source[:start] + part + test_source[end:]
 test_file.write_text(test_source)
+
+# 用户在微信里"引用回复"时，iLink 会在消息条目里带 ref_msg（被引用消息的摘要和/或内容）。
+# 上游的 MessageItem 没有这个字段，引用内容在 JSON 解码时被丢弃，下游 Agent 不知道用户回复的是哪一条。
+replace_once("internal/ilink/types.go",
+    '\tVideoItem *VideoItem `json:"video_item,omitempty"`\n}',
+    '\tVideoItem *VideoItem `json:"video_item,omitempty"`\n\tRefMsg    *RefMessage `json:"ref_msg,omitempty"`\n}\n\n'
+    '// RefMessage 是用户引用的那条消息：Title 是摘要，MessageItem 是内容（新版客户端可能只有摘要）。\n'
+    'type RefMessage struct {\n\tTitle       string       `json:"title,omitempty"`\n\tMessageItem *MessageItem `json:"message_item,omitempty"`\n}')
+replace_once("internal/bridge/poller.go",
+    '\t\t\tif item.TextItem != nil && item.TextItem.Text != "" {\n\t\t\t\ttexts = append(texts, item.TextItem.Text)\n\t\t\t}',
+    '\t\t\tif item.TextItem != nil && item.TextItem.Text != "" {\n'
+    '\t\t\t\tif quote := quoteText(item.RefMsg); quote != "" {\n'
+    '\t\t\t\t\tp.log().Info("inbound quote", "has_title", item.RefMsg.Title != "", "has_item", item.RefMsg.MessageItem != nil)\n'
+    '\t\t\t\t\ttexts = append(texts, quote)\n'
+    '\t\t\t\t}\n'
+    '\t\t\t\ttexts = append(texts, item.TextItem.Text)\n'
+    '\t\t\t}')
+# 补丁引入的字段改变了结构体对齐，交给 gofmt 统一格式。
+subprocess.run(["gofmt", "-w", str(root / "internal/ilink/types.go")], check=True)
+# 引用拼接函数和它的测试放在 extra/，避免在补丁脚本里内嵌 Go 源码。
+extra = Path(__file__).resolve().parent / "extra"
+for source in sorted(extra.rglob("*.go")):
+    target = root / "internal" / source.relative_to(extra)
+    target.write_text(source.read_text())
 
 print("wx-bot compatibility and cursor patch applied")
