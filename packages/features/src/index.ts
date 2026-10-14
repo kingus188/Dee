@@ -9,3 +9,4 @@ export * from "./episodes/index.js";
 export * from "./attachments/index.js";
 export * from "./assistant.js";
 export * from "./teams/index.js";
+export * from "./teams/reply.js";

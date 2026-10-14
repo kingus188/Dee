@@ -63,3 +63,31 @@ test("按聊天查询：群名匹配群聊，姓名匹配私聊整段对话", as
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("按名称找聊天、草稿只取本会话最近未发送的、占用后不能重复发送", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-teams-store-"));
+  const store = openTeamsStore(directory);
+  try {
+    store.record({ ...base, id: "p:1", chatId: "p", senderName: "张三", createdAt: at(30) });
+    store.record({ ...base, id: "p2:1", chatId: "p2", senderName: "张三丰", createdAt: at(29) });
+    store.record({ ...base, id: "g:1", chatId: "g", chatType: "group", senderName: "李四", chatTopic: "项目群", createdAt: at(28) });
+    assert.deepEqual(store.findChats("张三").map(chat => chat.label), ["私聊「张三」"], "完全同名优先");
+    assert.equal(store.findChats("张").length, 2, "模糊匹配多个时全部返回，由调用方要求指明");
+    assert.deepEqual(store.findChats("项目").map(chat => chat.chatId), ["g"]);
+    assert.deepEqual(store.findChats("不存在"), []);
+
+    const first = store.saveDraft({ conversationId: 1, chatId: "p", label: "私聊「张三」", text: "旧稿" });
+    const second = store.saveDraft({ conversationId: 1, chatId: "p", label: "私聊「张三」", text: "新稿" });
+    store.saveDraft({ conversationId: 2, chatId: "g", label: "群聊「项目群」", text: "别的会话" });
+    assert.equal(store.latestDraft(1, 60_000)?.text, "新稿");
+    assert.equal(store.latestDraft(3, 60_000), undefined);
+    assert.equal(store.claim(second), true);
+    assert.equal(store.claim(second), false, "已占用的草稿不能再发");
+    assert.equal(store.latestDraft(1, 60_000)?.id, first, "新稿已发出，最近未发送的是旧稿");
+    store.release(second);
+    assert.equal(store.latestDraft(1, 60_000)?.id, second, "失败释放后可重试");
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

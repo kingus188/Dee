@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { TeamsInboxQuery, TeamsMessageRow } from "@assistant/features";
+import type { TeamsChatRef, TeamsDraft, TeamsInboxQuery, TeamsMessageRow } from "@assistant/features";
 
 export type TeamsMessage = {
   id: string; chatId: string; chatType: string; senderId: string; senderName: string;
@@ -18,7 +18,10 @@ export function openTeamsStore(dataDir: string) {
         id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, chat_type TEXT NOT NULL,
         sender_id TEXT NOT NULL, sender_name TEXT NOT NULL, direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),
         text TEXT NOT NULL, created_at TEXT NOT NULL, important INTEGER NOT NULL DEFAULT 0, pushed_at TEXT, replied_at TEXT);
-      CREATE INDEX IF NOT EXISTS teams_messages_chat ON teams_messages (chat_id, created_at)`);
+      CREATE INDEX IF NOT EXISTS teams_messages_chat ON teams_messages (chat_id, created_at);
+      CREATE TABLE IF NOT EXISTS teams_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL, chat_id TEXT NOT NULL, label TEXT NOT NULL,
+        text TEXT NOT NULL, created_at TEXT NOT NULL, sent_at TEXT)`);
     // 旧库没有群名列：一次性补上，历史行保持为空。
     if (!(db.prepare("PRAGMA table_info(teams_messages)").all() as { name: string }[]).some(column => column.name === "chat_topic")) db.exec("ALTER TABLE teams_messages ADD COLUMN chat_topic TEXT");
     db.prepare("DELETE FROM teams_messages WHERE created_at < ?").run(iso(Date.now() - RETENTION_DAYS * 86_400_000));
@@ -67,6 +70,31 @@ export function openTeamsStore(dataDir: string) {
       const sql = `SELECT * FROM teams_messages ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY created_at DESC LIMIT ?`;
       return db.prepare(sql).all(...params, query.limit).map(row);
     },
+    // 按群名（群聊）或对方姓名（私聊）找聊天；完全同名的优先，避免「张三」误匹配「张三丰」。
+    findChats(name: string): TeamsChatRef[] {
+      const like = `%${name.replace(/[\\%_]/g, "\\$&")}%`;
+      const rows = db.prepare("SELECT chat_id, chat_type, chat_topic, sender_name FROM teams_messages WHERE chat_topic LIKE ? ESCAPE '\\' OR (chat_type = 'oneOnOne' AND direction = 'in' AND sender_name LIKE ? ESCAPE '\\') ORDER BY created_at DESC").all(like, like) as Record<string, string | null>[];
+      const found = new Map<string, TeamsChatRef & { name: string }>();
+      for (const r of rows) {
+        const id = String(r.chat_id);
+        if (found.has(id)) continue;
+        const oneOnOne = r.chat_type === "oneOnOne";
+        const label = String(oneOnOne ? r.sender_name : r.chat_topic);
+        found.set(id, { chatId: id, label: oneOnOne ? `私聊「${label}」` : `群聊「${label}」`, name: label });
+      }
+      const all = [...found.values()];
+      const exact = all.filter((chat) => chat.name === name);
+      return (exact.length === 1 ? exact : all).map(({ chatId, label }) => ({ chatId, label }));
+    },
+    saveDraft(draft: TeamsChatRef & { conversationId: number; text: string }) {
+      return Number(db.prepare("INSERT INTO teams_drafts (conversation_id, chat_id, label, text, created_at) VALUES (?, ?, ?, ?, ?)").run(draft.conversationId, draft.chatId, draft.label, draft.text, iso(Date.now())).lastInsertRowid);
+    },
+    latestDraft(conversationId: number, maxAgeMs: number): TeamsDraft | undefined {
+      const r = db.prepare("SELECT * FROM teams_drafts WHERE conversation_id = ? AND sent_at IS NULL AND created_at >= ? ORDER BY id DESC LIMIT 1").get(conversationId, iso(Date.now() - maxAgeMs)) as Record<string, unknown> | undefined;
+      return r && { id: Number(r.id), chatId: String(r.chat_id), label: String(r.label), text: String(r.text) };
+    },
+    claim: (id: number) => Number(db.prepare("UPDATE teams_drafts SET sent_at = ? WHERE id = ? AND sent_at IS NULL").run(iso(Date.now()), id).changes) === 1,
+    release(id: number) { db.prepare("UPDATE teams_drafts SET sent_at = NULL WHERE id = ?").run(id); },
     close: () => db.close(),
   };
 }

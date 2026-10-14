@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { readConfig, startServer } from "@assistant/server";
 import { existsSync, readFileSync } from "node:fs";
 import { createGinaTokenProvider } from "./teams-gina.js";
-import { createTeamsTokenProvider, type TeamsAccount } from "./teams-auth.js";
+import { createTeamsTokenProvider, SEND_SCOPE, type TeamsAccount } from "./teams-auth.js";
+import { sendTeamsMessage } from "./teams-send.js";
 import type { ImportantRules } from "./teams-rules.js";
 import { startTeamsForward } from "./teams-forward.js";
 import { startWechatBot } from "./wechat-bot.js";
@@ -99,6 +100,8 @@ if (!app.requestSingleInstanceLock()) {
         const getToken = account ? createTeamsTokenProvider(account) : ginaHome ? createGinaTokenProvider(ginaHome, env) : undefined;
         if (!getToken) dialog.showErrorBox("Teams 转发", "teams-forward-config.json 需要 account 或 ginaHome");
         else {
+          const sendToken = account ? createTeamsTokenProvider(account, SEND_SCOPE) : getToken;
+          service.teamsSender.send = (chatId, text) => sendTeamsMessage(sendToken, chatId, text);
           const stopBot = stopWechat;
           const stopForward = startTeamsForward({ dir, store: service.teamsStore, getToken, rules: important, sendURL: service.wechat.sendURL, sendToken: service.wechat.sendToken,
             inject: { url: `${origin}/channels/wechat/incoming`, webhookKey: service.wechat.webhookKey },
