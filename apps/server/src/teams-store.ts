@@ -47,6 +47,10 @@ export function openTeamsStore(dataDir: string) {
       return db.prepare("SELECT * FROM teams_messages WHERE chat_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT ?")
         .all(chatId, before, limit).map(row).reverse();
     },
+    // 晚于 after 的全部消息（含自己发出的），按时间正序，供整理情景摘要。
+    messagesSince(after: string, limit: number) {
+      return db.prepare("SELECT * FROM teams_messages WHERE created_at > ? ORDER BY created_at LIMIT ?").all(after, limit).map(row);
+    },
     markPushed(id: string) { db.prepare("UPDATE teams_messages SET pushed_at = ? WHERE id = ?").run(iso(Date.now()), id); },
     list(query: TeamsInboxQuery): TeamsMessageRow[] {
       const where: string[] = [];

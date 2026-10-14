@@ -34,11 +34,12 @@ test("recentInChat 返回同聊天早于新消息的最近上文，并带群名"
   const directory = await mkdtemp(join(tmpdir(), "pi-teams-store-"));
   const store = openTeamsStore(directory);
   try {
+    const cutoff = at(10);
     store.record({ ...base, id: "c1:1", createdAt: at(30), chatTopic: "项目群" });
     store.record({ ...base, id: "c1:2", direction: "out", senderId: "me", senderName: "我", text: "收到", createdAt: at(20), important: false });
     store.record({ ...base, id: "c2:1", chatId: "c2", createdAt: at(15) });
-    store.record({ ...base, id: "c1:3", text: "好的", createdAt: at(10) });
-    const history = store.recentInChat("c1", at(10), 5);
+    store.record({ ...base, id: "c1:3", text: "好的", createdAt: cutoff });
+    const history = store.recentInChat("c1", cutoff, 5);
     assert.deepEqual(history.map(item => item.text), ["在吗", "收到"], "只含 c1 且早于新消息，按时间正序");
     assert.equal(history[0].chatTopic, "项目群");
   } finally {

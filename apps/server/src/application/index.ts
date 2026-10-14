@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModelCatalog, openRuntime, Index } from "@assistant/runtime";
-import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createTeamsInbox } from "@assistant/features";
+import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createEpisodes, createTeamsInbox } from "@assistant/features";
 import { mkdir } from "node:fs/promises";
 import { WechatChannel } from "@assistant/channel-wechat";
 import type { AppConfig } from "../config.js";
@@ -8,15 +8,19 @@ import type { AppContext } from "./context.js";
 import { openModelSettings } from "../model-settings.js";
 import { openWechatSettings } from "../wechat-settings.js";
 import { openTeamsStore } from "../teams-store.js";
+import { openEpisodeStore } from "../episode-store.js";
+import { createSummarizer } from "../episode-model.js";
 
 export async function createApplication(config: AppConfig): Promise<AppContext> {
   if (config.production && !config.password) throw new Error("生产环境必须设置 DEMO_PASSWORD");
   const modelSettings = await openModelSettings(config.dataDir, config.model);
   let wechatSettings: ReturnType<typeof openWechatSettings> | undefined;
   let teamsStore: ReturnType<typeof openTeamsStore> | undefined;
+  let episodeStore: ReturnType<typeof openEpisodeStore> | undefined;
   try {
     wechatSettings = openWechatSettings(config.dataDir, config.wechat);
     teamsStore = openTeamsStore(config.dataDir);
+    episodeStore = openEpisodeStore(config.dataDir);
     config = { ...config, model: modelSettings.model, wechat: wechatSettings.active };
     if (config.wechat.enabled && (!config.wechat.webhookKey || !config.wechat.sendToken)) throw new Error("微信启用时必须设置 WECHAT_WEBHOOK_KEY 和 WECHAT_SEND_TOKEN");
     const redact = modelSettings.redact;
@@ -32,14 +36,14 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     const { models, agentModel, label: modelLabel, configured: modelConfigured } = await createModelCatalog(config.model, config.model.api === "faux" ? (await import("./faux.js")).fauxScript : undefined);
     if (config.wechat.enabled && !modelConfigured) throw new Error("启用微信通道前请先保存模型配置");
     const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
-      extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(config.materialsRoot), createTeamsInbox(teamsStore)],
+      extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(config.materialsRoot), createEpisodes(episodeStore), createTeamsInbox(teamsStore)],
       onReport: error => console.error("Harness 报告：", redact(error instanceof Error ? error.message : error)),
     }, ctx);
     const wechat = config.wechat.enabled ? new WechatChannel({ ...runtime, indexDoc: Index, context: ctx, ...config.wechat }) : null;
     try {
       if (wechat) await wechat.start();
       const taskGraph = await runtime.harness.taskGraph(ctx);
-      return { ...runtime, config, ctx, taskGraph, tasks, wechat, modelSettings, wechatSettings, teamsStore, modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
+      return { ...runtime, config, ctx, taskGraph, tasks, wechat, modelSettings, wechatSettings, teamsStore, episodeStore, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
     } catch (error) {
       wechat?.stop();
       await runtime.harness.close(ctx);
@@ -48,6 +52,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
   } catch (error) {
     wechatSettings?.close();
     teamsStore?.close();
+    episodeStore?.close();
     modelSettings.close();
     throw error;
   }

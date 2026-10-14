@@ -7,11 +7,13 @@ import type { AppConfig } from "../config.js";
 import type { openModelSettings } from "../model-settings.js";
 import type { openWechatSettings } from "../wechat-settings.js";
 import type { TeamsStore } from "../teams-store.js";
+import type { EpisodeStore } from "../episode-store.js";
 export type AppContext = Runtime & {
   config: AppConfig; ctx: Context; taskGraph: AttachedReplicatedState<TaskGraph>;
   tasks: ReturnType<typeof createTaskCenter>; wechat: WechatChannel | null;
   modelSettings: Awaited<ReturnType<typeof openModelSettings>>;
   wechatSettings: ReturnType<typeof openWechatSettings>;
   teamsStore: TeamsStore;
+  episodeStore: EpisodeStore; summarize: (prompt: string) => Promise<string>;
   modelLabel: string; modelConfigured: boolean; startedAt: string; redact: (value: unknown) => string; exitIfFatal: (error: unknown) => void;
 };

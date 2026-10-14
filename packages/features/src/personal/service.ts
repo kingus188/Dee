@@ -20,6 +20,8 @@ const SKILL_PENDING_MAX = 20;
 // 常见密钥形态；记忆会进入每轮提示词，不能存凭据。
 const SECRET_PATTERN = /sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|(?:password|passwd|secret|token|api[_-]?key|密码|密钥)\s*[:=：]\s*\S{6,}/i;
 
+export const hasSecret = (text: string) => SECRET_PATTERN.test(text);
+
 type Decision = { id: string; status: "pending" | "approved" | "rejected"; source: "user" | "agent"; conversationId: ConversationId | null; createdAt: number; decidedAt: number | null };
 export type MemoryItem = Decision & { text: string };
 export type SkillItem = Decision & { name: string; description: string; body: string };
