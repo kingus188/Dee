@@ -21,7 +21,8 @@ export function openTeamsStore(dataDir: string) {
       CREATE INDEX IF NOT EXISTS teams_messages_chat ON teams_messages (chat_id, created_at);
       CREATE TABLE IF NOT EXISTS teams_drafts (
         id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL, chat_id TEXT NOT NULL, label TEXT NOT NULL,
-        text TEXT NOT NULL, created_at TEXT NOT NULL, sent_at TEXT)`);
+        text TEXT NOT NULL, created_at TEXT NOT NULL, sent_at TEXT, explicit INTEGER NOT NULL DEFAULT 0)`);
+    if (!(db.prepare("PRAGMA table_info(teams_drafts)").all() as { name: string }[]).some(column => column.name === "explicit")) db.exec("ALTER TABLE teams_drafts ADD COLUMN explicit INTEGER NOT NULL DEFAULT 0");
     // 旧库没有群名列：一次性补上，历史行保持为空。
     if (!(db.prepare("PRAGMA table_info(teams_messages)").all() as { name: string }[]).some(column => column.name === "chat_topic")) db.exec("ALTER TABLE teams_messages ADD COLUMN chat_topic TEXT");
     db.prepare("DELETE FROM teams_messages WHERE created_at < ?").run(iso(Date.now() - RETENTION_DAYS * 86_400_000));
@@ -86,12 +87,17 @@ export function openTeamsStore(dataDir: string) {
       const exact = all.filter((chat) => chat.name === name);
       return (exact.length === 1 ? exact : all).map(({ chatId, label }) => ({ chatId, label }));
     },
-    saveDraft(draft: TeamsChatRef & { conversationId: number; text: string }) {
-      return Number(db.prepare("INSERT INTO teams_drafts (conversation_id, chat_id, label, text, created_at) VALUES (?, ?, ?, ?, ?)").run(draft.conversationId, draft.chatId, draft.label, draft.text, iso(Date.now())).lastInsertRowid);
+    saveDraft(draft: TeamsChatRef & { conversationId: number; text: string; explicit: boolean }) {
+      return Number(db.prepare("INSERT INTO teams_drafts (conversation_id, chat_id, label, text, created_at, explicit) VALUES (?, ?, ?, ?, ?, ?)").run(draft.conversationId, draft.chatId, draft.label, draft.text, iso(Date.now()), draft.explicit ? 1 : 0).lastInsertRowid);
+    },
+    // 用户在该聊天里最近一次来信之后自己发出的消息；没有则说明还没回复。
+    alreadyReplied(chatId: string) {
+      const r = db.prepare("SELECT text, created_at FROM teams_messages WHERE chat_id = ? AND direction = 'out' AND created_at > COALESCE((SELECT MAX(created_at) FROM teams_messages WHERE chat_id = ? AND direction = 'in'), '') ORDER BY created_at DESC LIMIT 1").get(chatId, chatId) as { text: string; created_at: string } | undefined;
+      return r && { text: r.text, at: r.created_at };
     },
     latestDraft(conversationId: number, maxAgeMs: number): TeamsDraft | undefined {
       const r = db.prepare("SELECT * FROM teams_drafts WHERE conversation_id = ? AND sent_at IS NULL AND created_at >= ? ORDER BY id DESC LIMIT 1").get(conversationId, iso(Date.now() - maxAgeMs)) as Record<string, unknown> | undefined;
-      return r && { id: Number(r.id), chatId: String(r.chat_id), label: String(r.label), text: String(r.text) };
+      return r && { id: Number(r.id), chatId: String(r.chat_id), label: String(r.label), text: String(r.text), explicit: r.explicit === 1 };
     },
     claim: (id: number) => Number(db.prepare("UPDATE teams_drafts SET sent_at = ? WHERE id = ? AND sent_at IS NULL").run(iso(Date.now()), id).changes) === 1,
     release(id: number) { db.prepare("UPDATE teams_drafts SET sent_at = NULL WHERE id = ?").run(id); },

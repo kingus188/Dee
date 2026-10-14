@@ -76,16 +76,33 @@ test("按名称找聊天、草稿只取本会话最近未发送的、占用后�
     assert.deepEqual(store.findChats("项目").map(chat => chat.chatId), ["g"]);
     assert.deepEqual(store.findChats("不存在"), []);
 
-    const first = store.saveDraft({ conversationId: 1, chatId: "p", label: "私聊「张三」", text: "旧稿" });
-    const second = store.saveDraft({ conversationId: 1, chatId: "p", label: "私聊「张三」", text: "新稿" });
-    store.saveDraft({ conversationId: 2, chatId: "g", label: "群聊「项目群」", text: "别的会话" });
+    const first = store.saveDraft({ conversationId: 1, chatId: "p", label: "私聊「张三」", text: "旧稿", explicit: false });
+    const second = store.saveDraft({ conversationId: 1, chatId: "p", label: "私聊「张三」", text: "新稿", explicit: true });
+    store.saveDraft({ conversationId: 2, chatId: "g", label: "群聊「项目群」", text: "别的会话", explicit: false });
     assert.equal(store.latestDraft(1, 60_000)?.text, "新稿");
+    assert.deepEqual([store.latestDraft(1, 60_000)?.explicit], [true], "explicit 标记随草稿保存");
     assert.equal(store.latestDraft(3, 60_000), undefined);
     assert.equal(store.claim(second), true);
     assert.equal(store.claim(second), false, "已占用的草稿不能再发");
     assert.equal(store.latestDraft(1, 60_000)?.id, first, "新稿已发出，最近未发送的是旧稿");
     store.release(second);
     assert.equal(store.latestDraft(1, 60_000)?.id, second, "失败释放后可重试");
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("已回复检测：我在最近一次来信之后发过消息才算已回复", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-teams-store-"));
+  const store = openTeamsStore(directory);
+  try {
+    store.record({ ...base, id: "r:1", chatId: "r", createdAt: at(30) });
+    assert.equal(store.alreadyReplied("r"), undefined, "只有来信，没回复");
+    store.record({ ...base, id: "r:2", chatId: "r", direction: "out", senderId: "me", senderName: "我", text: "好的", createdAt: at(20), important: false });
+    assert.equal(store.alreadyReplied("r")?.text, "好的");
+    store.record({ ...base, id: "r:3", chatId: "r", createdAt: at(10), text: "又来一条" });
+    assert.equal(store.alreadyReplied("r"), undefined, "对方又来新消息后，之前的回复不再算");
   } finally {
     store.close();
     await rm(directory, { recursive: true, force: true });

@@ -8,6 +8,7 @@ export function createTeamsReplyPort(store: TeamsStore, sender: TeamsSender): Te
   return {
     findChats: name => store.findChats(name),
     saveDraft: draft => store.saveDraft(draft),
+    alreadyReplied: chatId => store.alreadyReplied(chatId),
     latestDraft: (conversationId, maxAgeMs) => store.latestDraft(conversationId, maxAgeMs),
     claim: id => store.claim(id),
     release: id => store.release(id),
