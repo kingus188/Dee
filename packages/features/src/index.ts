@@ -4,6 +4,7 @@ export * from "./tasks/notifications.js";
 export { Delegate } from "./tasks/delegation.js";
 export * from "./personal/index.js";
 export * from "./knowledge/index.js";
+export * from "./materials/index.js";
 export * from "./attachments/index.js";
 export * from "./assistant.js";
 export * from "./teams/index.js";

@@ -35,6 +35,7 @@ API Key 输入为空时保留原值；更换 Provider 或 Base URL 时必须重�
 | `WECHAT_SEND_URL` | `http://127.0.0.1:18790/v1/send` | 共用网络命名空间内的微信发送地址，通常不要更改 |
 | `OBSIDIAN_ROOT` | 空 | 只读 Obsidian 仓库根目录。留空时知识库工具会说明未启用，不影响聊天 |
 | `OBSIDIAN_ALLOW` | 空 | 额外允许的相对路径，用英文逗号分隔。默认已包含 AI学习、X灵感、VPS小白教程 |
+| `MATERIALS_ROOT` | `$DATA_DIR/materials` | 生产资料目录（Markdown），只读检索。路径含「归档」为归档、含「草稿」或「待确认」为草稿，只有其余文件算现行；建议每篇头部写明负责人和更新日期。启动时自动创建 |
 
 另外，`PORT`（本地默认 `3000`）和 `DATA_DIR`（本地默认 `./data`、Docker 默认 `/data`）在代码中读取，可用于开发或容器环境；它们不是当前示例 `.env.example` 的主要部署配置。
 

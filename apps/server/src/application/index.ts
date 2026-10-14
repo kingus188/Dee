@@ -1,6 +1,7 @@
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModelCatalog, openRuntime, Index } from "@assistant/runtime";
-import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal, createTeamsInbox } from "@assistant/features";
+import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createTeamsInbox } from "@assistant/features";
+import { mkdir } from "node:fs/promises";
 import { WechatChannel } from "@assistant/channel-wechat";
 import type { AppConfig } from "../config.js";
 import type { AppContext } from "./context.js";
@@ -25,12 +26,13 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
         process.exit(1);
       }
     };
+    await mkdir(config.materialsRoot, { recursive: true });
     const notify = createNotifier(config.notifications);
     const tasks = createTaskCenter(notify);
     const { models, agentModel, label: modelLabel, configured: modelConfigured } = await createModelCatalog(config.model, config.model.api === "faux" ? (await import("./faux.js")).fauxScript : undefined);
     if (config.wechat.enabled && !modelConfigured) throw new Error("启用微信通道前请先保存模型配置");
     const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
-      extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createTeamsInbox(teamsStore)],
+      extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(config.materialsRoot), createTeamsInbox(teamsStore)],
       onReport: error => console.error("Harness 报告：", redact(error instanceof Error ? error.message : error)),
     }, ctx);
     const wechat = config.wechat.enabled ? new WechatChannel({ ...runtime, indexDoc: Index, context: ctx, ...config.wechat }) : null;

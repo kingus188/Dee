@@ -28,6 +28,7 @@ return defineExtension({
 					"当前会话的备忘用 memo。跨会话要记住的稳定事实用 propose_memory，那只是候选，用户批准后才会在以后的会话出现。",
 					"已批准的技能先用 read_skill 读全文再执行，不要凭名称编造步骤。新流程用 propose_skill 提交，批准前不能当已生效。",
 					"用户自己的笔记用 search_knowledge 和 read_knowledge，回答要带路径和行号。查不到就说没找到。归档不能说成现行决定。没配置知识库时不要假装查过。",
+					"回答工作问题前先用 search_materials 查生产资料（读全文用 read_materials）。只有 [current] 资料能作依据，回答附路径和行号。资料过期、冲突、只有草稿或查不到时，明说「需确认」并列出已查到的内容；涉及承诺、排期、金额、权限、人事或对外口径时，一律先问用户，不要猜。",
 					"查公开网页用 fetch_page。",
 				].join("\n"),
 			{ tag: false },

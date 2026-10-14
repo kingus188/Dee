@@ -202,7 +202,7 @@ export function bestLine(text: string, query: string) {
 	return best;
 }
 
-function sliceLines(text: string, startLine: number) {
+export function sliceLines(text: string, startLine: number) {
 	const lines = String(text).split(/\r?\n/);
 	const start = Math.min(Math.max(1, startLine), Math.max(lines.length, 1));
 	const picked = [];
