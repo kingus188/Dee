@@ -1,10 +1,11 @@
 import type { Conversation, EntryId } from "@earendil-works/pi-durable";
+import { AgentDoc, configure } from "@earendil-works/pi-durable";
 import { Index } from "@assistant/runtime";
 import { AttachmentError, buildUserContent, imageAt, parseAttachments } from "@assistant/features";
 import { HttpError } from "../errors.js";
 import type { AppContext } from "./context.js";
 import type { createConversations } from "./conversations.js";
-export function createMessages({ harness, ctx }: AppContext, { registerIn, updateTitle }: ReturnType<typeof createConversations>) {
+export function createMessages({ harness, ctx, agentModel }: AppContext, { registerIn, updateTitle }: ReturnType<typeof createConversations>) {
  async function submit(conversation: Conversation, body: Record<string, unknown>) {
 			const text = String(body.text ?? "").trim();
 			let files;
@@ -34,7 +35,11 @@ export function createMessages({ harness, ctx }: AppContext, { registerIn, updat
 				entryId,
 				{
 					ownership: { kind: "ownerless" },
-					init: registerIn({ title: `分叉：${parent?.title ?? conversation.id}`, forkOf: conversation.id, forkAtEntry: entryId }),
+					init: async (tx, id) => {
+						await registerIn({ title: `分叉：${parent?.title ?? conversation.id}`, forkOf: conversation.id, forkAtEntry: entryId })(tx, id);
+						// Old transcript checkpoints can still refer to the previously configured model.
+						if (agentModel.provider === "demo" && (await tx.doc(AgentDoc, id)).model?.provider === "demo") await configure(tx, id, { model: agentModel });
+					},
 				},
 				ctx,
 			);

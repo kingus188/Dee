@@ -5,7 +5,7 @@ export type ConversationItem = {
   id: number; title: string; createdAt: string; archivedAt?: string | null;
   channel?: string; forkOf?: number; forkAtEntry?: number;
 };
-export type ServerInfo = { pid: number; startedAt: string; boots: number; model: string; api: string };
+export type ServerInfo = { pid: number; startedAt: string; boots: number; model: string; api: string; configured: boolean };
 export type ToolArgs = Record<string, unknown> & { task?: string; seconds?: number };
 export type RunningTool = { name: string; callId?: string; args?: ToolArgs; status: string; output?: string; details?: unknown };
 export type LiveView = {

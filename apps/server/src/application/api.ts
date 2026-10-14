@@ -16,9 +16,18 @@ export function createApi(context: AppContext) {
   const messages = createMessages(context, conversations), tasks = createManagement(context, views), personal = createPersonalService(context);
   async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}) {
     const path = url.pathname;
+    if (path === "/api/settings/model") {
+      if (method === "GET") return { status: 200, data: context.modelSettings.get() };
+      if (method === "POST") return { status: 200, data: await context.modelSettings.save(body) };
+    }
+    if (path === "/api/settings/wechat") {
+      if (method === "GET") return { status: 200, data: context.wechatSettings.get() };
+      if (method === "POST") return { status: 200, data: context.wechatSettings.save(body) };
+    }
+    if (method === "POST" && path.startsWith("/api/conversations") && !context.modelConfigured) throw new HttpError(409, "请先在设置中保存模型配置，再重启应用");
     if (method === "GET" && path === "/api/info") {
       const meta = await harness.snapshot(Meta, ctx);
-      return { status: 200, data: { model: modelLabel, api: config.model.api, pid: process.pid, startedAt, boots: meta?.boots ?? 0 } };
+      return { status: 200, data: { model: modelLabel, api: config.model.api, configured: context.modelConfigured, pid: process.pid, startedAt, boots: meta?.boots ?? 0 } };
     }
     if (method === "GET" && path === "/api/wechat/status") return { status: 200, data: wechat ? await wechat.status() : { enabled: false } };
     if (path.startsWith("/api/personal") || path.startsWith("/api/knowledge/")) {

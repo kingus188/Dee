@@ -4,6 +4,18 @@
 
 ## 环境变量
 
+服务启动后，可从网页左侧「设置」打开「模型连接」，配置 Provider（接口协议）、Base URL、模型 ID 和 API Key。支持下表对应的三类模型协议。
+
+网页配置保存后需重启服务生效。模型连接保存在 `DATA_DIR/agent.sqlite` 的私有配置表中，已保存的连接优先于 `LLM_API`、`LLM_BASE_URL`、`LLM_MODEL` 和 `LLM_API_KEY`；上下文窗口和最大输出仍使用环境变量。首次使用有效的模型环境变量启动时，会自动将连接保存到 SQLite，之后不再依赖这四个环境变量。
+
+没有已保存的模型配置时，应用仍可打开设置页。填写连接并保存后重启即可聊天；配置完成前不启动模型生成或恢复后台任务，不提供模拟回复。启用了微信通道的服务需先完成模型配置。
+
+切换模型 ID 时，请等正在生成的回复结束后再重启。会话和分叉后续使用新模型，但 SDK 已保存的未完成生成请求可能仍引用旧模型 ID。
+
+API Key 输入为空时保留原值；更换 Provider 或 Base URL 时必须重新填写，避免把旧 Key 发给另一个服务。数据库文件及 WAL/SHM 文件权限限制为 `0600`；Key 在 SQLite 中为明文，数据目录和备份应按凭据管理，勿提交到 Git。读取接口只返回 Key 是否已配置，不返回 Key 内容。
+
+旧版 `DATA_DIR/model-settings.json` 会在启动时迁移到 SQLite，只有成功入库后才删除旧文件。SQLite 中已有的配置优先，损坏的存储配置不会静默回退到环境变量。
+
 | 变量 | 默认 / 示例 | 说明 |
 | --- | --- | --- |
 | `LLM_API` | `openai-completions` | 可选 `openai-completions` / `openai-responses` / `anthropic-messages` |

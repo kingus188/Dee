@@ -6,6 +6,7 @@ import { ChatThread } from "../chat/ChatThread.js";
 import { CardPanel } from "../tasks/CardPanel.js";
 import { Icon } from "./Icon.js";
 import { Welcome } from "./Welcome.js";
+import { ModelSettings } from "../settings/ModelSettings.js";
 import { mascotStatus, ROBOT_SVG_CONTENT } from "./mascot.js";
 
 const groups: { group: CardGroup; label: string; icon: string }[] = [
@@ -20,10 +21,11 @@ const prompts = [
 
 export function App() {
   const { view, connection, info, recoveredUntil, connectDirectChat } = useConversation();
-  const [page, setPage] = useState<"home" | "chat">("home"), [group, setGroup] = useState<CardGroup | null>(null);
+  const [page, setPage] = useState<"home" | "chat" | "settings">("home"), [group, setGroup] = useState<CardGroup | null>(null);
   const [draft, setDraft] = useState(""), [, tick] = useState(0), [moreOpen, setMoreOpen] = useState(false);
   const scroll = useRef<HTMLElement>(null), autoScroll = useRef(true), help = useRef<HTMLDialogElement>(null), more = useRef<HTMLDetailsElement>(null);
   const service = useRef<HTMLDetailsElement>(null);
+  useEffect(() => { if (info?.configured === false) { setPage("settings"); setGroup(null); } }, [info?.configured]);
   useEffect(() => { const timer = setInterval(() => tick(value => value + 1), 1000); return () => clearInterval(timer); }, []);
   useLayoutEffect(() => { if (autoScroll.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; }, [view, page]);
   useEffect(() => {
@@ -53,7 +55,7 @@ export function App() {
   const mascot = mascotStatus({ currentViewData: view, isDisconnected: connection !== "connected", isRecovered: recoveredUntil > Date.now(), recoveredUntil });
   function prompt(text: string) { setDraft(text); document.getElementById("chat-textarea")?.focus(); }
   function openGroup(next: CardGroup) { setGroup(next); setPage("chat"); setMoreOpen(false); }
-  function navigate(next: "home" | "chat") { setPage(next); setGroup(null); }
+  function navigate(next: "home" | "chat" | "settings") { setPage(next); setGroup(null); }
   return <>
     {connection !== "connected" && <div id="reconnect-banner" className="reconnect-banner" style={{ display: "flex" }} role="status"><div className="reconnect-spinner" /><span>{connection === "connecting" ? "正在连接小 D…" : "与服务器断开，正在重连…"}</span></div>}
     <div className="app-layout" id="mascot-card" data-state={mascot.state}>
@@ -64,6 +66,7 @@ export function App() {
           <button className="rail-button" type="button" aria-current={page === "chat" && !group ? "page" : undefined} aria-label="继续对话" onClick={() => navigate("chat")}><Icon name="message-circle" /><span>对话</span></button>
           <div className="rail-divider" />
           {groups.map(item => <button key={item.group} className="rail-button" type="button" aria-label={item.label} aria-current={page === "chat" && group === item.group ? "page" : undefined} onClick={() => openGroup(item.group)}><Icon name={item.icon} /><span>{item.label.split("与")[0].replace("长期", "").replace("我的", "")}</span></button>)}
+          <button className="rail-button" type="button" aria-label="模型设置" aria-current={page === "settings" ? "page" : undefined} onClick={() => navigate("settings")}><Icon name="settings" /><span>设置</span></button>
         </nav>
         <div className="rail-bottom"><button className="rail-button" type="button" aria-label="使用指南" onClick={() => help.current?.showModal()}><Icon name="circle-help" /><span>指南</span></button><div className="workspace-avatar" aria-label="个人空间">D<span /></div></div>
       </aside>
@@ -78,13 +81,14 @@ export function App() {
           </div>
         </header>
         <Welcome />
+        {page === "settings" && <ModelSettings onBack={() => navigate("chat")} />}
         <section ref={scroll} className="messages-container" id="messages-container" aria-label="与小 D 的对话" onScroll={() => { const el = scroll.current!; autoScroll.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
           <div className="conversation-heading"><span><Icon name="message-circle" />与小 D 的对话</span><button className="text-button" type="button" onClick={() => navigate("home")}>回到首页<Icon name="arrow-up-right" /></button></div>
           <div id="message-history" aria-live="polite"><ChatThread view={view} /></div>
           <CardPanel view={view} group={group} setGroup={setGroup} onPrompt={prompt} />
         </section>
         <footer className="input-container"><Composer draft={draft} setDraft={setDraft} view={view} connect={connectDirectChat} onSent={() => { autoScroll.current = true; setPage("chat"); }} />
-          <div className="composer-footer"><span className="composer-hint"><span>{info ? "已配置你的模型服务" : "你的个人智能空间"}</span><span className="keyboard-hint">Enter 发送 · Shift + Enter 换行</span></span>
+          <div className="composer-footer"><span className="composer-hint"><span>{info?.configured ? "已配置你的模型服务" : "请在设置中配置模型服务"}</span><span className="keyboard-hint">Enter 发送 · Shift + Enter 换行</span></span>
             <details ref={more} className="chat-more" open={moreOpen} onToggle={event => setMoreOpen(event.currentTarget.open)} onKeyDown={event => { if (event.key === "Escape") { setMoreOpen(false); more.current?.querySelector("summary")?.focus(); } }}><summary aria-label="查看全部能力">查看全部能力<Icon name="chevron-down" /></summary><div className="chat-more-menu"><nav className="conversation-card-tools" aria-label="在聊天中查看">{groups.map(item => <button key={item.group} type="button" aria-pressed={group === item.group} onClick={() => openGroup(item.group)}>{item.label}</button>)}</nav></div></details>
           </div>
         </footer>

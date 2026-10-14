@@ -17,7 +17,8 @@ export async function startServer(config: AppConfig, host = config.password ? "0
       });
       app.wechat?.stop();
       app.taskGraph.dispose();
-      await Promise.all([stopped, app.harness.close(app.ctx)]);
+      try { await Promise.all([stopped, app.harness.close(app.ctx)]); }
+      finally { app.wechatSettings.close(); app.teamsStore.close(); app.modelSettings.close(); }
     })();
   }
   try {
@@ -32,5 +33,5 @@ export async function startServer(config: AppConfig, host = config.password ? "0
     await close();
     throw error;
   }
-  return { origin: `http://${host}:${(server.address() as AddressInfo).port}`, modelLabel: app.modelLabel, close, redact: app.redact };
+  return { origin: `http://${host}:${(server.address() as AddressInfo).port}`, modelLabel: app.modelLabel, wechat: app.config.wechat, teamsStore: app.teamsStore, close, redact: app.redact };
 }

@@ -23,9 +23,17 @@ export function verifyDesktopPackage(directory: string) {
     let service;
     try {
       service = await startServer(readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: dataDir, PORT: "0", NOTIFY_MODE: "off" }), "127.0.0.1", new URL("../../web/dist/", entry));
-      for (const path of ["/", "/app.js", "/style.css", "/tasks.css", "/workspace.css", "/assets/icons.svg", "/assets/orb-reference.png", "/api/info"]) {
+      for (const path of ["/", "/app.js", "/style.css", "/tasks.css", "/workspace.css", "/assets/icons.svg", "/assets/orb-reference.png", "/api/info", "/api/settings/model"]) {
         assert.equal((await fetch(service.origin + path)).status, 200, path);
       }
+      const settings = await (await fetch(service.origin + "/api/settings/model")).json();
+      assert.equal(Object.hasOwn(settings, "apiKey"), false, "Settings must not expose credentials");
+      await service.close();
+      service = await startServer(readConfig({ DATA_DIR: dataDir, PORT: "0", NOTIFY_MODE: "off" }), "127.0.0.1", new URL("../../web/dist/", entry));
+      const info = await (await fetch(service.origin + "/api/info")).json();
+      assert.equal(info.configured, false, "First launch opens setup without model credentials");
+      assert.equal((await fetch(service.origin + "/api/settings/model")).status, 200);
+      assert.equal((await fetch(service.origin + "/api/conversations/direct", { method: "POST" })).status, 409);
       console.log("Desktop package entry, service and assets: PASS");
     } finally {
       await service?.close();

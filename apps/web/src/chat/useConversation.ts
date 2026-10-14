@@ -33,8 +33,8 @@ export function useConversation() {
         if (!mounted) return;
         if (previousBoots !== undefined && data.boots > previousBoots) setRecoveredUntil(Date.now() + 4000);
         previousBoots = data.boots; setInfo(data);
+        if (data.configured !== false) void connectDirectChat().catch(error => showToast("暂时连不上小 D：" + error.message, "error"));
       }).catch(error => showToast("暂时无法读取服务状态：" + error.message, "error"));
-      void connectDirectChat().catch(error => showToast("暂时连不上小 D：" + error.message, "error"));
     });
     void apiClient.connect().catch(error => showToast("暂时连不上小 D：" + error.message, "error"));
     const close = () => apiClient.close();

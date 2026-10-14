@@ -11,3 +11,4 @@ dist/
 dist-tests/
 .build/
 *.tsbuildinfo
+deploy/wechat/bin/

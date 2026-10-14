@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { packager } from "@electron/packager";
@@ -7,6 +8,7 @@ import { verifyDesktopPackage } from "./desktop-smoke.js";
 
 const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 const desktop = JSON.parse(await readFile(join(root, "apps/desktop/package.json"), "utf8"));
+const wxBot = join(root, "deploy/wechat/bin/wx-bot");
 const stage = await mkdtemp(join(root, ".build/desktop-stage-"));
 try {
   // Copy an explicit build allowlist so local data, credentials and source files never enter the app.
@@ -30,6 +32,8 @@ try {
     icon: join(root, "apps/desktop/assets/icon"),
     appVersion: manifest.version, electronVersion: desktop.devDependencies.electron,
     asar: true, prune: false, overwrite: true,
+    // 微信 Bot 二进制由 scripts/build-wx-bot.sh 生成；存在才随应用打包。
+    extraResource: existsSync(wxBot) ? [wxBot] : [],
   });
   for (const output of outputs) {
     verifyDesktopPackage(output);

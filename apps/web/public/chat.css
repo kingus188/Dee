@@ -52,6 +52,7 @@
 .turn-activity summary { cursor: pointer; min-height: 28px; display: flex; align-items: center; }
 .turn-activity pre, .turn-thinking { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-width: 100%; }
 .turn-activity pre { max-height: 240px; overflow: auto; padding: 10px 12px; background: var(--chat-soft); border-radius: 8px; }
+.turn-loading { display: flex; align-items: center; gap: 8px; }
 .turn-thinking, .turn-intermediate { padding: 4px 16px 4px 22px; color: var(--text-muted); }
 .turn-intermediate { font-size: 13px; }
 #workspace[data-view="chat"] .conversation-card { max-width: 100%; border-radius: 8px; padding: 16px 20px; box-shadow: none; background: transparent; }

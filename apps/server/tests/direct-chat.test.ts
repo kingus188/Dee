@@ -41,6 +41,7 @@ test("延续已有普通聊天，跳过微信、分叉和已归档记录", async
   } finally {
     app.taskGraph.dispose();
     await app.harness.close(app.ctx);
+    app.modelSettings.close();
     await rm(data, { recursive: true, force: true });
   }
 });
@@ -70,6 +71,7 @@ test("停用体验后保留模拟与未绑定模型的旧历史，并重复打�
   } finally {
     app.taskGraph.dispose();
     await app.harness.close(app.ctx);
+    app.modelSettings.close();
     await rm(data, { recursive: true, force: true });
   }
 });

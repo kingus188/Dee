@@ -52,7 +52,7 @@ function TurnCard({ turn, live, busy }: { turn: ChatTurn; live?: ConversationVie
     {turn.entries.filter(entry => entry.error).map(entry => <div key={entry.id} className="error-system-card" role="alert"><p>模型调用失败：{entry.error}</p><small>可以稍后重发，或检查模型服务。</small></div>)}
     {!!responses.length && <div className="message-row assistant-row"><ResponseCard text={responses.at(-1)!.text} /></div>}
     {info?.text && <div className="message-row assistant-row"><ResponseCard text={info.text} streaming /></div>}
-    {busy && !info?.text && <p className="turn-thinking" role="status">{info?.runningTools.length ? "正在执行…" : "思考中…"}</p>}
+    {busy && !info?.text && <p className="turn-thinking turn-loading" role="status"><span className="activity-spinner" aria-hidden="true" />{info?.runningTools.length ? "正在执行…" : "思考中…"}</p>}
   </section>;
 }
 

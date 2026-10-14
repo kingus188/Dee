@@ -14,11 +14,13 @@ set +a
 pnpm run desktop
 ```
 
-桌面版启动必须配置真实模型，不再回退到模拟剧本，显式设置 `LLM_API=faux` 也会被拒绝。模型沿用服务端的 `LLM_API`、`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` 环境变量；模块不自动读取 `.env`。macOS 从 Finder 启动不会继承终端设置的环境变量；当前真实模型需从已配置环境的终端启动应用，尚无桌面设置页。
+首次打开可从左侧「设置」填写 Provider、Base URL、模型 ID 和 API Key，保存后重启应用生效。模型连接和 Key 保存在应用数据目录的 SQLite 中，之后从 Finder 打开也无需终端注入模型环境变量。没有配置时只提供设置入口，不启动模型生成和后台任务；显式设置 `LLM_API=faux` 仍会被拒绝。
+
+也可使用上面的环境变量启动方式；有效配置会自动保存到 SQLite，之后以数据库中的连接为准。模块不自动读取 `.env`，Key 不会回显到网页。
 
 桌面版数据固定放在 Electron `userData/data` 下，macOS 默认是 `~/Library/Application Support/Pi Durable Assistant/data`。它不读取或迁移仓库的 `data/`，也不使用 `DATA_DIR`、`PORT` 或 `DEMO_PASSWORD`。只允许一个桌面实例使用该目录。
 
-服务仅监听 `127.0.0.1` 的随机端口，每次启动生成临时口令，由主进程给同源请求添加认证。网页没有 Node.js 权限，没有 preload/IPC 接口；HTTP(S) 外链交给系统浏览器，其他协议和跨源导航被拒绝。模拟崩溃接口已移除，桌面服务不启用微信入口。
+服务仅监听 `127.0.0.1` 的随机端口，每次启动生成临时口令，由主进程给同源请求添加认证。网页没有 Node.js 权限，没有 preload/IPC 接口；HTTP(S) 外链交给系统浏览器，其他协议和跨源导航被拒绝。模拟崩溃接口已移除，微信通道默认关闭，可在设置页「微信 Bot」启用（需另行运行 wx-bot）。
 
 macOS 关闭窗口后应用与任务继续运行，点击 Dock 可恢复窗口；使用 Cmd+Q 完全退出后，本地服务和后台任务停止。Windows/Linux 关闭最后一个窗口即退出。再次打开应用时由现有持久化运行时恢复可恢复的任务。
 

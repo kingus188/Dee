@@ -16,11 +16,11 @@ export async function createModelCatalog(config: ModelConfig, fauxResponse?: Fau
 		if (!fauxResponse) throw new Error("faux 模型需要提供测试剧本");
 		faux.setResponses(Array(1000).fill(fauxResponse));
 		models.setProvider(faux.provider);
-		return { models, agentModel: { provider: "faux", modelId: "faux-1" }, label: "faux（自动化测试）" };
+		return { models, agentModel: { provider: "faux", modelId: "faux-1" }, label: "faux（自动化测试）", configured: true };
 	}
 	const loadApi = Object.hasOwn(API_LOADERS, config.api) ? API_LOADERS[config.api as keyof typeof API_LOADERS] : undefined;
 	if (!loadApi) throw new Error(`不支持的 LLM_API：${config.api}`);
-	if (!config.baseUrl || !config.model) throw new Error("缺少 LLM_BASE_URL 或 LLM_MODEL");
+	if (!config.baseUrl || !config.model || !config.apiKey) return { models, agentModel: { provider: "demo", modelId: "unconfigured" }, label: "未配置模型", configured: false };
 	const model: Model<"openai-completions" | "openai-responses" | "anthropic-messages"> = {
 		id: config.model,
 		name: config.model,
@@ -44,5 +44,5 @@ export async function createModelCatalog(config: ModelConfig, fauxResponse?: Fau
 		api: await loadApi(),
 	});
 	models.setProvider(provider);
-	return { models, agentModel: { provider: "demo", modelId: config.model }, label: config.model };
+	return { models, agentModel: { provider: "demo", modelId: config.model }, label: config.model, configured: true };
 }

@@ -16,7 +16,7 @@ test("React 浏览器产物已打包，不依赖 npm 裸导入或内联按钮入
 
 test("workspace illustration, stylesheet and React Lucide icons are packaged", async () => {
   const sprite = await readFile(new URL("assets/icons.svg", root), "utf8");
-  for (const name of ["send", "copy", "file-text", "message-circle", "list-todo", "brain", "globe", "paperclip", "notebook-pen", "sparkles", "chevron-right"]) assert.ok(sprite.includes(`id="${name}"`), name);
+  for (const name of ["send", "copy", "file-text", "message-circle", "list-todo", "brain", "globe", "paperclip", "notebook-pen", "sparkles", "chevron-right", "settings", "plug", "shield-check", "loader-circle", "check"]) assert.ok(sprite.includes(`id="${name}"`), name);
   assert.ok((await readFile(new URL("workspace.css", root))).length > 0);
   assert.deepEqual((await readFile(new URL("assets/orb-reference.png", root))).subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
 });

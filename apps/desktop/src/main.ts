@@ -1,9 +1,15 @@
-import { app, BrowserWindow, dialog, session, shell } from "electron";
+import { app, BrowserWindow, dialog, Notification, session, shell } from "electron";
 import type { WebContents } from "electron";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readConfig, startServer } from "@assistant/server";
+import { existsSync, readFileSync } from "node:fs";
+import { createGinaTokenProvider } from "./teams-gina.js";
+import { createTeamsTokenProvider, type TeamsAccount } from "./teams-auth.js";
+import type { ImportantRules } from "./teams-rules.js";
+import { startTeamsForward } from "./teams-forward.js";
+import { startWechatBot } from "./wechat-bot.js";
 import { isAppConnection, isAppUrl, isExternalUrl } from "./policy.js";
 
 app.setName("Pi Durable Assistant");
@@ -12,6 +18,7 @@ let service: Awaited<ReturnType<typeof startServer>> | undefined;
 let window: BrowserWindow | undefined;
 let quitting = false;
 let stopped = false;
+let stopWechat = () => {};
 
 function fail(message: string) {
   dialog.showErrorBox("小 D 启动失败", message);
@@ -62,7 +69,7 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
     // Wait for startup too, so quitting during initialization cannot leave storage open.
     const timeout = setTimeout(() => app.exit(1), 10_000);
-    void startup.then(() => service?.close()).catch(() => {
+    void startup.then(() => { stopWechat(); return service?.close(); }).catch(() => {
       dialog.showErrorBox("小 D 退出异常", "本地服务未正常关闭，下次启动时将尝试恢复持久化任务。");
     }).finally(() => { clearTimeout(timeout); stopped = true; app.quit(); });
   });
@@ -75,9 +82,31 @@ if (!app.requestSingleInstanceLock()) {
     config.dataDir = join(app.getPath("userData"), "data");
     config.password = randomBytes(32).toString("hex");
     config.production = true;
-    config.wechat.enabled = false;
     service = await startServer(config, "127.0.0.1", new URL("../../web/dist/", import.meta.url));
     const origin = service.origin;
+    if (service.wechat.enabled) {
+      stopWechat = startWechatBot({
+        binary: env.WX_BOT_PATH || (app.isPackaged ? join(process.resourcesPath, "wx-bot") : fileURLToPath(new URL("../../../deploy/wechat/bin/wx-bot", import.meta.url))),
+        dir: join(app.getPath("userData"), "wechat"), origin, env, wechat: service.wechat,
+        openFile: path => { void shell.openPath(path); },
+        onError: message => dialog.showErrorBox("微信 Bot", message),
+      });
+      // 存在 teams-forward-config.json 才启用 Teams → 微信转发：{ account } 监听自己的账号，{ ginaHome } 监听 Gina；important 为筛选规则。
+      const dir = join(app.getPath("userData"), "wechat");
+      const forwardConfig = join(dir, "teams-forward-config.json");
+      if (existsSync(forwardConfig)) {
+        const { account, ginaHome, important } = JSON.parse(readFileSync(forwardConfig, "utf8")) as { account?: TeamsAccount; ginaHome?: string; important?: ImportantRules };
+        const getToken = account ? createTeamsTokenProvider(account) : ginaHome ? createGinaTokenProvider(ginaHome, env) : undefined;
+        if (!getToken) dialog.showErrorBox("Teams 转发", "teams-forward-config.json 需要 account 或 ginaHome");
+        else {
+          const stopBot = stopWechat;
+          const stopForward = startTeamsForward({ dir, store: service.teamsStore, getToken, rules: important, sendURL: service.wechat.sendURL, sendToken: service.wechat.sendToken,
+            inject: { url: `${origin}/channels/wechat/incoming`, webhookKey: service.wechat.webhookKey },
+            onStuck: pending => new Notification({ title: "Teams 消息未能送达微信", body: `有 ${pending} 条待发送。请在微信里给 ClawBot 发一句话刷新会话，之后会自动补发。` }).show() });
+          stopWechat = () => { stopForward(); stopBot(); };
+        }
+      }
+    }
     const desktopSession = session.fromPartition("desktop");
     desktopSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     desktopSession.setPermissionCheckHandler(() => false);

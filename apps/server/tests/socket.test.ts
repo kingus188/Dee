@@ -73,6 +73,12 @@ test("真实 WebSocket 完成发送、附件、去重、重连、任务、记忆
     assert.equal((await rpc.request("/api/personal")).status, 200);
     assert.equal((await rpc.request(`/api/conversations/${id}/messages`, { text: "", attachments: [] })).status, 400);
     assert.equal((await rpc.request("/api/missing")).status, 404);
+    const settings = await rpc.request("/api/settings/model");
+    assert.equal(settings.status, 200);
+    assert.equal(Object.hasOwn(settings.data as object, "apiKey"), false);
+    const savedSettings = await rpc.request("/api/settings/model", { provider: "openai-completions", baseUrl: "http://127.0.0.1:1/v1", model: "test-model", apiKey: "socket-test-only-key" });
+    assert.equal(savedSettings.status, 200);
+    assert.equal(JSON.stringify(savedSettings).includes("socket-test-only-key"), false);
     socket.close(); await once(socket, "close");
     socket = await open(server.origin); sockets.push(socket); rpc = channel(socket);
     assert.equal((await rpc.request(`/api/conversations/${id}/events`)).status, 200);
