@@ -105,7 +105,8 @@ if (!app.requestSingleInstanceLock()) {
           const stopBot = stopWechat;
           const stopForward = startTeamsForward({ dir, store: service.teamsStore, getToken, rules: important, sendURL: service.wechat.sendURL, sendToken: service.wechat.sendToken,
             inject: { url: `${origin}/channels/wechat/incoming`, webhookKey: service.wechat.webhookKey },
-            onStuck: pending => new Notification({ title: "Teams 消息未能送达微信", body: `有 ${pending} 条待发送。请在微信里给 ClawBot 发一句话刷新会话，之后会自动补发。` }).show() });
+            undelivered: service.wechatUndelivered,
+            onStuck: (pending, _reason, preview) => new Notification({ title: `微信暂时发不出去（${pending} 条）`, body: `${preview}\n在微信里给 ClawBot 发一句话，立即补发。` }).show() });
           stopWechat = () => { stopForward(); stopBot(); };
         }
       }

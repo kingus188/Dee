@@ -163,6 +163,10 @@ export class WechatChannel {
     const submission = await conversation.submit({
       type: "input", content: data.message, requestId: data.requestId, whenBusy: "followUp",
     }, this.context);
+    // 用户刚发来消息，回复令牌已刷新：立即重试因失败而退避等待的消息，不用等到下一个退避时间点。
+    await this.root.commit(async (tx) => {
+      for (const item of (await tx.doc(WechatState)).outbox) if (item.status === "pending") item.nextAt = 0;
+    }, this.context);
     return { ok: true, conversationId: conversation.id, submissionId: submission.id };
   }
 
@@ -246,6 +250,12 @@ export class WechatChannel {
         if (!ok && permanent) console.error("微信消息被拒绝，已暂停自动重试；请检查 wx-bot 状态");
       }
     } finally { this.busy = false; }
+  }
+
+  // 已发送失败、正在退避重试的回复（通常是回复令牌过期），供宿主提醒用户；正在发送的不算。
+  async undelivered() {
+    const doc = await this.harness.snapshot(WechatState, this.context);
+    return (doc?.outbox ?? []).filter((x) => x.status === "pending" && x.attempts > 0).map((x) => ({ text: x.text, createdAt: x.createdAt }));
   }
 
   async status() {

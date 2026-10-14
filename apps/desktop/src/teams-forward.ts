@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { TeamsStore } from "@assistant/server";
@@ -13,7 +13,9 @@ export type TeamsForwardOptions = {
   // 提供后，命中的消息还会作为入站消息交给微信会话里的 agent，生成摘要和建议回复。
   inject?: { url: string; webhookKey: string };
   // 待发消息发不出去（如微信令牌过期）时，每次故障只提醒一次。
-  onStuck?: (pending: number, reason: string) => void;
+  onStuck?: (pending: number, reason: string, preview: string) => void;
+  // 微信发件箱里已尝试发送但没送达的回复。有 agent 时转发在注入成功后就算完成，失败只会出现在这里。
+  undelivered?: () => Promise<{ text: string }[]>;
 };
 const PUSH_TEXT_MAX = 500;
 const STORE_TEXT_MAX = 2000;
@@ -23,13 +25,14 @@ type PendingItem = ReturnType<TeamsStore["pendingPush"]>[number];
 type Message = { id: string; createdDateTime: string; messageType?: string; from?: { user?: { id?: string; displayName?: string } }; body?: { content?: string; contentType?: string }; mentions?: { mentioned?: { user?: { id?: string } } }[] };
 
 // 轮询 Teams 聊天新消息，命中重要性规则的转发到已绑定的微信。token 由调用方提供。
-export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendToken, inject, onStuck }: TeamsForwardOptions) {
+export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendToken, inject, onStuck, undelivered }: TeamsForwardOptions) {
   const logPath = join(dir, "teams-forward.log");
   const markPath = join(dir, "teams-forward.json");
   const log = (message: string) => appendFileSync(logPath, `${new Date().toISOString()} ${message}\n`);
   // 水位线按会话保存；首次出现的会话以启动时间为起点，不回灌历史。
   migrateLegacyQueue();
   let stuckReason = "";
+  let notified = 0; // 已就多少条未送达消息提醒过用户；恢复后归零，新增时再提醒
   const marks: Record<string, string> = existsSync(markPath) ? JSON.parse(readFileSync(markPath, "utf8")) : {};
   const startedAt = new Date().toISOString();
   let stopped = false;
@@ -56,6 +59,8 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
     if (!id) throw new Error("微信尚无会话：请先在微信里给 ClawBot 发一条消息");
     return id;
   }
+  // 回复令牌自用户最后一次给 ClawBot 发消息起算的时长，记入日志以量出令牌实际能用多久。
+  const tokenAge = () => { try { return `${Math.round((Date.now() - statSync(join(dir, "state/primary/context_tokens.json")).mtimeMs) / 60_000)}min`; } catch { return "unknown"; } };
   async function send(text: string) {
     const response = await fetch(sendURL, { method: "POST", signal: AbortSignal.timeout(30_000),
       headers: { Authorization: `Bearer ${sendToken}`, "Content-Type": "application/json" },
@@ -141,20 +146,35 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
           await send(rawText(item));
         } catch (error) {
           const reason = describe(error);
-          if (reason !== stuckReason) log(`send failed, ${queue.length - index} pending: ${reason}`);
-          if (!stuckReason) onStuck?.(queue.length - index, reason);
+          const pending = queue.length - index;
+          if (reason !== stuckReason) log(`send failed, ${pending} pending, token age ${tokenAge()}: ${reason}`);
+          if (pending > notified) { notified = pending; onStuck?.(pending, reason, preview(item.senderName, item.text)); }
           stuckReason = reason;
           return;
         }
       }
-      stuckReason = "";
+      if (stuckReason) { stuckReason = ""; notified = 0; }
       store.markPushed(item.id);
+    }
+  }
+
+  const preview = (sender: string, text: string) => `${sender}：${text.replace(/\s+/g, " ").slice(0, 80)}`;
+  // 微信回复令牌过期时，发件箱里的回复会一直退避重试；这里把它显性提醒出来，并带上内容。
+  async function watchOutbox() {
+    if (!undelivered) return;
+    const items = await undelivered();
+    if (!items.length) { if (!stuckReason) notified = 0; return; }
+    if (items.length > notified) {
+      notified = items.length;
+      log(`wechat replies undelivered: ${items.length}, token age ${tokenAge()}`);
+      onStuck?.(items.length, "微信回复令牌已过期", items[items.length - 1].text.replace(/\s+/g, " ").slice(0, 80));
     }
   }
 
   const tick = async () => {
     try { await poll(); } catch (error) { log(`poll failed: ${describe(error)}`); }
     try { await flush(); } catch (error) { log(`flush failed: ${describe(error)}`); }
+    try { await watchOutbox(); } catch (error) { log(`outbox check failed: ${describe(error)}`); }
     if (!stopped) timer = setTimeout(tick, POLL_MS);
   };
   log("started");
