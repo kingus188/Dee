@@ -9,6 +9,7 @@ export function readConfig(env: NodeJS.ProcessEnv) {
     model: { api, baseUrl: env.LLM_BASE_URL || "", model: env.LLM_MODEL || "",
       apiKey: env.LLM_API_KEY || "", contextWindow: Number(env.LLM_CONTEXT_WINDOW || 128000), maxTokens: Number(env.LLM_MAX_TOKENS || 8192) },
     materialsRoot: env.MATERIALS_ROOT || "",
+    investigate: { repos: env.INVESTIGATE_REPOS || "", agent: (env.INVESTIGATE_AGENT === "claude" ? "claude" : "codex") as "codex" | "claude", codexBin: env.INVESTIGATE_CODEX_BIN || "codex-acp", claudeBin: env.INVESTIGATE_CLAUDE_BIN || "claude" },
     knowledge: { OBSIDIAN_ROOT: env.OBSIDIAN_ROOT || "", OBSIDIAN_ALLOW: env.OBSIDIAN_ALLOW || "" },
     notifications: { url: env.NOTIFY_WEBHOOK_URL || "", mode: env.NOTIFY_MODE || "errors", kind: env.NOTIFY_WEBHOOK_KIND || "generic" },
     wechat: { enabled: env.WECHAT_ENABLED === "1", webhookKey: env.WECHAT_WEBHOOK_KEY || "", sendToken: env.WECHAT_SEND_TOKEN || "",

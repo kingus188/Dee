@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModelCatalog, openRuntime, Index } from "@assistant/runtime";
-import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createEpisodes, createTeamsInbox, createTeamsReply } from "@assistant/features";
+import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply } from "@assistant/features";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { WechatChannel } from "@assistant/channel-wechat";
@@ -42,7 +42,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     const { models, agentModel, label: modelLabel, configured: modelConfigured } = await createModelCatalog(config.model, config.model.api === "faux" ? (await import("./faux.js")).fauxScript : undefined);
     if (config.wechat.enabled && !modelConfigured) throw new Error("启用微信通道前请先保存模型配置");
     const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
-      extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createEpisodes(episodeStore), createTeamsInbox(teamsStore), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender, config.offline))],
+      extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox(teamsStore), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender, config.offline))],
       onReport: error => console.error("Harness 报告：", redact(error instanceof Error ? error.message : error)),
     }, ctx);
     const wechat = config.wechat.enabled ? new WechatChannel({ ...runtime, indexDoc: Index, context: ctx, ...config.wechat }) : null;

@@ -36,6 +36,10 @@ API Key 输入为空时保留原值；更换 Provider 或 Base URL 时必须重�
 | `OBSIDIAN_ROOT` | 空 | 只读 Obsidian 仓库根目录。留空时知识库工具会说明未启用，不影响聊天 |
 | `OBSIDIAN_ALLOW` | 空 | 额外允许的相对路径，用英文逗号分隔。默认已包含 AI学习、X灵感、VPS小白教程 |
 | `PI_OFFLINE` | 空 | 设为 `1` 时强制关闭微信通道、Teams 发送和 Webhook 通知，不受数据库里保存的配置影响。**用真实数据目录的副本做测试或调试时必须开启**，否则副本会连到真实的微信和 Teams |
+| `INVESTIGATE_REPOS` | 空 | 允许开发任务的本机仓库，`名称=绝对路径[#测试命令]`，逗号分隔，如 `erp=/Users/me/erp#pnpm test`。助手可在隔离 git worktree 里启动后台 Claude Code 排查修复（fix）或开发功能（feature），成果提交到新分支 `fix/pi-<id>` / `feat/pi-<id>`（工作目录 `$DATA_DIR/investigations/`），不推送、不发布。基于仓库当前 HEAD 的已提交代码；主仓库的 `node_modules` 会链接进去供测试使用；同时最多 2 个任务、单个预算 5 美元。你回复「确认合并 任务ID」后才会本地合并到仓库当前分支（仓库须无未提交改动）。完成通知走 Webhook，需 `NOTIFY_MODE=all`；微信回复令牌约 30 分钟过期，不能依赖微信推送完成消息 |
+| `INVESTIGATE_AGENT` | `codex` | 开发任务默认使用的编码 Agent，对话里也可以按任务指定（如“用 claude 做”）。可选：`codex`（通过 ACP 驱动）或 `claude`（Claude Code 的 `claude -p`）。Codex 会话固定为 `workspace-write`：工作区内可写，网络和工作区外写入被拒绝；仅 git 的 add/commit/diff/status/log、printf/echo 和该仓库配置的测试命令会被自动批准。两种 Agent 都由服务进程持有，**服务重启会中断正在运行的任务**（分支上已提交的内容保留）。新增 Agent 只需在 `packages/features/src/investigate/agents.ts` 实现一个 runner |
+| `INVESTIGATE_CODEX_BIN` | `codex-acp` | ACP 适配器 `@agentclientprotocol/codex-acp`（建议固定版本 `npm i -g @agentclientprotocol/codex-acp@2.2.2`），需已登录 Codex；服务进程的 PATH 里要能找到，否则填绝对路径 |
+| `INVESTIGATE_CLAUDE_BIN` | `claude` | `INVESTIGATE_AGENT=claude` 时使用的 Claude Code 可执行文件；需已登录 |
 | `MATERIALS_ROOT` | `$DATA_DIR/materials` | 生产资料目录（Markdown），只读检索。路径含「归档」为归档、含「草稿」或「待确认」为草稿，只有其余文件算现行；建议每篇头部写明负责人和更新日期。启动时自动创建。也可以在对话里让助手记入资料：先存入「待确认」，你确认后转为现行，同名旧资料自动归档 |
 
 另外，`PORT`（本地默认 `3000`）和 `DATA_DIR`（本地默认 `./data`、Docker 默认 `/data`）在代码中读取，可用于开发或容器环境；它们不是当前示例 `.env.example` 的主要部署配置。

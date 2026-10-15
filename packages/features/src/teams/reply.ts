@@ -67,7 +67,7 @@ export async function sendLatestDraft(port: TeamsReplyPort, conversationId: numb
 }
 
 // 会话里最近一条用户消息（不含 Teams 注入之外的系统条目）。
-const latestUserTextOf = (items: readonly { kind: string; model?: readonly { role: string; content: unknown }[] }[]) => {
+export const latestUserTextOf = (items: readonly { kind: string; model?: readonly { role: string; content: unknown }[] }[]) => {
 	const message = items.find((item) => item.kind === "pi.user")?.model?.[0];
 	return message?.role === "user" ? splitUserContent(message.content as never).text : "";
 };

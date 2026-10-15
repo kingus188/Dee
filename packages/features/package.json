@@ -9,6 +9,7 @@
     "test": "pnpm run check && node --test dist-tests/*.test.js"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.8.0",
     "@assistant/runtime": "workspace:*",
     "@earendil-works/chord": "1.1.0",
     "@earendil-works/pi-ai": "1.1.0",
