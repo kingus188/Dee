@@ -6,3 +6,4 @@ export type * from "./socket.js";
 export type * from "./model-settings.js";
 export type * from "./wechat-settings.js";
 export type * from "./daily-reports.js";
+export type * from "./mail.js";

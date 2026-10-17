@@ -7,6 +7,7 @@ import { CardPanel } from "../tasks/CardPanel.js";
 import { Icon } from "./Icon.js";
 import { Welcome } from "./Welcome.js";
 import { ModelSettings } from "../settings/ModelSettings.js";
+import { MailNotifications } from "../mail/MailNotifications.js";
 import { DailyReports } from "../daily-reports/DailyReports.js";
 import { mascotStatus, ROBOT_SVG_CONTENT } from "./mascot.js";
 
@@ -59,6 +60,7 @@ export function App() {
   function openGroup(next: CardGroup) { setGroup(next); setPage("chat"); setMoreOpen(false); }
   function navigate(next: "home" | "chat" | "settings" | "reports") { if (next === "reports") setReportsOpened(true); setPage(next); setGroup(null); }
   return <>
+    <MailNotifications />
     {connection !== "connected" && <div id="reconnect-banner" className="reconnect-banner" style={{ display: "flex" }} role="status"><div className="reconnect-spinner" /><span>{connection === "connecting" ? "正在连接小 D…" : "与服务器断开，正在重连…"}</span></div>}
     <div className="app-layout" id="mascot-card" data-state={mascot.state}>
       <aside className="sidebar" aria-label="主导航">

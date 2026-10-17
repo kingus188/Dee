@@ -8,6 +8,7 @@ import { createMessages } from "./messages.js";
 import { createManagement } from "./management.js";
 import { createPersonalService } from "./personal.js";
 import { createViews } from "./views.js";
+import { mailApi } from "../mail-api.js";
 import { createDailyReports } from "../daily-reports.js";
 
 // HTTP 与 WebSocket 共用用例和错误语义。
@@ -18,6 +19,8 @@ export function createApi(context: AppContext) {
   const dailyReports = createDailyReports(config.dataDir);
   async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}) {
     const path = url.pathname;
+    const mailResult = mailApi(context.mail, method, url, body);
+    if (mailResult) return await mailResult;
     if (method === "GET" && path === "/api/daily-reports") return { status: 200, data: dailyReports.list() };
     const report = path.match(/^\/api\/daily-reports\/([^/]+)$/);
     if (report) {

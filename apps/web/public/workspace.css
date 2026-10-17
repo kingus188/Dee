@@ -232,6 +232,11 @@ button:active:not(:disabled) { transform: translateY(1px); }
   .ring-outer { width: 275px; }.ring-middle { width: 220px; }
 }
 
+/* 跨页面保留新邮件提醒，邮件字段只通过 React 文本节点呈现。 */
+.mail-notice { position: fixed; z-index: 100; top: 12px; left: 50%; transform: translateX(-50%); width: min(680px, calc(100vw - 32px)); box-sizing: border-box; display: flex; align-items: center; gap: 16px; padding: 12px 16px; border: 1px solid #d8dee8; border-radius: 12px; background: #fff; color: #273449; box-shadow: 0 8px 32px #14213b20; }
+.mail-notice span { min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+.mail-notice button { flex-shrink: 0; }
+
 /* 指令菜单贴近输入框，沿用工作区颜色；窄屏与高缩放时内部滚动。 */
 .input-box-wrapper { position: relative; }
 .command-menu { position: absolute; z-index: 20; bottom: calc(100% + 8px); left: 0; right: 0; max-height: min(280px, 40dvh); overflow-y: auto; padding: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-surface); color: var(--text-main); box-shadow: var(--shadow-lg); }

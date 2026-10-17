@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModelCatalog, openRuntime, Index } from "@assistant/runtime";
-import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway } from "@assistant/features";
+import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway, createMailInbox } from "@assistant/features";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { WechatChannel } from "@assistant/channel-wechat";
@@ -8,6 +8,7 @@ import type { AppConfig } from "../config.js";
 import type { AppContext } from "./context.js";
 import { openModelSettings } from "../model-settings.js";
 import { openWechatSettings } from "../wechat-settings.js";
+import { createMailService } from "../mail-service.js";
 import { openTeamsStore } from "../teams-store.js";
 import { openEpisodeStore } from "../episode-store.js";
 import { createSummarizer } from "../episode-model.js";
@@ -19,11 +20,13 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
   const modelSettings = await openModelSettings(config.dataDir, config.model);
   let wechatSettings: ReturnType<typeof openWechatSettings> | undefined;
   let teamsStore: ReturnType<typeof openTeamsStore> | undefined;
+  let mail: ReturnType<typeof createMailService> | undefined;
   let episodeStore: ReturnType<typeof openEpisodeStore> | undefined;
   try {
     wechatSettings = openWechatSettings(config.dataDir, config.wechat);
     teamsStore = openTeamsStore(config.dataDir);
     episodeStore = openEpisodeStore(config.dataDir);
+    mail = createMailService(config.dataDir, config.offline, fetch, config.mailAccountFile);
     config = { ...config, model: modelSettings.model, wechat: wechatSettings.active };
     if (config.offline) config = { ...config, wechat: { ...config.wechat, enabled: false }, notifications: { ...config.notifications, mode: "off" } };
     if (config.wechat.enabled && (!config.wechat.webhookKey || !config.wechat.sendToken)) throw new Error("微信启用时必须设置 WECHAT_WEBHOOK_KEY 和 WECHAT_SEND_TOKEN");
@@ -43,7 +46,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     const { models, agentModel, label: modelLabel, configured: modelConfigured } = await createModelCatalog(config.model, config.model.api === "faux" ? (await import("./faux.js")).fauxScript : undefined);
     if (config.wechat.enabled && !modelConfigured) throw new Error("启用微信通道前请先保存模型配置");
     const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
-      extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query),
+      extensions: [createMailInbox(mail), createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query),
         refresh: () => teamsSender.refresh?.() ?? Promise.resolve({ ok: false, lastSuccessAt: teamsSender.syncStatus?.().lastSuccessAt ?? null }),
         syncStatus: () => teamsSender.syncStatus?.() ?? { lastSuccessAt: null } }), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender, config.offline)),
         createTeamsAway({ get: () => teamsStore!.away(), set: input => teamsStore!.setAway(input), clear: () => teamsStore!.clearAway() })],
@@ -53,13 +56,14 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     try {
       if (wechat) { await wechat.linkLegacyTeams(teamsStore.notificationIds()); await wechat.start(); }
       const taskGraph = await runtime.harness.taskGraph(ctx);
-      return { ...runtime, config, ctx, taskGraph, tasks, wechat, modelSettings, wechatSettings, teamsStore, teamsSender, episodeStore, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
+      return { ...runtime, config, ctx, taskGraph, tasks, wechat, modelSettings, wechatSettings, teamsStore, teamsSender, mail, episodeStore, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
     } catch (error) {
       wechat?.stop();
       await runtime.harness.close(ctx);
       throw error;
     }
   } catch (error) {
+    await mail?.close();
     wechatSettings?.close();
     teamsStore?.close();
     episodeStore?.close();

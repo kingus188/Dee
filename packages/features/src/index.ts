@@ -14,3 +14,4 @@ export * from "./assistant.js";
 export * from "./teams/index.js";
 export * from "./teams/reply.js";
 export * from "./teams/away.js";
+export * from "./mail.js";

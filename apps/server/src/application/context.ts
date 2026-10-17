@@ -8,12 +8,14 @@ import type { openModelSettings } from "../model-settings.js";
 import type { openWechatSettings } from "../wechat-settings.js";
 import type { TeamsStore } from "../teams-store.js";
 import type { EpisodeStore } from "../episode-store.js";
+import type { MailService } from "../mail-service.js";
 import type { TeamsSender } from "../teams-reply-port.js";
 export type AppContext = Runtime & {
   config: AppConfig; ctx: Context; taskGraph: AttachedReplicatedState<TaskGraph>;
   tasks: ReturnType<typeof createTaskCenter>; wechat: WechatChannel | null;
   modelSettings: Awaited<ReturnType<typeof openModelSettings>>;
   wechatSettings: ReturnType<typeof openWechatSettings>;
+  mail: MailService;
   teamsStore: TeamsStore; teamsSender: TeamsSender;
   episodeStore: EpisodeStore; summarize: (prompt: string) => Promise<string>;
   modelLabel: string; modelConfigured: boolean; startedAt: string; redact: (value: unknown) => string; exitIfFatal: (error: unknown) => void;

@@ -24,6 +24,7 @@ export async function startServer(config: AppConfig, host = config.password ? "0
         server.closeAllConnections();
       });
       stopEpisodes();
+      await app.mail.close();
       app.wechat?.stop();
       app.taskGraph.dispose();
       try { await Promise.all([stopped, app.harness.close(app.ctx)]); }
@@ -42,5 +43,6 @@ export async function startServer(config: AppConfig, host = config.password ? "0
     await close();
     throw error;
   }
-  return { origin: `http://${host}:${(server.address() as AddressInfo).port}`, modelLabel: app.modelLabel, wechat: app.config.wechat, teamsStore: app.teamsStore, teamsSender: app.teamsSender, wechatNotify: app.wechat ? (wxid: string, text: string, messageId: string) => app.wechat!.notify("primary", wxid, text, { kind: "teams", messageIds: [messageId] }).then(() => {}) : undefined, wechatUndelivered: app.wechat ? () => app.wechat!.undelivered() : undefined, close, redact: app.redact };
+  app.mail.start();
+  return { mail: app.mail, origin: `http://${host}:${(server.address() as AddressInfo).port}`, modelLabel: app.modelLabel, wechat: app.config.wechat, teamsStore: app.teamsStore, teamsSender: app.teamsSender, wechatNotify: app.wechat ? (wxid: string, text: string, messageId: string) => app.wechat!.notify("primary", wxid, text, { kind: "teams", messageIds: [messageId] }).then(() => {}) : undefined, wechatUndelivered: app.wechat ? () => app.wechat!.undelivered() : undefined, close, redact: app.redact };
 }

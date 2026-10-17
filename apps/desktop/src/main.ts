@@ -1,3 +1,4 @@
+import { startMailNotifications } from "./mail-notifications.js";
 import { createTeamsSync } from "./teams-sync.js";
 import { app, BrowserWindow, dialog, Notification, session, shell } from "electron";
 import type { WebContents } from "electron";
@@ -21,6 +22,7 @@ let window: BrowserWindow | undefined;
 let quitting = false;
 let stopped = false;
 let stopWechat = () => {};
+let stopMailNotifications = () => {};
 
 function fail(message: string) {
   dialog.showErrorBox("小 D 启动失败", message);
@@ -71,7 +73,7 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
     // Wait for startup too, so quitting during initialization cannot leave storage open.
     const timeout = setTimeout(() => app.exit(1), 10_000);
-    void startup.then(() => { stopWechat(); return service?.close(); }).catch(() => {
+    void startup.then(() => { stopMailNotifications(); stopWechat(); return service?.close(); }).catch(() => {
       dialog.showErrorBox("小 D 退出异常", "本地服务未正常关闭，下次启动时将尝试恢复持久化任务。");
     }).finally(() => { clearTimeout(timeout); stopped = true; app.quit(); });
   });
@@ -88,10 +90,14 @@ if (!app.requestSingleInstanceLock()) {
     const config = readConfig({ ...env, NODE_ENV: "production" });
     config.port = 0;
     config.dataDir = join(app.getPath("userData"), "data");
+    config.mailAccountFile ||= join(app.getPath("userData"), "wechat", "teams-forward-config.json");
     config.password = randomBytes(32).toString("hex");
     config.production = true;
     service = await startServer(config, "127.0.0.1", new URL("../../web/dist/", import.meta.url));
     const origin = service.origin;
+    stopMailNotifications = startMailNotifications(service.mail.notices, (title, body) => {
+      if (Notification.isSupported()) new Notification({ title, body }).show();
+    });
     if (service.wechat.enabled) {
       stopWechat = startWechatBot({
         binary: env.WX_BOT_PATH || (app.isPackaged ? join(process.resourcesPath, "wx-bot") : fileURLToPath(new URL("../../../deploy/wechat/bin/wx-bot", import.meta.url))),

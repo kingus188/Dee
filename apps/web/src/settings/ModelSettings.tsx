@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ModelProvider, ModelSettings as Settings, ModelSettingsInput } from "@assistant/contracts";
 import { request } from "../api/request.js";
 import { Icon } from "../ui/Icon.js";
+import { MailSettings } from "./MailSettings.js";
 import { WechatSettings } from "./WechatSettings.js";
 
 const providers: { value: ModelProvider; label: string; hint: string }[] = [
@@ -69,6 +70,7 @@ export function ModelSettings({ onBack }: { onBack: () => void }) {
         </form>
       </>}
       <WechatSettings />
+      <MailSettings />
     </div>
   </section>;
 }
