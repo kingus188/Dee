@@ -42,9 +42,7 @@ These examples require a real model. Results depend on the selected model and th
 
 The web interface supports multiple conversations, conversation forks, streamed responses, and image/text attachments. Conversation cards manage tasks, reminders, memories and skills. An optional WeChat iLink bridge handles text and voice-transcription text provided by WeChat. Generic Webhooks and Feishu bots can deliver task notifications.
 
-### Local changes awaiting publication
-
-The following capabilities exist in local commits but have not been synchronized to GitHub `main`. A clone of the remote repository does not include them yet:
+### Saving materials, Teams replies and coding tasks
 
 - **Saving work materials:** Turn conversation content into a draft, approve it as current, and archive an older document with the same name.
 - **Teams replies:** Show the target chat and draft, then send only after the user says `确认发送`. Requires desktop account access and send permissions.
@@ -100,9 +98,9 @@ See [Deployment and backups](docs/DEPLOYMENT.md). Docker-based WeChat access nee
 
 - **Avatar and voice:** SVG/CSS animation is available. Real-time voice conversation, voice cloning, lip synchronization, Live2D and 3D model integration are not implemented.
 - **Memory and data:** Self-hosting stores conversations and memory in your instance. Relevant messages, attachments and retrieved text may still be sent to an external model provider. Never commit `.env`, API keys or WeChat credentials.
-- **Execution and recovery:** Recovery depends on persisted state and the task's recovery semantics. It does not guarantee exactly-once execution of arbitrary external operations. Recurring jobs use fixed-minute intervals, not timezone-aware calendar scheduling. Coding tasks in the unpublished local changes are owned by the server process and stop on restart; committed branch changes remain available.
+- **Execution and recovery:** Recovery depends on persisted state and the task's recovery semantics. It does not guarantee exactly-once execution of arbitrary external operations. Recurring jobs use fixed-minute intervals, not timezone-aware calendar scheduling. Coding tasks are owned by the server process and stop on restart; committed branch changes remain available.
 - **Delivery:** Generic Webhook and Feishu notifications are best-effort and can be lost. WeChat has its own persistent delivery queue, but duplicates and platform restrictions remain possible. Real WeChat login and production delivery need separate validation.
-- **Attachments and access:** Web uploads allow 5 files, up to 5 MiB per image, 200 KiB per text file and 10 MiB total. WeChat images, videos and files are not parsed. Obsidian access is read-only. In the unpublished local changes, material writes target the designated materials directory and coding changes target configured repository worktrees. General computer control is not provided.
+- **Attachments and access:** Web uploads allow 5 files, up to 5 MiB per image, 200 KiB per text file and 10 MiB total. WeChat images, videos and files are not parsed. Obsidian access is read-only. Material writes target the designated materials directory and coding changes target configured repository worktrees. General computer control is not provided.
 - **Scope:** This is a personal application without tenant isolation or enterprise role management. Archiving stops that conversation's unfinished tasks. Removing it from the list does not erase all persisted records.
 
 ## Direction
