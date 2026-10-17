@@ -20,11 +20,11 @@ func TestQuoteText(t *testing.T) {
 	}{
 		{"nil", nil, ""},
 		{"empty", &ilink.RefMessage{}, ""},
-		{"title only", &ilink.RefMessage{Title: "目标聊天：Levi Qian"}, "[引用：目标聊天：Levi Qian]"},
-		{"item only", &ilink.RefMessage{MessageItem: text("好的")}, "[引用：好的]"},
-		{"title and item", &ilink.RefMessage{Title: "摘要", MessageItem: text("原文")}, "[引用：摘要 | 原文]"},
-		{"same title and item", &ilink.RefMessage{Title: "好的", MessageItem: text("好的")}, "[引用：好的]"},
-		{"image", &ilink.RefMessage{MessageItem: &ilink.MessageItem{Type: ilink.ItemTypeImage}}, "[引用：[图片]]"},
+		{"title only", &ilink.RefMessage{Title: "目标聊天：Levi Qian"}, "目标聊天：Levi Qian"},
+		{"item only", &ilink.RefMessage{MessageItem: text("好的")}, "好的"},
+		{"title and item", &ilink.RefMessage{Title: "摘要", MessageItem: text("原文")}, "摘要 | 原文"},
+		{"same title and item", &ilink.RefMessage{Title: "好的", MessageItem: text("好的")}, "好的"},
+		{"image", &ilink.RefMessage{MessageItem: &ilink.MessageItem{Type: ilink.ItemTypeImage}}, "[图片]"},
 	}
 	for _, c := range cases {
 		if got := quoteText(c.ref); got != c.want {
@@ -44,13 +44,14 @@ func TestMessageItemKeepsRefMsg(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &item); err != nil {
 		t.Fatal(err)
 	}
-	if got := quoteText(item.RefMsg); got != "[引用：草稿 | 目标聊天：Levi Qian]" {
+	if got := quoteText(item.RefMsg); got != "草稿 | 目标聊天：Levi Qian" {
 		t.Fatalf("引用解码后丢失：%q", got)
 	}
 }
 
-// 带引用的文本消息：Webhook 的 text 里，引用在前、正文在后。
-func TestBuildPayloadPrependsQuote(t *testing.T) {
+// 带引用的文本消息：引用进 payload 的 quote 字段，text 只有用户自己打的字。
+// 用户原话不含第三方内容，下游才能把「确认发送」这类授权只认在用户原话上。
+func TestBuildPayloadKeepsQuoteOutOfText(t *testing.T) {
 	p := &Poller{
 		Name:   "primary",
 		Client: ilink.NewClient(&ilink.Session{BotToken: "tok", BaseURL: "http://127.0.0.1:1", BotID: "bot@im.bot", UserID: "wxid_owner"}),
@@ -67,7 +68,10 @@ func TestBuildPayloadPrependsQuote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if payload.Text != "[引用：目标聊天：Levi Qian]\n帮我回复好的" {
+	if payload.Text != "帮我回复好的" {
 		t.Fatalf("text = %q", payload.Text)
+	}
+	if payload.Quote != "目标聊天：Levi Qian" {
+		t.Fatalf("quote = %q", payload.Quote)
 	}
 }

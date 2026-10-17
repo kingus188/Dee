@@ -8,7 +8,8 @@ import (
 
 const maxQuoteRunes = 500
 
-// quoteText 把用户引用的消息拼成「[引用：摘要 | 内容]」，放在正文前面，让下游知道回复的是哪一条。
+// quoteText 把用户引用的消息拼成「摘要 | 内容」。它只进 Payload 的 quote 字段，
+// 绝不拼进 text：下游要把用户原话和第三方引用分开，引用不能充当指令或授权。
 func quoteText(ref *ilink.RefMessage) string {
 	if ref == nil {
 		return ""
@@ -28,7 +29,7 @@ func quoteText(ref *ilink.RefMessage) string {
 	if runes := []rune(quote); len(runes) > maxQuoteRunes {
 		quote = string(runes[:maxQuoteRunes]) + "…"
 	}
-	return "[引用：" + quote + "]"
+	return quote
 }
 
 func quoteBody(item *ilink.MessageItem) string {

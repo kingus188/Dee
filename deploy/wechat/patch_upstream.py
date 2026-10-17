@@ -148,17 +148,32 @@ replace_once("internal/ilink/types.go",
     '\tVideoItem *VideoItem `json:"video_item,omitempty"`\n\tRefMsg    *RefMessage `json:"ref_msg,omitempty"`\n}\n\n'
     '// RefMessage 是用户引用的那条消息：Title 是摘要，MessageItem 是内容（新版客户端可能只有摘要）。\n'
     'type RefMessage struct {\n\tTitle       string       `json:"title,omitempty"`\n\tMessageItem *MessageItem `json:"message_item,omitempty"`\n}')
+# 引用单独走 payload 的 quote 字段，绝不拼进 text：text 必须只有用户自己打的字，
+# 下游才能把发送授权只认在用户原话上，而不会被引用里的「确认发送」骗过去。
+replace_once("internal/bridge/webhook.go",
+    '\tReplyHint       string     `json:"reply_hint"`\n}',
+    '\tReplyHint       string     `json:"reply_hint"`\n'
+    '\t// Quote 是用户"引用回复"时被引用的那条消息，来自第三方，不是用户原话。\n'
+    '\tQuote string `json:"quote,omitempty"`\n}')
+replace_once("internal/bridge/poller.go",
+    '\tvar texts []string\n',
+    '\tvar texts []string\n\tvar quote string\n')
 replace_once("internal/bridge/poller.go",
     '\t\t\tif item.TextItem != nil && item.TextItem.Text != "" {\n\t\t\t\ttexts = append(texts, item.TextItem.Text)\n\t\t\t}',
     '\t\t\tif item.TextItem != nil && item.TextItem.Text != "" {\n'
-    '\t\t\t\tif quote := quoteText(item.RefMsg); quote != "" {\n'
+    '\t\t\t\tif q := quoteText(item.RefMsg); q != "" && quote == "" {\n'
     '\t\t\t\t\tp.log().Info("inbound quote", "has_title", item.RefMsg.Title != "", "has_item", item.RefMsg.MessageItem != nil)\n'
-    '\t\t\t\t\ttexts = append(texts, quote)\n'
+    '\t\t\t\t\tquote = q\n'
     '\t\t\t\t}\n'
     '\t\t\t\ttexts = append(texts, item.TextItem.Text)\n'
     '\t\t\t}')
+replace_once("internal/bridge/poller.go",
+    '\t\tReplyHint:       fmt.Sprintf("wx-bot send --binding %s --to %s --text \'...\'", p.Name, msg.FromUserID),\n',
+    '\t\tReplyHint:       fmt.Sprintf("wx-bot send --binding %s --to %s --text \'...\'", p.Name, msg.FromUserID),\n'
+    '\t\tQuote:           quote,\n')
 # 补丁引入的字段改变了结构体对齐，交给 gofmt 统一格式。
-subprocess.run(["gofmt", "-w", str(root / "internal/ilink/types.go")], check=True)
+for formatted in ("internal/ilink/types.go", "internal/bridge/webhook.go", "internal/bridge/poller.go"):
+    subprocess.run(["gofmt", "-w", str(root / formatted)], check=True)
 # 引用拼接函数和它的测试放在 extra/，避免在补丁脚本里内嵌 Go 源码。
 extra = Path(__file__).resolve().parent / "extra"
 for source in sorted(extra.rglob("*.go")):
