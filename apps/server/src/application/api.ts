@@ -46,6 +46,7 @@ export function createApi(context: AppContext) {
       }
     }
     if (method === "POST" && path === "/api/conversations/direct") return { status: 200, data: { id: await openDirectChat(context) } };
+    if (method === "POST" && path === "/api/conversations/direct/new") return { status: 200, data: { id: await openDirectChat(context, { fresh: true }) } };
     if (path === "/api/conversations") {
       if (method === "GET") return { status: 200, data: [...((await harness.snapshot(Index, ctx))?.items ?? [])].reverse() };
       if (method === "POST") {

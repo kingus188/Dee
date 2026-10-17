@@ -43,10 +43,14 @@ test("WebSocket 请求相关联，断线不重放写入，重连恢复订阅，�
   next.onmessage?.({ data: JSON.stringify({ type: "event", event: "view", data: { conversationId: 8 } as ConversationView }) });
   next.onmessage?.({ data: JSON.stringify({ type: "event", event: "view", data: { conversationId: 7 } as ConversationView }) });
   assert.deepEqual(received, [7]);
+  const switched = client.subscribeConversation(8); await Promise.resolve(); await Promise.resolve();
+  next.response(next.sent.at(-1)!.id, {}); await switched;
+  for (const conversationId of [7, 8]) next.onmessage?.({ data: JSON.stringify({ type: "event", event: "view", data: { conversationId } as ConversationView }) });
+  assert.deepEqual(received, [7, 8], "切换后忽略同一连接中迟到的旧会话事件");
   const timedOut = client.request("/api/info"); await Promise.resolve();
   const timeout = assert.rejects(timedOut, /请求超时/); t.mock.timers.tick(30_000); await timeout;
   client.close();
   await assert.rejects(client.connect(), /连接已关闭/);
   const resumed = client.resume(); const restored = Socket.all.at(-1)!; restored.open(); await resumed; await Promise.resolve();
-  assert.equal(restored.sent[0].path, "/api/conversations/7/events"); restored.response(restored.sent[0].id, {});
+  assert.equal(restored.sent[0].path, "/api/conversations/8/events"); restored.response(restored.sent[0].id, {});
 });

@@ -75,3 +75,24 @@ test("停用体验后保留模拟与未绑定模型的旧历史，并重复打�
     await rm(data, { recursive: true, force: true });
   }
 });
+
+test("显式新建保留旧会话与计划，之后默认恢复最新网页会话", async () => {
+  const data = await mkdtemp(join(tmpdir(), "pi-direct-new-"));
+  const app = await createApplication(readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: data, NOTIFY_MODE: "off" }));
+  try {
+    const previous = await openDirectChat(app);
+    const next = await openDirectChat(app, { fresh: true });
+    assert.notEqual(next, previous);
+    assert.equal(await openDirectChat(app), next);
+    assert.deepEqual(await Promise.all(Array.from({ length: 6 }, () => openDirectChat(app))), Array(6).fill(next));
+    assert.ok(await app.harness.conversation(previous, app.ctx));
+    const index = await app.harness.snapshot(Index, app.ctx);
+    assert.equal(index?.items.length, 2);
+    assert.ok(index?.items.every(item => item.channel === "web" && !item.archivedAt));
+  } finally {
+    app.taskGraph.dispose();
+    await app.harness.close(app.ctx);
+    app.modelSettings.close();
+    await rm(data, { recursive: true, force: true });
+  }
+});

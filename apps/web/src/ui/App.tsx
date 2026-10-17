@@ -20,7 +20,7 @@ const prompts = [
 ];
 
 export function App() {
-  const { view, connection, info, recoveredUntil, connectDirectChat } = useConversation();
+  const { view, connection, info, recoveredUntil, connectDirectChat, newConversation } = useConversation();
   const [page, setPage] = useState<"home" | "chat" | "settings">("home"), [group, setGroup] = useState<CardGroup | null>(null);
   const [draft, setDraft] = useState(""), [, tick] = useState(0), [moreOpen, setMoreOpen] = useState(false);
   const scroll = useRef<HTMLElement>(null), autoScroll = useRef(true), help = useRef<HTMLDialogElement>(null), more = useRef<HTMLDetailsElement>(null);
@@ -87,13 +87,13 @@ export function App() {
           <div id="message-history" aria-live="polite"><ChatThread view={view} /></div>
           <CardPanel view={view} group={group} setGroup={setGroup} onPrompt={prompt} />
         </section>
-        <footer className="input-container"><Composer draft={draft} setDraft={setDraft} view={view} connect={connectDirectChat} onSent={() => { autoScroll.current = true; setPage("chat"); }} />
-          <div className="composer-footer"><span className="composer-hint"><span>{info?.configured ? "已配置你的模型服务" : "请在设置中配置模型服务"}</span><span className="keyboard-hint">Enter 发送 · Shift + Enter 换行</span></span>
+        <footer className="input-container"><Composer draft={draft} setDraft={setDraft} view={view} connect={connectDirectChat} onSent={() => { autoScroll.current = true; setPage("chat"); }} onNewConversation={async () => { await newConversation(); autoScroll.current = true; setGroup(null); setPage("chat"); }} />
+          <div className="composer-footer"><span className="composer-hint"><span>{info?.configured ? "已配置你的模型服务" : "请在设置中配置模型服务"}</span><span className="keyboard-hint">/ 快捷指令 · Enter 发送 · Shift + Enter 换行</span></span>
             <details ref={more} className="chat-more" open={moreOpen} onToggle={event => setMoreOpen(event.currentTarget.open)} onKeyDown={event => { if (event.key === "Escape") { setMoreOpen(false); more.current?.querySelector("summary")?.focus(); } }}><summary aria-label="查看全部能力">查看全部能力<Icon name="chevron-down" /></summary><div className="chat-more-menu"><nav className="conversation-card-tools" aria-label="在聊天中查看">{groups.map(item => <button key={item.group} type="button" aria-pressed={group === item.group} onClick={() => openGroup(item.group)}>{item.label}</button>)}</nav></div></details>
           </div>
         </footer>
       </main>
     </div>
-    <dialog ref={help} className="help-dialog" aria-labelledby="help-title"><form method="dialog"><button className="icon-button close-help" aria-label="关闭使用指南"><Icon name="x" /></button></form><div className="help-mark"><Icon name="sparkles" /></div><h2 id="help-title">你好，我是小 D</h2><p>把想法写下来，或者交给我一件需要记住、整理和跟进的事。</p><ul><li>发送文字、图片或文件，继续同一段对话。</li><li>从左侧查看任务、记忆、技能和笔记。</li><li>记忆和技能会先请你确认，再保存使用。</li></ul><p className="help-note">使用前请配置真实模型。关闭整个桌面应用后，本地后台任务会暂停。</p></dialog>
+    <dialog ref={help} className="help-dialog" aria-labelledby="help-title"><form method="dialog"><button className="icon-button close-help" aria-label="关闭使用指南"><Icon name="x" /></button></form><div className="help-mark"><Icon name="sparkles" /></div><h2 id="help-title">你好，我是小 D</h2><p>把想法写下来，或者交给我一件需要记住、整理和跟进的事。</p><ul><li>发送文字、图片或文件，继续同一段对话。</li><li>输入 / 选择快捷指令：/new 新建对话，/help 查看说明，/stop 停止回复。</li><li>从左侧查看任务、记忆、技能和笔记。</li><li>记忆和技能会先请你确认，再保存使用。</li></ul><p className="help-note">使用前请配置真实模型。关闭整个桌面应用后，本地后台任务会暂停。</p></dialog>
   </>;
 }

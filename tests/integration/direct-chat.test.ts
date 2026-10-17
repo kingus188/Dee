@@ -27,11 +27,22 @@ test("固定聊天并发打开不重复创建，更换话题与重启都保留�
     assert.equal(plan.schedules[0].status, "active");
     await post(origin, "/api/conversations");
     assert.equal((await post(origin, "/api/conversations/direct")).id, id, "旧接口新建的记录不会抢走固定聊天");
+    const next = (await post(origin, "/api/conversations/direct/new")).id;
+    assert.notEqual(next, id);
+    assert.equal((await post(origin, "/api/conversations/direct")).id, next);
+    const fresh = await readView(origin, next);
+    assert.equal(fresh.entries.length, 0);
+    await post(origin, `/api/conversations/${next}/messages`, { text: "这是独立的新对话", mode: "steer" });
+    const newView = await readView(origin, next, value => value.entries.some(entry => entry.text === "这是独立的新对话"));
+    assert.ok(!newView.entries.some(entry => entry.text === "先聊今天的安排"));
+    const oldPlan = await (await fetch(origin + `/api/conversations/${id}/management`)).json();
+    assert.equal(oldPlan.schedules[0].status, "active", "新建不取消旧会话的计划");
     await stop(app.child);
     app = await launch(dir, await freePort());
-    assert.equal((await post(app.origin, "/api/conversations/direct")).id, id);
+    assert.equal((await post(app.origin, "/api/conversations/direct")).id, next);
     const restored = await readView(app.origin, id);
     assert.ok(restored.entries.some(entry => entry.text === "换个话题，晚餐吃什么"));
+    assert.ok((await readView(app.origin, next)).entries.some(entry => entry.text === "这是独立的新对话"));
   } finally {
     if (app) await stop(app.child);
     await rm(dir, { recursive: true, force: true });
@@ -43,11 +54,13 @@ test("固定聊天入口继承鉴权与同源限制", async () => {
   let app: Awaited<ReturnType<typeof launch>> | undefined;
   try {
     app = await launch(dir, await freePort(), { DEMO_PASSWORD: "local-test-password" });
-    const url = app.origin + "/api/conversations/direct";
-    assert.equal((await fetch(url, { method: "POST" })).status, 401);
     const authorization = "Basic " + Buffer.from("demo:local-test-password").toString("base64");
-    assert.equal((await fetch(url, { method: "POST", headers: { authorization, origin: "https://untrusted.example" } })).status, 403);
-    assert.equal((await fetch(url, { method: "POST", headers: { authorization, origin: app.origin, "content-type": "application/json" }, body: "{}" })).status, 200);
+    for (const path of ["/api/conversations/direct", "/api/conversations/direct/new"]) {
+      const url: string = app.origin + path;
+      assert.equal((await fetch(url, { method: "POST" })).status, 401);
+      assert.equal((await fetch(url, { method: "POST", headers: { authorization, origin: "https://untrusted.example" } })).status, 403);
+      assert.equal((await fetch(url, { method: "POST", headers: { authorization, origin: app.origin, "content-type": "application/json" }, body: "{}" })).status, 200);
+    }
   } finally {
     if (app) await stop(app.child);
     await rm(dir, { recursive: true, force: true });
