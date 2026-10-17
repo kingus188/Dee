@@ -1,12 +1,12 @@
-# 小 D · 个人数字人助手
+# Pi Durable Assistant · 小 D
 
 **有自己的形象，记得你的约定，把交代的事情继续做完。**
 
-小 D 是一个可以自托管的个人数字人助手。你通过对话交代事情，它用动态形象呈现工作状态，保存经你确认的记忆，安排提醒，并在后台处理需要时间的任务。
+小 D 是一个可以自托管的个人 AI 助手，提供 Electron 桌面端和 Web 界面，可接入微信 iLink 与 Teams 消息。你通过对话交代事情，它用动态形象呈现工作状态，记住偏好、回顾历史、安排提醒，并在后台处理需要时间的任务。
 
 项目名称为 **Pi Durable Assistant**，基于 [Pi Durable](https://github.com/earendil-works/pi) 构建。数字形象负责表达，持久化 Agent 负责执行：关闭网页后，服务端仍可继续工作；服务重启后，可恢复的任务从持久化状态继续运行。
 
-[English](README.en.md) · [快速开始](docs/GETTING_STARTED.md) · [配置说明](docs/CONFIGURATION.md) · [架构与开发](docs/ARCHITECTURE.md)
+[English](README.en.md) · [快速开始](docs/GETTING_STARTED.md) · [桌面程序](apps/desktop/README.md) · [配置说明](docs/CONFIGURATION.md) · [架构与开发](docs/ARCHITECTURE.md)
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B-43853d?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![CI](https://github.com/kingus188/pi-durable-assistant/actions/workflows/v3-ci.yml/badge.svg)](https://github.com/kingus188/pi-durable-assistant/actions/workflows/v3-ci.yml)
@@ -14,13 +14,15 @@
 
 > 当前是面向个人、单用户的实验性实现，交互以文字对话和二维动态形象为主。实时语音、口型同步、写实视频形象尚未实现。
 
-## 我们希望小 D 成为什么
+## 核心能力
 
 一个长期为你工作的数字伙伴，需要让你认得它、知道它在做什么，也能接着上次的事情继续。
 
 - **看得见的状态。** 小 D 会用表情和状态文字反馈思考、工具执行、等待、断线和恢复。形象变化对应程序运行状态。
-- **由你决定的记忆。** 偏好、稳定事实和常用流程可以跨会话保留。助手提出的记忆和技能先等待批准，再用于后续对话。
+- **偏好与历史记忆。** 助手提出的长期记忆和技能先等待批准，再用于后续对话。另有自动整理的网页、微信和 Teams 历史摘要，用于回顾背景和待跟进事项；摘要可能遗漏细节，不作为已确认事实。
 - **能够持续的行动。** 提醒、周期计划和后台任务有持久化记录。离开网页后，事情可以继续推进。
+- **有出处的资料。** 只读检索配置好的 Obsidian 笔记；工作资料区分现行、待确认和归档状态，回答附路径和行号。
+- **跨入口协作。** 桌面端内置本地服务，网页用于远程访问；可选接入微信聊天，以及 Teams 消息检索和重点消息转发。桌面端与独立 Web 服务各自保存数据，不自动同步。
 - **可管理的个人空间。** 对话、记忆和任务状态保存在你部署的实例中；你可以停止任务、管理记忆、归档会话和导出对话。
 
 ## 可以交给小 D 的事
@@ -35,29 +37,62 @@
 | “阅读这个公开网页，后台整理重点，完成后告诉我。” | 抓取公开网页文字，将适合的工作交给后台子 Agent |
 | “帮我找一下笔记里关于这个项目的决定，附上出处。” | 在配置好的 Obsidian 白名单目录中只读检索，返回路径和行号 |
 | “把这套步骤整理成技能，以后遇到类似事情再用。” | 提交技能候选，批准后按需读取流程；不会重新训练模型 |
+| “上次在微信里说的那件事，后来进展怎么样？” | 按关键词回顾已整理的跨渠道历史摘要，返回日期、来源和待跟进事项 |
+| “帮我查一下 Teams 里还有哪些消息没回复。” | 检索桌面端已采集的 Teams 消息；需要配置账号及相应权限 |
+| “看看今天有哪些 Outlook 邮件，读一下张三那封报价。” | 公司 Microsoft 365 收件箱只读查询与正文读取；可复用现有公司账号配置或在设置页交互授权 |
 
-网页支持多会话、会话分叉、流式回复，以及图片和文本附件。可选的微信 iLink 通道用于收发文字及微信提供的语音转写文字。通用 Webhook 和飞书机器人可用于发送任务通知。
+网页左侧「日报」支持按日期手写 Markdown、预览、保存和查看历史，一天一篇，可补写或修改。日报不需要配置模型，保存到当前实例的 SQLite；切换导航保留未保存草稿，刷新或关闭前仍需点击「保存日报」。多个页面同时修改时会阻止旧版本覆盖，保留当前正文供复制、重新读取后合并。
+
+Outlook 邮件支持桌面端和独立 Web 服务。桌面端默认复用现有 `wechat/teams-forward-config.json` 公司账号，Web 可用 `MAIL_ACCOUNT_FILE` 指定同格式文件；首次无邮件配置时自动连接，后续尊重暂停与断开。也可在「设置 → Outlook 邮件」填写公司 Entra 应用 Tenant ID、Client ID，使用设备代码交互登录（支持 MFA）；公司要求 MFA 时不能用密码方式替代。首次同步近 30 天收件箱，不提醒历史邮件；之后约每分钟增量同步，Web 显示横幅，桌面端可弹系统通知。不发送、不改变已读、不下载附件。详见[邮件配置与限制](docs/CONFIGURATION.md#outlook--microsoft-365-邮件当前工作区)。
+
+网页支持多会话、会话分叉、流式回复，以及图片和文本附件；任务、提醒、记忆和技能通过对话卡片管理。可选的微信 iLink 通道用于收发文字及微信提供的语音转写文字。通用 Webhook 和飞书机器人可用于发送任务通知。
+
+桌面端和 Web 聊天框支持快捷指令。输入 `/` 查看候选，↑↓ 选择，Tab 补全，Enter 执行，Esc 关闭菜单；Shift + Enter 仍然换行，中文输入法选词不会执行指令。
+
+- `/new`：新建并切换到独立对话，保留旧记录及原有提醒和计划；刷新或重启后默认恢复最新的网页对话。正在回复时先用 `/stop` 停止。
+- `/help`：在输入框上方显示指令说明，不发送给模型。
+- `/stop`：停止当前对话的回复，与“停止”按钮相同，不取消独立的后台计划。
+
+指令须独占一行、不带参数或附件；带参数及未知指令会提示并保留草稿。正文中提到 `/new`、多行文本或 `/path/to/file` 仍按普通消息发送。本次不改变微信、Teams 的指令行为。
+
+### 本地待同步能力
+
+以下能力已在本地提交中实现，尚未同步到 GitHub `main`；直接克隆远端暂不可用：
+
+- **资料沉淀：** 将对话整理为待确认的工作资料，确认后转为现行，同名旧资料自动归档。
+- **Teams 回复：** 展示目标聊天和回复草稿，用户本人发送「确认发送」后才发出；需要桌面端登录及发送权限。
+- **代码任务：** 为配置好的本机仓库启动 Codex 或 Claude Code，在独立 git worktree 中排查修复或开发功能，产出报告和分支。用户审阅后发送「确认合并 任务ID」才本地合并，不自动推送或发布。需要额外安装并登录所选编码工具。
 
 ## 本机运行
 
-需要 **Node.js ≥ 22.19**、pnpm 12.9.1、Git，以及可用的真实模型服务。
+需要 **Node.js ≥ 22.19**、pnpm 12.9.1 和 Git；聊天与后台任务还需要可用的真实模型服务。
 
 ```bash
 git clone https://github.com/kingus188/pi-durable-assistant.git
 cd pi-durable-assistant
 corepack enable
 pnpm install --frozen-lockfile
-cp .env.example .env
-# 用编辑器填写 LLM_API、LLM_BASE_URL、LLM_API_KEY、LLM_MODEL
-set -a
-. ./.env
-set +a
+```
+
+**桌面端：** 内置本地服务，无需另开终端运行服务端。
+
+```bash
+pnpm run desktop
+```
+
+**Web：** 启动后打开 **http://127.0.0.1:3000**。
+
+```bash
 pnpm run dev
 ```
 
-打开 **http://127.0.0.1:3000**。也可在左侧「设置」填写模型连接，保存后重启服务生效；没有配置时先进入设置页，不启动模型生成或后台任务。连接和 Key 保存到 SQLite，后续启动无需重复注入模型环境变量。产品不提供模拟体验或无模型回复。旧模拟会话及未记录模型的历史会话会保留，正式聊天使用新的真实模型会话。
+首次打开，在左侧「设置」填写模型接口、Base URL、模型 ID 和 API Key，保存后重启应用或服务生效。没有配置时先进入设置页，不启动模型生成或后台任务。连接和 Key 保存到 SQLite，后续启动无需重复注入模型环境变量。Key 在数据库中为明文，数据目录和备份需按凭据保管。也可由环境变量注入配置，见 [配置说明](docs/CONFIGURATION.md)。
+
+产品不提供模拟体验或无模型回复。旧模拟会话及未记录模型的历史会话会保留，正式聊天使用新的真实模型会话。
 
 支持 `openai-completions`、`openai-responses` 和 `anthropic-messages` 三类接口。具体模型、图片理解能力、费用和数据处理方式由所选服务商决定。知识库、通知和微信接入需要单独配置，见 [配置说明](docs/CONFIGURATION.md)。
+
+桌面端使用 Electron 应用数据目录，独立于仓库下的 Web 数据。macOS 关闭窗口后任务仍可运行，`Cmd+Q` 完全退出后停止本地服务；Windows/Linux 关闭最后一个窗口即退出。再次启动时尝试恢复可恢复的任务。打包命令为 `pnpm run desktop:package`，产物位于 `dist/desktop/`；目前没有分发签名、公证和自动更新。详见 [桌面程序](apps/desktop/README.md)。
 
 ## 让小 D 持续运行
 
@@ -72,15 +107,15 @@ docker compose ps
 
 默认访问地址为 **http://127.0.0.1:3300**。对外提供访问时配置 HTTPS 反向代理，并保留登录鉴权；HTTP Basic Auth 用户名为 `demo`。升级前备份数据卷，**不要用 `docker compose down -v` 升级**，它会删除持久数据。
 
-详细步骤见 [部署与备份](docs/DEPLOYMENT.md)。微信接入见 [微信 iLink 手册](docs/WECHAT.md)，需要额外启动 `wx-bot` 容器并完成扫码。
+详细步骤见 [部署与备份](docs/DEPLOYMENT.md)。Docker 微信接入需要额外启动 `wx-bot` 容器并完成扫码；桌面端可管理本地桥接进程，需准备对应二进制。微信与 Teams 配置见 [微信 iLink 手册](docs/WECHAT.md)。
 
 ## 当前边界
 
 - **形象与声音：** 当前使用 SVG/CSS 动态形象，没有实时语音对话、声音克隆、口型驱动、Live2D 或三维模型接入。
 - **记忆与数据：** 自托管保存对话和记忆；调用外部模型时，相关消息、附件和检索内容仍可能发送给模型服务商。不要提交 `.env`、密钥或微信会话凭据。
-- **执行与恢复：** 恢复依赖已保存的状态和对应任务的可恢复性，不保证任意外部操作只执行一次。周期计划按固定分钟间隔运行，不是支持时区和夏令时的日历调度。
+- **执行与恢复：** 恢复依赖已保存的状态和对应任务的可恢复性，不保证任意外部操作只执行一次。周期计划按固定分钟间隔运行，不是支持时区和夏令时的日历调度。本地待同步的编码 Agent 任务由服务进程持有，重启会中断，分支上已提交的内容保留。
 - **消息送达：** 通用 Webhook／飞书通知为尽力发送，网络故障可能丢失通知。微信有独立持久发送队列，仍可能重复投递或受平台限制；真实微信扫码和生产送达需单独验收。
-- **附件与权限：** 网页单次最多 5 个附件，图片每个 5 MiB、文本每个 200 KiB、总计 10 MiB。微信图片、视频和文件尚不解析。知识库只读，不提供任意本地文件写入或通用电脑控制。
+- **附件与权限：** 网页单次最多 5 个附件，图片每个 5 MiB、文本每个 200 KiB、总计 10 MiB。微信图片、视频和文件尚不解析。Obsidian 知识库只读；本地待同步的资料写入限于指定资料目录，代码修改限于配置仓库的 worktree，不提供通用电脑控制。
 - **适用范围：** 当前面向个人使用，尚无多租户隔离和企业角色权限体系。归档会停止该会话未完成的任务；从列表移除会话不等于彻底删除其持久化记录。
 
 ## 数字人方向
@@ -97,15 +132,16 @@ docker compose ps
 
 ## 开发与扩展
 
-技术栈：**TypeScript / React / Node.js / Pi Durable 1.1.0 / SQLite / WebSocket**。使用 pnpm workspaces、`tsc` 和 esbuild；网页构建已包含在现有 build 命令中，无需独立数据库服务。
+技术栈：**TypeScript / React / Electron / Node.js / Pi Durable 1.1.0 / SQLite / WebSocket**。使用 pnpm workspaces、`tsc` 和 esbuild；网页构建已包含在现有 build 命令中，无需独立数据库服务。
 
 | 目录 | 职责 |
 | --- | --- |
 | `apps/web` | 小 D 的数字形象、对话和交互界面 |
+| `apps/desktop` | Electron 桌面入口、本地服务和消息通道集成 |
 | `apps/server` | 服务启动、鉴权、HTTP/WebSocket 和应用用例 |
 | `packages/contracts` | 前后端共同使用的协议类型 |
 | `packages/runtime` | 模型接入、会话与持久化运行时 |
-| `packages/features` | 记忆、技能、笔记、知识检索、提醒和任务 |
+| `packages/features` | 记忆、技能、资料、知识检索、提醒、任务和 Teams 工具 |
 | `packages/channel-wechat` | 微信消息适配与持久发送队列 |
 | `tests/integration` | 跨模块接口与恢复行为验证 |
 
@@ -121,7 +157,7 @@ pnpm test
 
 ## 更多文档
 
-[快速开始](docs/GETTING_STARTED.md) · [配置](docs/CONFIGURATION.md) · [部署与备份](docs/DEPLOYMENT.md) · [微信接入](docs/WECHAT.md) · [故障排查](docs/TROUBLESHOOTING.md) · [v3 设计记录](docs/V3_PLAN.md) · [知识库需求](docs/KNOWLEDGE_FEATURE_REQUIREMENTS.md)
+[快速开始](docs/GETTING_STARTED.md) · [桌面程序](apps/desktop/README.md) · [配置](docs/CONFIGURATION.md) · [部署与备份](docs/DEPLOYMENT.md) · [微信与 Teams](docs/WECHAT.md) · [故障排查](docs/TROUBLESHOOTING.md) · [v3 设计记录](docs/V3_PLAN.md) · [知识库需求](docs/KNOWLEDGE_FEATURE_REQUIREMENTS.md)
 
 部分文档记录了早期任务中心界面和历史设计；具体界面操作以所运行版本为准，功能规划不代表已实现能力。
 

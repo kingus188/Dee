@@ -1,12 +1,12 @@
-# Xiao D · Personal Digital Companion
+# Pi Durable Assistant · Xiao D
 
 **A familiar face, a memory of your preferences, and an assistant that keeps working.**
 
-Xiao D is a self-hosted personal AI companion with an animated avatar. Give it a task through conversation, see its working state, approve what it remembers, and let longer tasks run in the background.
+Xiao D is a self-hosted personal AI assistant with an Electron desktop app, a web interface, and optional WeChat iLink and Teams message integrations. Give it a task through conversation, see its working state through an animated avatar, remember preferences, recall past work, and let longer tasks run in the background.
 
 The project, **Pi Durable Assistant**, is built on [Pi Durable](https://github.com/earendil-works/pi). The avatar communicates activity; the durable Agent runtime handles execution. Work can continue after you close the browser, and recoverable tasks resume from persisted state after a server restart.
 
-[简体中文](README.md) · [Getting started](docs/GETTING_STARTED.md) · [Configuration](docs/CONFIGURATION.md) · [Architecture](docs/ARCHITECTURE.md)
+[简体中文](README.md) · [Getting started](docs/GETTING_STARTED.md) · [Desktop app](apps/desktop/README.md) · [Configuration](docs/CONFIGURATION.md) · [Architecture](docs/ARCHITECTURE.md)
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B-43853d?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![CI](https://github.com/kingus188/pi-durable-assistant/actions/workflows/v3-ci.yml/badge.svg)](https://github.com/kingus188/pi-durable-assistant/actions/workflows/v3-ci.yml)
@@ -14,13 +14,15 @@ The project, **Pi Durable Assistant**, is built on [Pi Durable](https://github.c
 
 > An experimental, single-user application. Today, interaction uses text and a two-dimensional animated avatar. Real-time voice, lip synchronization and photorealistic video avatars are not implemented.
 
-## What Xiao D is becoming
+## Core capabilities
 
 A personal digital companion should be recognizable, make its activity understandable, and help you pick up where you left off.
 
 - **Visible activity.** Expressions and short status messages reflect thinking, tool use, waiting, disconnection and recovery. Animation follows application state.
-- **Memory you control.** Preferences, stable facts and reusable procedures can carry across conversations. Assistant-proposed memories and skills require approval before use.
+- **Preferences and history.** Assistant-proposed long-term memories and skills require approval before use. Separately, automatic summaries of web, WeChat and Teams history help recall context and open items; they can omit details and are not confirmed facts.
 - **Work that continues.** Reminders, recurring plans and background tasks have persistent records. The server can keep working while you are away from the browser.
+- **Sources you can check.** Search configured Obsidian notes in read-only mode. Work materials distinguish current documents, drafts and archives, with file and line citations.
+- **Multiple ways to connect.** The desktop app includes a local server; the web interface supports remote access. Optional integrations add WeChat conversations, Teams message search and forwarding of important messages. Desktop and standalone web instances store their data separately, without automatic synchronization.
 - **A personal space you manage.** Conversations, memory and task state are stored in your instance. You can stop tasks, manage memories, archive conversations and export chat text.
 
 ## Things to try
@@ -35,29 +37,49 @@ These examples require a real model. Results depend on the selected model and th
 | “Read this public webpage and summarize it in the background.” | Retrieve public webpage text and delegate suitable work to a background Agent |
 | “Find the decision about this project in my notes, with sources.” | Search configured, allowlisted Obsidian folders with file and line citations |
 | “Save these steps as a skill for similar work later.” | Propose a reusable procedure for approval; this does not retrain the model |
+| “What happened with the issue we discussed on WeChat?” | Search collected cross-channel summaries, including dates, sources and open items |
+| “Which Teams messages still need my reply?” | Search Teams messages collected by the desktop app; account configuration and permissions are required |
 
-The web interface supports multiple conversations, conversation forks, streamed responses, and image/text attachments. An optional WeChat iLink bridge handles text and voice-transcription text provided by WeChat. Generic Webhooks and Feishu bots can deliver task notifications.
+The web interface supports multiple conversations, conversation forks, streamed responses, and image/text attachments. Conversation cards manage tasks, reminders, memories and skills. An optional WeChat iLink bridge handles text and voice-transcription text provided by WeChat. Generic Webhooks and Feishu bots can deliver task notifications.
+
+### Local changes awaiting publication
+
+The following capabilities exist in local commits but have not been synchronized to GitHub `main`. A clone of the remote repository does not include them yet:
+
+- **Saving work materials:** Turn conversation content into a draft, approve it as current, and archive an older document with the same name.
+- **Teams replies:** Show the target chat and draft, then send only after the user says `确认发送`. Requires desktop account access and send permissions.
+- **Coding tasks:** Run Codex or Claude Code in a separate git worktree for an allowlisted local repository, producing a report and branch. A local merge requires the user's `确认合并 <task ID>` message after review; tasks do not automatically push or deploy. The selected coding tool must be installed and authenticated separately.
 
 ## Run locally
 
-Requires **Node.js ≥ 22.19**, pnpm 12.9.1, Git and a configured model service.
+Requires **Node.js ≥ 22.19**, pnpm 12.9.1 and Git. Chat and background tasks also require a working model service.
 
 ```bash
 git clone https://github.com/kingus188/pi-durable-assistant.git
 cd pi-durable-assistant
 corepack enable
 pnpm install --frozen-lockfile
-cp .env.example .env
-# Set LLM_API, LLM_BASE_URL, LLM_API_KEY and LLM_MODEL in an editor
-set -a
-. ./.env
-set +a
+```
+
+**Desktop:** Includes a local server; no separate server process is needed.
+
+```bash
+pnpm run desktop
+```
+
+**Web:** Start the server and open **http://127.0.0.1:3000**.
+
+```bash
 pnpm run dev
 ```
 
-Open **http://127.0.0.1:3000** and talk to Xiao D. Configure a real model before starting; the product no longer offers a simulated demo or a model-free fallback. Previous simulated conversations and legacy conversations without an explicit model remain stored, while real-model chat starts in a separate conversation.
+On first launch, open Settings in the left sidebar and enter the API protocol, Base URL, model ID and API key. Save and restart the app or server. Without a model connection, settings remain available but generation and background tasks do not start. Connections and keys are stored in SQLite for subsequent launches. Keys are stored as plaintext, so protect the data directory and backups as credentials. Environment-based configuration is also supported; see [Configuration](docs/CONFIGURATION.md).
+
+The product does not offer simulated replies or a model-free fallback. Previous simulated conversations and legacy conversations without an explicit model remain stored, while real-model chat starts in a separate conversation.
 
 Supported API protocols are `openai-completions`, `openai-responses` and `anthropic-messages`. Model availability, image understanding, costs and data handling depend on your provider. Knowledge search, notifications and WeChat need separate configuration; see [Configuration](docs/CONFIGURATION.md).
+
+Desktop data lives in Electron's application data directory, separately from the web instance's data. On macOS, closing the window keeps tasks running; `Cmd+Q` stops the local service. On Windows/Linux, closing the last window exits the app. Restarting attempts to resume recoverable tasks. Run `pnpm run desktop:package` to produce an application under `dist/desktop/`; distribution signing, notarization and automatic updates are not included. See the [desktop guide](apps/desktop/README.md).
 
 ## Keep Xiao D running
 
@@ -72,15 +94,15 @@ docker compose ps
 
 The default address is **http://127.0.0.1:3300**. For remote access, use an HTTPS reverse proxy and retain authentication; the HTTP Basic Auth username is `demo`. Back up volumes before upgrading. **Do not use `docker compose down -v` to upgrade**, as it removes persistent data.
 
-See [Deployment and backups](docs/DEPLOYMENT.md). The [WeChat iLink guide](docs/WECHAT.md) covers the additional `wx-bot` container and QR-code login. Detailed guides are primarily in Chinese.
+See [Deployment and backups](docs/DEPLOYMENT.md). Docker-based WeChat access needs an additional `wx-bot` container and QR-code login. The desktop app can manage a local bridge process when its binary is available. The [WeChat and Teams guide](docs/WECHAT.md) covers channel configuration. Detailed guides are primarily in Chinese.
 
 ## Current boundaries
 
 - **Avatar and voice:** SVG/CSS animation is available. Real-time voice conversation, voice cloning, lip synchronization, Live2D and 3D model integration are not implemented.
 - **Memory and data:** Self-hosting stores conversations and memory in your instance. Relevant messages, attachments and retrieved text may still be sent to an external model provider. Never commit `.env`, API keys or WeChat credentials.
-- **Execution and recovery:** Recovery depends on persisted state and the task's recovery semantics. It does not guarantee exactly-once execution of arbitrary external operations. Recurring jobs use fixed-minute intervals, not timezone-aware calendar scheduling.
+- **Execution and recovery:** Recovery depends on persisted state and the task's recovery semantics. It does not guarantee exactly-once execution of arbitrary external operations. Recurring jobs use fixed-minute intervals, not timezone-aware calendar scheduling. Coding tasks in the unpublished local changes are owned by the server process and stop on restart; committed branch changes remain available.
 - **Delivery:** Generic Webhook and Feishu notifications are best-effort and can be lost. WeChat has its own persistent delivery queue, but duplicates and platform restrictions remain possible. Real WeChat login and production delivery need separate validation.
-- **Attachments and access:** Web uploads allow 5 files, up to 5 MiB per image, 200 KiB per text file and 10 MiB total. WeChat images, videos and files are not parsed. Knowledge search is read-only; arbitrary local file writing and general computer control are not provided.
+- **Attachments and access:** Web uploads allow 5 files, up to 5 MiB per image, 200 KiB per text file and 10 MiB total. WeChat images, videos and files are not parsed. Obsidian access is read-only. In the unpublished local changes, material writes target the designated materials directory and coding changes target configured repository worktrees. General computer control is not provided.
 - **Scope:** This is a personal application without tenant isolation or enterprise role management. Archiving stops that conversation's unfinished tasks. Removing it from the list does not erase all persisted records.
 
 ## Direction
@@ -97,15 +119,16 @@ Future work focuses on identity, expression and sustained collaboration. These a
 
 ## Development
 
-**TypeScript / React / Node.js / Pi Durable 1.1.0 / SQLite / WebSocket.** The project uses pnpm workspaces, `tsc` and esbuild. The existing build command includes the web bundle; no separate database server is required.
+**TypeScript / React / Electron / Node.js / Pi Durable 1.1.0 / SQLite / WebSocket.** The project uses pnpm workspaces, `tsc` and esbuild. The existing build command includes the web bundle; no separate database server is required.
 
 | Directory | Responsibility |
 | --- | --- |
 | `apps/web` | Xiao D's avatar, conversation interface and interactions |
+| `apps/desktop` | Electron entry point, local server and messaging integrations |
 | `apps/server` | Startup, authentication, HTTP/WebSocket and application use cases |
 | `packages/contracts` | Shared frontend/backend protocol types |
 | `packages/runtime` | Model integration, sessions and the durable runtime |
-| `packages/features` | Memory, skills, notes, knowledge search, reminders and tasks |
+| `packages/features` | Memory, skills, materials, knowledge search, reminders, tasks and Teams tools |
 | `packages/channel-wechat` | WeChat message handling and the persistent delivery queue |
 | `tests/integration` | Cross-module API and recovery verification |
 
@@ -121,7 +144,7 @@ Automated tests cover simulated local models, APIs, persistence and recovery. Th
 
 ## Further reading
 
-[Getting started](docs/GETTING_STARTED.md) · [Configuration](docs/CONFIGURATION.md) · [Deployment](docs/DEPLOYMENT.md) · [WeChat](docs/WECHAT.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [v3 design record](docs/V3_PLAN.md) · [Knowledge requirements](docs/KNOWLEDGE_FEATURE_REQUIREMENTS.md)
+[Getting started](docs/GETTING_STARTED.md) · [Desktop app](apps/desktop/README.md) · [Configuration](docs/CONFIGURATION.md) · [Deployment](docs/DEPLOYMENT.md) · [WeChat and Teams](docs/WECHAT.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [v3 design record](docs/V3_PLAN.md) · [Knowledge requirements](docs/KNOWLEDGE_FEATURE_REQUIREMENTS.md)
 
 Some guides describe the earlier Task Center interface and historical designs. Follow the interface in your running version; planned features are not evidence of implemented capabilities.
 
