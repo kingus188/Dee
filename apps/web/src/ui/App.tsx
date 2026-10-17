@@ -7,6 +7,7 @@ import { CardPanel } from "../tasks/CardPanel.js";
 import { Icon } from "./Icon.js";
 import { Welcome } from "./Welcome.js";
 import { ModelSettings } from "../settings/ModelSettings.js";
+import { DailyReports } from "../daily-reports/DailyReports.js";
 import { mascotStatus, ROBOT_SVG_CONTENT } from "./mascot.js";
 
 const groups: { group: CardGroup; label: string; icon: string }[] = [
@@ -21,7 +22,8 @@ const prompts = [
 
 export function App() {
   const { view, connection, info, recoveredUntil, connectDirectChat, newConversation } = useConversation();
-  const [page, setPage] = useState<"home" | "chat" | "settings">("home"), [group, setGroup] = useState<CardGroup | null>(null);
+  const [page, setPage] = useState<"home" | "chat" | "settings" | "reports">("home"), [group, setGroup] = useState<CardGroup | null>(null);
+  const [reportsOpened, setReportsOpened] = useState(false);
   const [draft, setDraft] = useState(""), [, tick] = useState(0), [moreOpen, setMoreOpen] = useState(false);
   const scroll = useRef<HTMLElement>(null), autoScroll = useRef(true), help = useRef<HTMLDialogElement>(null), more = useRef<HTMLDetailsElement>(null);
   const service = useRef<HTMLDetailsElement>(null);
@@ -55,7 +57,7 @@ export function App() {
   const mascot = mascotStatus({ currentViewData: view, isDisconnected: connection !== "connected", isRecovered: recoveredUntil > Date.now(), recoveredUntil });
   function prompt(text: string) { setDraft(text); document.getElementById("chat-textarea")?.focus(); }
   function openGroup(next: CardGroup) { setGroup(next); setPage("chat"); setMoreOpen(false); }
-  function navigate(next: "home" | "chat" | "settings") { setPage(next); setGroup(null); }
+  function navigate(next: "home" | "chat" | "settings" | "reports") { if (next === "reports") setReportsOpened(true); setPage(next); setGroup(null); }
   return <>
     {connection !== "connected" && <div id="reconnect-banner" className="reconnect-banner" style={{ display: "flex" }} role="status"><div className="reconnect-spinner" /><span>{connection === "connecting" ? "正在连接小 D…" : "与服务器断开，正在重连…"}</span></div>}
     <div className="app-layout" id="mascot-card" data-state={mascot.state}>
@@ -66,6 +68,7 @@ export function App() {
           <button className="rail-button" type="button" aria-current={page === "chat" && !group ? "page" : undefined} aria-label="继续对话" onClick={() => navigate("chat")}><Icon name="message-circle" /><span>对话</span></button>
           <div className="rail-divider" />
           {groups.map(item => <button key={item.group} className="rail-button" type="button" aria-label={item.label} aria-current={page === "chat" && group === item.group ? "page" : undefined} onClick={() => openGroup(item.group)}><Icon name={item.icon} /><span>{item.label.split("与")[0].replace("长期", "").replace("我的", "")}</span></button>)}
+          <button className="rail-button" type="button" aria-label="每日日报" aria-current={page === "reports" ? "page" : undefined} onClick={() => navigate("reports")}><Icon name="calendar-days" /><span>日报</span></button>
           <button className="rail-button" type="button" aria-label="模型设置" aria-current={page === "settings" ? "page" : undefined} onClick={() => navigate("settings")}><Icon name="settings" /><span>设置</span></button>
         </nav>
         <div className="rail-bottom"><button className="rail-button" type="button" aria-label="使用指南" onClick={() => help.current?.showModal()}><Icon name="circle-help" /><span>指南</span></button><div className="workspace-avatar" aria-label="个人空间">D<span /></div></div>
@@ -82,6 +85,7 @@ export function App() {
         </header>
         <Welcome />
         {page === "settings" && <ModelSettings onBack={() => navigate("chat")} />}
+        {reportsOpened && <DailyReports active={page === "reports"} />}
         <section ref={scroll} className="messages-container" id="messages-container" aria-label="与小 D 的对话" onScroll={() => { const el = scroll.current!; autoScroll.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
           <div className="conversation-heading"><span><Icon name="message-circle" />与小 D 的对话</span><button className="text-button" type="button" onClick={() => navigate("home")}>回到首页<Icon name="arrow-up-right" /></button></div>
           <div id="message-history" aria-live="polite"><ChatThread view={view} /></div>

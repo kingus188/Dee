@@ -8,14 +8,22 @@ import { createMessages } from "./messages.js";
 import { createManagement } from "./management.js";
 import { createPersonalService } from "./personal.js";
 import { createViews } from "./views.js";
+import { createDailyReports } from "../daily-reports.js";
 
 // HTTP 与 WebSocket 共用用例和错误语义。
 export function createApi(context: AppContext) {
   const { harness, ctx, agentModel, config, modelLabel, startedAt, wechat } = context;
   const conversations = createConversations(context), views = createViews(context);
   const messages = createMessages(context, conversations), tasks = createManagement(context, views), personal = createPersonalService(context);
+  const dailyReports = createDailyReports(config.dataDir);
   async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}) {
     const path = url.pathname;
+    if (method === "GET" && path === "/api/daily-reports") return { status: 200, data: dailyReports.list() };
+    const report = path.match(/^\/api\/daily-reports\/([^/]+)$/);
+    if (report) {
+      if (method === "GET") return { status: 200, data: dailyReports.get(report[1]) };
+      if (method === "POST") return { status: 200, data: dailyReports.save(report[1], body) };
+    }
     if (path === "/api/settings/model") {
       if (method === "GET") return { status: 200, data: context.modelSettings.get() };
       if (method === "POST") return { status: 200, data: await context.modelSettings.save(body) };
