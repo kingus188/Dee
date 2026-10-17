@@ -8,7 +8,8 @@ export type TeamsMessageRow = {
 };
 export type TeamsInboxQuery = { unreplied?: boolean; sender?: string; chat?: string; sinceHours?: number; limit: number };
 // 存储由宿主注入（SQLite 在 server 层），功能包只依赖这个只读接口。
-export type TeamsInboxReader = { list(query: TeamsInboxQuery): TeamsMessageRow[] };
+export type TeamsSyncStatus = { ok: boolean; lastSuccessAt: string | null };
+export type TeamsInboxReader = { list(query: TeamsInboxQuery): TeamsMessageRow[]; refresh?: () => Promise<TeamsSyncStatus>; syncStatus?: () => { lastSuccessAt: string | null } };
 
 const clock = (iso: string) => new Date(iso).toLocaleString("zh-CN", { hour12: false });
 
@@ -29,9 +30,13 @@ export function createTeamsInbox(reader: TeamsInboxReader) {
 				}),
 				execute: async (args) => {
 					const limit = Math.min(Math.max(Math.trunc(args.limit ?? 20), 1), 50);
+					let status: TeamsSyncStatus | undefined;
+					try { status = await reader.refresh?.(); } catch { status = { ok: false, lastSuccessAt: reader.syncStatus?.().lastSuccessAt ?? null }; }
+					const freshness = status?.ok ? `Teams 已同步至 ${clock(status.lastSuccessAt!)}。\n` :
+						`Teams 当前同步不可用；以下仅为本地缓存，不能视为最新待办。最后成功同步：${status?.lastSuccessAt ? clock(status.lastSuccessAt) : "未知"}。\n`;
 					const rows = reader.list({ unreplied: args.unreplied, sender: args.sender?.trim() || undefined, chat: args.chat?.trim() || undefined, sinceHours: args.sinceHours, limit });
-					if (!rows.length) return resultText("没有符合条件的 Teams 消息。");
-					return resultText(rows.map((row) => {
+					if (!rows.length) return resultText(freshness + "没有符合条件的 Teams 消息。");
+					return resultText(freshness + rows.map((row) => {
 						const flags = row.direction === "out" ? "我发出" : [row.pushedAt ? "已推送" : row.important ? "未推送" : "未推送(非重点)", row.repliedAt ? "已回复" : "未回复"].join("/");
 						return `[${clock(row.createdAt)}] ${row.chatType === "oneOnOne" ? "私聊" : "群聊"}${row.chatTopic ? `「${row.chatTopic}」` : ""} ${row.direction === "out" ? "我" : row.senderName}（${flags}）：${row.text.slice(0, 300)}`;
 					}).join("\n"));

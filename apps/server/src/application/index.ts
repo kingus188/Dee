@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModelCatalog, openRuntime, Index } from "@assistant/runtime";
-import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply } from "@assistant/features";
+import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway } from "@assistant/features";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { WechatChannel } from "@assistant/channel-wechat";
@@ -11,6 +11,7 @@ import { openWechatSettings } from "../wechat-settings.js";
 import { openTeamsStore } from "../teams-store.js";
 import { openEpisodeStore } from "../episode-store.js";
 import { createSummarizer } from "../episode-model.js";
+import { reviewTeamsNotification } from "../teams-notifications.js";
 import { createTeamsReplyPort, type TeamsSender } from "../teams-reply-port.js";
 
 export async function createApplication(config: AppConfig): Promise<AppContext> {
@@ -42,12 +43,15 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     const { models, agentModel, label: modelLabel, configured: modelConfigured } = await createModelCatalog(config.model, config.model.api === "faux" ? (await import("./faux.js")).fauxScript : undefined);
     if (config.wechat.enabled && !modelConfigured) throw new Error("启用微信通道前请先保存模型配置");
     const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
-      extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox(teamsStore), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender, config.offline))],
+      extensions: [createAssistant(notify), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query),
+        refresh: () => teamsSender.refresh?.() ?? Promise.resolve({ ok: false, lastSuccessAt: teamsSender.syncStatus?.().lastSuccessAt ?? null }),
+        syncStatus: () => teamsSender.syncStatus?.() ?? { lastSuccessAt: null } }), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender, config.offline)),
+        createTeamsAway({ get: () => teamsStore!.away(), set: input => teamsStore!.setAway(input), clear: () => teamsStore!.clearAway() })],
       onReport: error => console.error("Harness 报告：", redact(error instanceof Error ? error.message : error)),
     }, ctx);
-    const wechat = config.wechat.enabled ? new WechatChannel({ ...runtime, indexDoc: Index, context: ctx, ...config.wechat }) : null;
+    const wechat = config.wechat.enabled ? new WechatChannel({ ...runtime, indexDoc: Index, context: ctx, ...config.wechat, reviewNotification: source => reviewTeamsNotification(teamsStore!, teamsSender, source) }) : null;
     try {
-      if (wechat) await wechat.start();
+      if (wechat) { await wechat.linkLegacyTeams(teamsStore.notificationIds()); await wechat.start(); }
       const taskGraph = await runtime.harness.taskGraph(ctx);
       return { ...runtime, config, ctx, taskGraph, tasks, wechat, modelSettings, wechatSettings, teamsStore, teamsSender, episodeStore, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
     } catch (error) {

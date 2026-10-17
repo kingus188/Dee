@@ -2,7 +2,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import type { ConversationId, ConversationView, InboxState, LiveState, UsageState } from "@earendil-works/pi-durable";
 import type { ViewEntry, ConversationView as ClientView } from "@assistant/contracts";
 import { Index } from "@assistant/runtime";
-import { Notes, Reminders, Delegations, BackgroundJobs, Parents, splitUserContent } from "@assistant/features";
+import { Notes, Reminders, Delegations, BackgroundJobs, Parents, splitUserContent, withQuote } from "@assistant/features";
 import type { AppContext } from "./context.js";
 export function createViews({ harness, ctx, taskGraph, redact }: AppContext) {
 const contentText = (content: Message["content"] | undefined) =>
@@ -15,11 +15,12 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
 		const message = entry.model?.[0];
 		if (!message) continue;
 		if (entry.kind === "pi.user" && message.role === "user") {
-			const { text, attachments } = splitUserContent(message.content);
+			const split = splitUserContent(message.content);
+			const { attachments } = split;
 			for (const a of attachments) {
 				if (a.kind === "image" && a.index !== undefined) a.url = `/api/conversations/${conversationId}/images/${entry.id}/${a.index}`;
 			}
-			entries.push({ id: entry.id, kind: "user", text, attachments });
+			entries.push({ id: entry.id, kind: "user", text: withQuote(split), attachments });
 		} else if (entry.kind === "pi.assistant" && message.role === "assistant") {
 			const parts = Array.isArray(message.content) ? message.content : [];
 			entries.push({

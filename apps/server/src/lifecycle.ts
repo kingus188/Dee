@@ -42,5 +42,5 @@ export async function startServer(config: AppConfig, host = config.password ? "0
     await close();
     throw error;
   }
-  return { origin: `http://${host}:${(server.address() as AddressInfo).port}`, modelLabel: app.modelLabel, wechat: app.config.wechat, teamsStore: app.teamsStore, teamsSender: app.teamsSender, wechatUndelivered: app.wechat ? () => app.wechat!.undelivered() : undefined, close, redact: app.redact };
+  return { origin: `http://${host}:${(server.address() as AddressInfo).port}`, modelLabel: app.modelLabel, wechat: app.config.wechat, teamsStore: app.teamsStore, teamsSender: app.teamsSender, wechatNotify: app.wechat ? (wxid: string, text: string, messageId: string) => app.wechat!.notify("primary", wxid, text, { kind: "teams", messageIds: [messageId] }).then(() => {}) : undefined, wechatUndelivered: app.wechat ? () => app.wechat!.undelivered() : undefined, close, redact: app.redact };
 }

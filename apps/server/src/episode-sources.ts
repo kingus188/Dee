@@ -1,6 +1,6 @@
 import type { ConversationId, EntryId } from "@earendil-works/pi-durable";
 import { Index } from "@assistant/runtime";
-import { splitUserContent } from "@assistant/features";
+import { splitUserContent, withQuote } from "@assistant/features";
 import type { AppContext } from "./application/context.js";
 import type { TeamsStore } from "./teams-store.js";
 
@@ -14,7 +14,7 @@ export type Batch = { source: string; label: string; channel: string; text: stri
 export type Collect = (cursorOf: (source: string) => string | undefined) => Promise<Batch[]>;
 
 const textOf = (content: unknown, role: "user" | "assistant") => {
-  if (role === "user") return splitUserContent(content as never).text;
+  if (role === "user") return withQuote(splitUserContent(content as never));
   return Array.isArray(content) ? content.filter((part): part is { type: "text"; text: string } => part?.type === "text").map(part => part.text).join("") : "";
 };
 

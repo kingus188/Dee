@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildUserContent, imageAt, parseAttachments, splitUserContent } from "@assistant/features";
+import { buildUserContent, imageAt, parseAttachments, splitUserContent, withQuote } from "@assistant/features";
 
 const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").toString("base64");
 const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
@@ -43,7 +43,17 @@ test("组装后能还原正文、附件清单和图片", () => {
   assert.equal(imageAt(content, 0)!.data, PNG);
   assert.equal(imageAt(content, 1), undefined);
   assert.equal(buildUserContent("纯文字", []), "纯文字");
-  assert.deepEqual(splitUserContent("纯文字"), { text: "纯文字", attachments: [] });
+  assert.deepEqual(splitUserContent("纯文字"), { text: "纯文字", attachments: [], quote: "" });
+});
+
+// 引用从授权用的 text 里剥掉，但展示和 recall 仍要看得见它。
+test("引用不进用户原话，展示文本把它标回来", () => {
+  const content = [{ type: "text" as const, text: "<引用>\n草稿 1 私聊「小周」\n</引用>" }, { type: "text" as const, text: "确认发送" }];
+  const split = splitUserContent(content);
+  assert.equal(split.text, "确认发送");
+  assert.equal(split.quote, "草稿 1 私聊「小周」");
+  assert.equal(withQuote(split), "[引用：草稿 1 私聊「小周」]\n确认发送");
+  assert.equal(withQuote(splitUserContent("确认发送")), "确认发送");
 });
 
 test("扩展名是文本但浏览器报了别的 MIME 时按 text/plain 处理", () => {

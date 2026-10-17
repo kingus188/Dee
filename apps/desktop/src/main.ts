@@ -1,3 +1,4 @@
+import { createTeamsSync } from "./teams-sync.js";
 import { app, BrowserWindow, dialog, Notification, session, shell } from "electron";
 import type { WebContents } from "electron";
 import { randomBytes } from "node:crypto";
@@ -77,7 +78,13 @@ if (!app.requestSingleInstanceLock()) {
   const startup = app.whenReady().then(async () => {
     if (quitting) return;
     app.dock?.setIcon(icon);
-    const env = process.env;
+    // 桌面应用从 Finder 启动，读不到 .env；开发任务配置放在数据目录的 investigate-config.json：{ repos, agent?, codexBin?, claudeBin? }（字段含义同 INVESTIGATE_* 环境变量）。
+    const investigateFile = join(app.getPath("userData"), "investigate-config.json");
+    const investigate = existsSync(investigateFile) ? JSON.parse(readFileSync(investigateFile, "utf8")) as { repos?: string; agent?: string; codexBin?: string; claudeBin?: string; path?: string } : {};
+    // Finder 启动的应用 PATH 很短，codex-acp 需要能找到 node 和 codex；path 会加到 PATH 前面，只影响本应用及其子进程。
+    if (investigate.path) process.env.PATH = `${investigate.path}:${process.env.PATH ?? ""}`;
+    const env: NodeJS.ProcessEnv = { ...process.env, INVESTIGATE_REPOS: investigate.repos ?? process.env.INVESTIGATE_REPOS, INVESTIGATE_AGENT: investigate.agent ?? process.env.INVESTIGATE_AGENT,
+      INVESTIGATE_CODEX_BIN: investigate.codexBin ?? process.env.INVESTIGATE_CODEX_BIN, INVESTIGATE_CLAUDE_BIN: investigate.claudeBin ?? process.env.INVESTIGATE_CLAUDE_BIN };
     const config = readConfig({ ...env, NODE_ENV: "production" });
     config.port = 0;
     config.dataDir = join(app.getPath("userData"), "data");
@@ -101,12 +108,15 @@ if (!app.requestSingleInstanceLock()) {
         if (!getToken) dialog.showErrorBox("Teams 转发", "teams-forward-config.json 需要 account 或 ginaHome");
         else {
           const sendToken = account ? createTeamsTokenProvider(account, SEND_SCOPE) : getToken;
-          service.teamsSender.send = (chatId, text) => sendTeamsMessage(sendToken, chatId, text);
+          service.teamsSender.send = async (chatId, text) => { await sendTeamsMessage(sendToken, chatId, text, service!.teamsStore); };
+          const sync = createTeamsSync({ dir, store: service.teamsStore, getToken, rules: important });
+          service.teamsSender.refresh = () => sync.refresh();
+          service.teamsSender.syncStatus = () => sync.status();
           const stopBot = stopWechat;
           const stopForward = startTeamsForward({ dir, store: service.teamsStore, getToken, rules: important, sendURL: service.wechat.sendURL, sendToken: service.wechat.sendToken,
-            inject: { url: `${origin}/channels/wechat/incoming`, webhookKey: service.wechat.webhookKey },
+            sync, inject: service.wechatNotify,
             undelivered: service.wechatUndelivered,
-            onStuck: (pending, _reason, preview) => new Notification({ title: `微信暂时发不出去（${pending} 条）`, body: `${preview}\n在微信里给 ClawBot 发一句话，立即补发。` }).show() });
+            onStuck: (pending, reason, preview) => new Notification({ title: `微信暂时发不出去（${pending} 条）`, body: `${preview}\n${reason}` }).show() });
           stopWechat = () => { stopForward(); stopBot(); };
         }
       }

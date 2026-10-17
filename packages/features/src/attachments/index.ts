@@ -27,6 +27,9 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 const MARK = /^<附件 name="([^"]*)" type="([^"]*)" size="(\d+)"(\/?)>/;
+// 第三方引用（如微信「引用回复」）单独成一段，不算用户原话：授权判定只看 text。
+// 产出方在 @assistant/channel-wechat 的 validateInbound，两边格式必须一致。
+const QUOTE = /^<引用>\n([\s\S]*)\n<\/引用>$/;
 
 export class AttachmentError extends Error {}
 
@@ -94,11 +97,12 @@ export function buildUserContent(text: string, files: readonly Attachment[]): st
 	return parts;
 }
 
-// 从用户消息内容拆出正文和附件清单；图片按出现顺序编号，供 imageUrl 取回
+// 从用户消息内容拆出正文、附件清单和第三方引用；图片按出现顺序编号，供 imageUrl 取回
 export function splitUserContent(content: Message["content"] | undefined) {
-	if (typeof content === "string") return { text: content, attachments: [] };
+	if (typeof content === "string") return { text: content, attachments: [], quote: "" };
 	const texts = [];
 	const attachments: AttachmentSummary[] = [];
+	let quote = "";
 	let imageIndex = 0;
 	for (const part of content ?? []) {
 		if (part.type === "image") {
@@ -108,6 +112,11 @@ export function splitUserContent(content: Message["content"] | undefined) {
 			continue;
 		}
 		if (part.type !== "text") continue;
+		const q = QUOTE.exec(part.text);
+		if (q) {
+			quote ||= q[1];
+			continue;
+		}
 		const m = MARK.exec(part.text);
 		if (!m) {
 			texts.push(part.text);
@@ -115,8 +124,11 @@ export function splitUserContent(content: Message["content"] | undefined) {
 		}
 		attachments.push({ kind: m[4] ? "image" : "text", name: m[1], mimeType: m[2], size: Number(m[3]) });
 	}
-	return { text: texts.join(""), attachments };
+	return { text: texts.join(""), attachments, quote };
 }
+
+// 展示和索引用的正文：引用是第三方内容，标回原来的 [引用：…] 形式，不参与授权判定。
+export const withQuote = ({ text, quote }: { text: string; quote: string }) => quote ? `[引用：${quote}]\n${text}` : text;
 
 // 取用户消息里第 index 张图片
 export function imageAt(content: Message["content"] | undefined, index: number) {
