@@ -22,7 +22,7 @@ docker compose logs --tail=100 pi-durable-assistant
 | 任务显示运行中很久 | API 慢、子 Agent 还没完成、上游服务卡住 | 打开任务中心查看子会话/任务状态，结合日志排查，不要直接删除 SQLite |
 | 计划每天发生时间偏移 | 当前是固定分钟间隔，不是时区 Cron | `1440` 表示每隔 24 小时；夏令时变化会影响本地钟点 |
 | 网页关闭后收不到提醒 | `NOTIFY_WEBHOOK_URL` 未配置；默认 `NOTIFY_MODE=errors` | 如需正常提醒也推送，改为 `all` 并测试真实接收端 |
-| 飞书/Webhook 收不到消息 | URL、机器人权限、限流、网络；当前是尽力发送 | 先验证 Webhook 目标；主分支暂无通用持久重试，别误当“保证送达” |
+| 飞书/Webhook 收不到消息 | URL、机器人权限、限流、网络；有限重试可能已耗尽 | 核对配置与真实目标，按[通知队列说明](CONFIGURATION.md#通知队列与失败记录)查看 `status`、`attempts`、`last_error`；失败记录不自动重发 |
 | 上传失败、提示类型不支持 | 超过 5 个文件、5MiB 图片、200KiB 文本、10MiB 总额，或不支持的格式 | 缩小文件；使用 PNG/JPEG/WebP/GIF 和 UTF-8 文本类文件 |
 | 网页图片上传成功但模型看不到图 | 模型 API 不支持图像 | 选择确实支持多模态的服务商/模型；并核对协议兼容性 |
 | 微信收不到回复 | 未扫码/失效、`WECHAT_ENABLED` 未启用、发送 token 不匹配 | 按 [微信手册](WECHAT.md) 检查 `wx-bot` 状态、允许的发送方和本地接口 |

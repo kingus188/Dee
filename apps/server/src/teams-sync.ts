@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { TeamsStore } from "@assistant/server";
+import type { TeamsStore } from "./teams-store.js";
 import { isImportant, type ImportantRules } from "./teams-rules.js";
 
 export const GRAPH = "https://graph.microsoft.com/v1.0";
@@ -26,8 +26,8 @@ export function messageText(message: GraphMessage) {
 }
 
 // 查询、提醒投递和定时轮询共用同一个采集器；并发刷新合并，不在刷新中产生通知。
-export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch }: {
-  dir: string; store: TeamsStore; getToken: () => Promise<string>; rules?: ImportantRules; fetchImpl?: typeof fetch;
+export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch, signal }: {
+  dir: string; store: TeamsStore; getToken: () => Promise<string>; rules?: ImportantRules; fetchImpl?: typeof fetch; signal?: AbortSignal;
 }) {
   const markPath = join(dir, "teams-forward.json");
   const statusPath = join(dir, "teams-sync-status.json");
@@ -43,10 +43,11 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
     renameSync(path + ".tmp", path);
   };
   async function graph<T>(auth: string, path: string): Promise<T> {
+    signal?.throwIfAborted();
     const url = path.startsWith("/") ? new URL(GRAPH + path) : new URL(path);
     // nextLink 来自远端；禁止把 Authorization 转发到其他来源或协议。
     if (url.origin !== "https://graph.microsoft.com" || !url.pathname.startsWith("/v1.0/") || url.username || url.password) throw new UnsafePaging("Graph 分页地址不合法");
-    const response = await fetchImpl(url.href, { headers: { Authorization: `Bearer ${auth}` }, signal: AbortSignal.timeout(30_000), redirect: "error" });
+    const response = await fetchImpl(url.href, { headers: { Authorization: `Bearer ${auth}` }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000), redirect: "error" });
     if (!response.ok) throw new Error(`Graph ${response.status} ${url.pathname}`);
     return await response.json() as T;
   }
@@ -82,6 +83,7 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
       for (const message of page) if (Date.parse(message.createdDateTime) >= lower) messages.set(message.id, message);
       if (page.length && page.every(message => Date.parse(message.createdDateTime) < lower)) break;
     }
+    signal?.throwIfAborted();
     // 中断可用消息 ID 安全重放。
     for (const message of [...messages.values()].sort((a, b) => Date.parse(a.createdDateTime) - Date.parse(b.createdDateTime))) {
       const sender = message.from?.user;
@@ -130,6 +132,7 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
         }
       }
     } catch (error) { skip("聊天列表", error); }
+    signal?.throwIfAborted();
     // 只有可重试的故障才让本轮不算成功；水位已按聊天各自推进。
     if (fault) return { ok: false, lastSuccessAt, skipped };
     const completedAt = new Date().toISOString();

@@ -22,7 +22,7 @@ A personal digital companion should be recognizable, make its activity understan
 - **Preferences and history.** Assistant-proposed long-term memories and skills require approval before use. Separately, automatic summaries of web, WeChat and Teams history help recall context and open items; they can omit details and are not confirmed facts.
 - **Work that continues.** Reminders, recurring plans and background tasks have persistent records. The server can keep working while you are away from the browser.
 - **Sources you can check.** Search configured Obsidian notes in read-only mode. Work materials distinguish current documents, drafts and archives, with file and line citations.
-- **Multiple ways to connect.** The desktop app includes a local server; the web interface supports remote access. Optional integrations add WeChat conversations, Teams message search and forwarding of important messages. Desktop and standalone web instances store their data separately, without automatic synchronization.
+- **Multiple ways to connect.** Desktop and browser clients use an independent Web service and the same API backend. Optional integrations add WeChat conversations and server-side Teams search and forwarding. Desktop no longer embeds a backend.
 - **A personal space you manage.** Conversations, memory and task state are stored in your instance. You can stop tasks, manage memories, archive conversations and export chat text.
 
 ## Things to try
@@ -38,14 +38,14 @@ These examples require a real model. Results depend on the selected model and th
 | “Find the decision about this project in my notes, with sources.” | Search configured, allowlisted Obsidian folders with file and line citations |
 | “Save these steps as a skill for similar work later.” | Propose a reusable procedure for approval; this does not retrain the model |
 | “What happened with the issue we discussed on WeChat?” | Search collected cross-channel summaries, including dates, sources and open items |
-| “Which Teams messages still need my reply?” | Search Teams messages collected by the desktop app; account configuration and permissions are required |
+| “Which Teams messages still need my reply?” | Search Teams messages collected by the backend; account configuration and permissions are required |
 
 The web interface supports multiple conversations, conversation forks, streamed responses, and image/text attachments. Conversation cards manage tasks, reminders, memories and skills. An optional WeChat iLink bridge handles text and voice-transcription text provided by WeChat. Generic Webhooks and Feishu bots can deliver task notifications.
 
 ### Saving materials, Teams replies and coding tasks
 
 - **Saving work materials:** Turn conversation content into a draft, approve it as current, and archive an older document with the same name.
-- **Teams replies:** Show the target chat and draft, then send only after the user says `确认发送`. Requires desktop account access and send permissions.
+- **Teams replies:** Show the target chat and draft, then send only after the user says `确认发送`. Requires backend account access and send permissions.
 - **Coding tasks:** Run Codex or Claude Code in a separate git worktree for an allowlisted local repository, producing a report and branch. A local merge requires the user's `确认合并 <task ID>` message after review; tasks do not automatically push or deploy. The selected coding tool must be installed and authenticated separately.
 
 ## Run locally
@@ -59,25 +59,19 @@ corepack enable
 pnpm install --frozen-lockfile
 ```
 
-**Desktop:** Includes a local server; no separate server process is needed.
+**API backend:** Run `pnpm run start:api` in one terminal (default `http://127.0.0.1:3000`, APIs only).
 
-```bash
-pnpm run desktop
-```
+**Web:** Run `pnpm run start:web` in a second terminal and open **http://127.0.0.1:8080**. Set `API_ORIGIN` to change the backend URL.
 
-**Web:** Start the server and open **http://127.0.0.1:3000**.
+**Desktop:** Keep both services running, then run `pnpm run desktop`. `ASSISTANT_WEB_URL` selects a different deployed Web service; connection settings are also available in the desktop menu.
 
-```bash
-pnpm run dev
-```
-
-On first launch, open Settings in the left sidebar and enter the API protocol, Base URL, model ID and API key. Save and restart the app or server. Without a model connection, settings remain available but generation and background tasks do not start. Connections and keys are stored in SQLite for subsequent launches. Keys are stored as plaintext, so protect the data directory and backups as credentials. Environment-based configuration is also supported; see [Configuration](docs/CONFIGURATION.md).
+On first launch, open Settings and enter the API protocol, Base URL, model ID and API key. Save and restart the backend, not the desktop app. Settings remain available without a model. Connections and keys are stored in backend SQLite; protect the data directory and backups as credentials. Environment-based configuration is also supported; see [Configuration](docs/CONFIGURATION.md).
 
 The product does not offer simulated replies or a model-free fallback. Previous simulated conversations and legacy conversations without an explicit model remain stored, while real-model chat starts in a separate conversation.
 
 Supported API protocols are `openai-completions`, `openai-responses` and `anthropic-messages`. Model availability, image understanding, costs and data handling depend on your provider. Knowledge search, notifications and WeChat need separate configuration; see [Configuration](docs/CONFIGURATION.md).
 
-Desktop data lives in Electron's application data directory, separately from the web instance's data. On macOS, closing the window keeps tasks running; `Cmd+Q` stops the local service. On Windows/Linux, closing the last window exits the app. Restarting attempts to resume recoverable tasks. Run `pnpm run desktop:package` to produce an application under `dist/desktop/`; distribution signing, notarization and automatic updates are not included. See the [desktop guide](apps/desktop/README.md).
+Desktop stores client connection settings only. Closing or quitting it does not stop backend tasks; quitting stops desktop notification polling. Run `pnpm run desktop:package` to produce a client-only application under `dist/desktop/`, without backend, Web assets or a WeChat binary. Distribution signing, notarization and automatic updates are not included. Existing desktop data is not automatically migrated; see the [desktop guide](apps/desktop/README.md).
 
 ## Keep Xiao D running
 
@@ -92,14 +86,14 @@ docker compose ps
 
 The default address is **http://127.0.0.1:3300**. For remote access, use an HTTPS reverse proxy and retain authentication; the HTTP Basic Auth username is `demo`. Back up volumes before upgrading. **Do not use `docker compose down -v` to upgrade**, as it removes persistent data.
 
-See [Deployment and backups](docs/DEPLOYMENT.md). Docker-based WeChat access needs an additional `wx-bot` container and QR-code login. The desktop app can manage a local bridge process when its binary is available. The [WeChat and Teams guide](docs/WECHAT.md) covers channel configuration. Detailed guides are primarily in Chinese.
+See [Deployment and backups](docs/DEPLOYMENT.md). WeChat requires a separate `wx-bot` service and QR-code login; desktop does not manage it. The [WeChat and Teams guide](docs/WECHAT.md) covers channel configuration. Detailed guides are primarily in Chinese.
 
 ## Current boundaries
 
 - **Avatar and voice:** SVG/CSS animation is available. Real-time voice conversation, voice cloning, lip synchronization, Live2D and 3D model integration are not implemented.
 - **Memory and data:** Self-hosting stores conversations and memory in your instance. Relevant messages, attachments and retrieved text may still be sent to an external model provider. Never commit `.env`, API keys or WeChat credentials.
 - **Execution and recovery:** Recovery depends on persisted state and the task's recovery semantics. It does not guarantee exactly-once execution of arbitrary external operations. Recurring jobs use fixed-minute intervals, not timezone-aware calendar scheduling. Coding tasks are owned by the server process and stop on restart; committed branch changes remain available.
-- **Delivery:** Generic Webhook and Feishu notifications are best-effort and can be lost. WeChat has its own persistent delivery queue, but duplicates and platform restrictions remain possible. Real WeChat login and production delivery need separate validation.
+- **Delivery:** Generic Webhook and Feishu notifications use a SQLite outbox, resume after restart and retain failure records after at most five attempts per delivery round. Settings → Notification delivery shows the latest 100 records per status for the current destination and lets you requeue failed events with their original ID and payload. Delivery is not guaranteed or exactly-once; receivers should deduplicate by event ID. WeChat uses a separate persistent queue. Real Feishu, WeChat and production delivery need separate validation.
 - **Attachments and access:** Web uploads allow 5 files, up to 5 MiB per image, 200 KiB per text file and 10 MiB total. WeChat images, videos and files are not parsed. Obsidian access is read-only. Material writes target the designated materials directory and coding changes target configured repository worktrees. General computer control is not provided.
 - **Scope:** This is a personal application without tenant isolation or enterprise role management. Archiving stops that conversation's unfinished tasks. Removing it from the list does not erase all persisted records.
 
@@ -117,13 +111,13 @@ Future work focuses on identity, expression and sustained collaboration. These a
 
 ## Development
 
-**TypeScript / React / Electron / Node.js / Pi Durable 1.1.0 / SQLite / WebSocket.** The project uses pnpm workspaces, `tsc` and esbuild. The existing build command includes the web bundle; no separate database server is required.
+**TypeScript / React / Electron / Node.js / Pi Durable 1.3.0 / SQLite / WebSocket.** The project uses pnpm workspaces, `tsc` and esbuild. The existing build command includes the web bundle; no separate database server is required.
 
 | Directory | Responsibility |
 | --- | --- |
 | `apps/web` | Xiao D's avatar, conversation interface and interactions |
-| `apps/desktop` | Electron entry point, local server and messaging integrations |
-| `apps/server` | Startup, authentication, HTTP/WebSocket and application use cases |
+| `apps/desktop` | Electron API client, connection settings and system notifications |
+| `apps/server` | API backend, data, task scheduling and messaging integrations |
 | `packages/contracts` | Shared frontend/backend protocol types |
 | `packages/runtime` | Model integration, sessions and the durable runtime |
 | `packages/features` | Memory, skills, materials, knowledge search, reminders, tasks and Teams tools |

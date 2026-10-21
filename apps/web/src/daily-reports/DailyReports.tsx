@@ -3,6 +3,7 @@ import type { DailyReport, DailyReportInput, DailyReportSummary } from "@assista
 import { request } from "../api/request.js";
 import { renderMarkdown } from "../chat/markdown.js";
 import { Icon } from "../ui/Icon.js";
+import { MarkdownEditor } from "../editor/MarkdownEditor.js";
 
 function today() {
   const date = new Date();
@@ -43,7 +44,7 @@ export function DailyReports({ active }: { active: boolean }) {
   }, [dirty, pending]);
 
   async function save() {
-    if (!ready || busy.current || !dirty) return;
+    if (!ready || busy.current || !dirty || markdown.length > 16000) return;
     busy.current = true; setPending(true); setError("");
     const input: DailyReportInput = { markdown, revision: saved?.revision ?? null };
     try {
@@ -65,13 +66,14 @@ export function DailyReports({ active }: { active: boolean }) {
         <nav>{reports.map(item => <button type="button" key={item.date} aria-current={date === item.date ? "date" : undefined} disabled={pending} onClick={() => { if (item.date !== date) void load(item.date); }}>{item.date}<Icon name="chevron-right" /></button>)}</nav>
       </aside>
       <div className="reports-editor" aria-busy={loading || pending}>
-        <div className="reports-toolbar"><label htmlFor="report-date">日期<input id="report-date" type="date" min="1000-01-01" max="9999-12-31" value={date} disabled={pending} onChange={event => { if (event.target.value) void load(event.target.value); }} /></label>
-          <div className="reports-tools"><button className="header-button" disabled={!ready} aria-pressed={preview} onClick={() => setPreview(value => !value)}>{preview ? "编辑" : "预览"}</button><button className="settings-save" disabled={!ready || pending || !dirty} onClick={() => void save()}><Icon name="check" />{pending ? "保存中…" : "保存日报"}</button></div>
+        <div className="reports-toolbar"><label htmlFor="report-date">日期<input id="report-date" type="date" min="1000-01-01" max="9999-12-31" value={date} disabled={pending} onChange={event => { const next = event.target.value; event.target.value = date; if (next) void load(next); }} /></label>
+          <div className="reports-tools"><button className="header-button" disabled={!ready} aria-pressed={preview} onClick={() => setPreview(value => !value)}>{preview ? "编辑" : "预览"}</button><button className="settings-save" disabled={!ready || pending || !dirty || markdown.length > 16000} onClick={() => void save()}><Icon name="check" />{pending ? "保存中…" : "保存日报"}</button></div>
         </div>
         {loading && <p role="status">正在读取日报…</p>}
         {error && <div className="reports-error"><p role="alert">{error}</p><button className="text-button" disabled={pending} onClick={() => void load(date)}>重新读取</button></div>}
         {ready && <>
-          {preview ? <article className="reports-preview md" aria-label="日报预览" dangerouslySetInnerHTML={{ __html: renderMarkdown(markdown) || "<p>还没有内容，切回编辑开始记录。</p>" }} /> : <><label className="reports-editor-label" htmlFor="report-markdown">Markdown 正文</label><textarea id="report-markdown" value={markdown} disabled={pending} maxLength={16000} onChange={event => setMarkdown(event.target.value)} placeholder={"## 今日完成\n- \n\n## 问题与阻碍\n- \n\n## 明日计划\n- "} spellCheck={false} /></>}
+          {preview ? <article className="reports-preview md" aria-label="日报预览" dangerouslySetInnerHTML={{ __html: renderMarkdown(markdown) || "<p>还没有内容，切回编辑开始记录。</p>" }} /> : <MarkdownEditor key={date} value={markdown} onChange={setMarkdown} disabled={pending} label="日报正文" />}
+          {markdown.length > 16000 && <p className="reports-error" role="alert">正文不能超过 16000 个字符，请缩短内容后保存。当前草稿仍完整保留。</p>}
           <footer className="reports-footer"><span role="status">{pending ? "正在保存…" : dirty ? "有未保存的修改" : saved ? `已保存 · ${new Date(saved.updatedAt).toLocaleString()}` : "当天还没有日报"}</span><span>{markdown.length} / 16000</span></footer>
         </>}
       </div>

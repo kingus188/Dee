@@ -26,7 +26,7 @@ docker compose ps
 docker compose logs --tail=100 pi-durable-assistant
 ```
 
-默认 `HOST_PORT=3300`，Compose 只发布 `127.0.0.1:3300:3000`。从服务器上验证（例：已经设置了口令）：
+Compose 分开运行 `pi-durable-assistant` API 后端与 `web` 页面/代理容器。默认 `HOST_PORT=3300`，只发布 Web 的 `127.0.0.1:3300:8080`；后端 3000 仅在容器网络访问。Web 镜像不包含后端依赖，不挂载数据卷、不读取账号文件。验证（例：已经设置了口令）：
 
 ```bash
 curl -u demo:YOUR_PASSWORD http://127.0.0.1:3300/api/info
@@ -34,7 +34,7 @@ curl -u demo:YOUR_PASSWORD http://127.0.0.1:3300/api/info
 
 示例 `YOUR_PASSWORD` 必须换成自己的密码；避免在共享机器的 Shell 历史里保留明文凭据。可直接使用 `curl -u demo` 交互输入密码。
 
-`NODE_ENV=production` 的网页入口使用 HTTP Basic Auth；**不要开放 3000、3300 或微信桥 18790 给公网访问**。
+API 使用 HTTP Basic Auth，静态页面可加载但不含账户数据；数据请求未登录返回 401。**不要开放 3000、3300 或微信桥 18790 给公网访问**。
 
 ### Nginx 反向代理示例
 
@@ -44,7 +44,7 @@ curl -u demo:YOUR_PASSWORD http://127.0.0.1:3300/api/info
 location /api/socket {
     proxy_pass http://127.0.0.1:3300;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
+    proxy_set_header Host $http_host;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_read_timeout 1h;
@@ -53,7 +53,7 @@ location /api/socket {
 location / {
     proxy_pass http://127.0.0.1:3300;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
+    proxy_set_header Host $http_host;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_buffering off;      # SSE / streaming
     proxy_read_timeout 1h;
@@ -116,8 +116,14 @@ docker compose ps
 - `docker compose ps` 中服务为运行状态，`/api/info` 在提供凭据后可以返回信息。
 - 浏览器创建一轮真实模型对话，确认 WebSocket 对话、工具调用、任务中心正常。
 - 创建 1 个提醒、1 个后台任务，重启主服务后查看它们的持久状态；**不要通过 `down -v` 验证恢复**。
-- 需要手机推送时用真实目标检查 `NOTIFY_MODE=all`；主分支普通 Webhook 没有持久重试保障。
+- 需要手机推送时用真实目标检查 `NOTIFY_MODE=all`；Webhook 已有持久队列与有限重试，仍须现场验证目标响应和去重，并按[通知队列说明](CONFIGURATION.md#通知队列与失败记录)检查失败记录。
 - 至少在隔离环境验证一次备份可以恢复。没有这一步，不能把它视为生产级数据可靠性。
+
+本轮隔离验收（2026-10-21）：在独立 Docker Compose 实例中使用新数据卷和 `no-new-privileges` 运行 API/Web；外层 Nginx 提供自签名 HTTPS（验证入口 `https://192.168.31.5:3443`，HTTP `:3300` 仅 301 跳转）。已实测 Basic Auth、`/api/info`、日报写入与容器重启后的 SQLite 数据保留；HTTPS 浏览器安全上下文可正常打开日报并读取已保存内容。随后在同一隔离实例启用服务端微信通道：固定版本 wx-bot 的 44 项 Go 测试通过，使用本机交叉编译的 Linux amd64 二进制构建容器，迁移现有 `primary` 登录状态，并通过服务端 Webhook 收到测试消息；桌面端微信开关已持久关闭，本机 18790 端口已释放。生产 VPS 仍需真实微信消息和长时间稳定性验收。
+
+出站首轮测试曾被上游 `/ilink/bot/sendmessage: ret=-2` 拒绝，原因未确定。随后真实微信发来 `Hello`，此前排队的迁移测试回复及新生成的正常问候“Hello！有什么我可以帮你的吗？”均已标记 `sent`，状态接口确认 `pending=0`、`blocked=0`。迁移文案来自此前注入的测试请求，不是固定回复。至此已验证真实入站、模型生成及微信发送接口接受回复；长期稳定性与重启恢复仍需单独验收。
+
+模型连接复用本机 Pi `~/.pi/agent/models.json` 中已有的 `cpa/gpt-6.1-sol` 配置和对应 Key，协议为 `openai-responses`；不是直接复制 Pi 默认的 `magpie/auto/gpt-6.1-sol`，因为该地址仅监听 Mac 的 `127.0.0.1:3425`。远端直连已有 CPA 服务，不依赖 Mac 持续在线。通过受验证的 HTTPS 设置接口将连接保存到权限为 `0600` 的私有 SQLite；Compose 仅设置非秘密参数 `LLM_CONTEXT_WINDOW=128000`、`LLM_MAX_TOKENS=16384`，不包含模型 Key。已通过实际网页请求收到“模型连接正常。”，容器重建后模型连接和该轮对话均保留；未验证模型工具调用、长上下文和外部渠道。网页访问密码另行轮换，旧密码返回 `401`。本次是一次性配置复制，本机 Pi 后续修改不会自动同步到远端。
 
 ## 6. 故障与限制
 

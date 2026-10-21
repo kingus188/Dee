@@ -1,9 +1,17 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { defineDoc, defineTask, defineTool } from "@earendil-works/pi-durable";
-import type { TaskId } from "@earendil-works/pi-durable";
+import type { ConversationId, TaskId, Tx } from "@earendil-works/pi-durable";
 import { Type } from "@earendil-works/pi-ai";
 import { resultText as text } from "../results.js";
 import type { NotifyEvent } from "./notifications.js";
+import { normalizeRequestId } from "./parameters.js";
+import { detach } from "../results.js";
+
+export function normalizeReminder(input: { text?: unknown; minutesFromNow?: unknown }) {
+	if (typeof input.text !== "string" || !input.text.trim() || input.text.trim().length > 1000) throw new Error("提醒内容必须是 1～1000 字");
+	if (typeof input.minutesFromNow !== "number" || !Number.isFinite(input.minutesFromNow) || input.minutesFromNow < 0.25 || input.minutesFromNow > 1440) throw new Error("提醒时间必须在 0.25～1440 分钟内");
+	return { text: input.text.trim(), at: Date.now() + Math.round(input.minutesFromNow * 60000) };
+}
 export type Reminder = { id: TaskId; text: string; at: number; status: "scheduled" | "cancelled" | "fired" };
 export const Reminders = defineDoc<{ items: Reminder[]; applied: Record<string, string> }>({
 	kind: "app.reminders",
@@ -47,16 +55,31 @@ const ReminderTask = defineTask<{ at: number; text: string }, { phase: "sleep" }
 				{ type: "input", content: `[定时提醒] ${task.input.text}`, whenBusy: "followUp", requestId: `reminder:${task.id}` },
 				taskContext,
 			);
+			await notifyEvent({ id: "reminder:" + task.id, type: "reminder", text: "定时提醒：" + task.input.text });
 			await runtime.commit(async (tx) => {
 				const item = (await tx.doc(Reminders, runtime.conversationId)).items.find((i) => i.id === task.id);
 				if (item) item.status = "fired";
 				return { status: "terminal", outcome: { status: "completed", result: null } };
 			}, taskContext);
-			await notifyEvent({ id: "reminder:" + task.id, type: "reminder", text: "定时提醒：" + task.input.text });
 		},
 	},
 	abort: (_task, runtime, taskContext) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext),
 });
+
+async function reminderInTx(tx: Tx, conversationId: ConversationId, input: { text?: unknown; minutesFromNow?: unknown }, rawRequestId: unknown) {
+	const requestId = normalizeRequestId(rawRequestId);
+	const doc = await tx.doc(Reminders, conversationId);
+	if (requestId && Object.hasOwn(doc.applied, "user:" + requestId)) {
+		const item = doc.items.find(entry => String(entry.id) === doc.applied["user:" + requestId]);
+		if (item) return detach(item);
+	}
+	const normalized = normalizeReminder(input);
+	const id = await tx.createTask(ReminderTask, normalized, { ownership: { kind: "conversation" }, background: true });
+	const item: Reminder = { id, ...normalized, status: "scheduled" };
+	doc.items.push(item);
+	if (requestId) doc.applied["user:" + requestId] = String(id);
+	return detach(item);
+}
 
 const remindMe = defineTool({
 	name: "remind_me",
@@ -80,5 +103,5 @@ const remindMe = defineTool({
 });
 
 
-return { ReminderTask, remindMe };
+return { ReminderTask, remindMe, reminderInTx };
 }

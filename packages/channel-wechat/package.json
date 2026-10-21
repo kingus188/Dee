@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@assistant/runtime": "workspace:*",
-    "@earendil-works/chord": "1.1.0",
-    "@earendil-works/pi-durable": "1.1.0"
+    "@earendil-works/chord": "1.3.0",
+    "@earendil-works/pi-durable": "1.3.0"
   },
   "exports": {
     ".": {

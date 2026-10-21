@@ -35,8 +35,9 @@ export const mustAccept = [
 ];
 
 export const normalizeCases: { input: unknown; output?: string; error?: RegExp }[] = [
-	{ input: "  记住   这件事  ", output: "记住 这件事" },
-	{ input: "第一行\n第二行\t第三行", output: "第一行 第二行 第三行" },
+	{ input: "  记住   这件事  ", output: "记住   这件事" },
+	{ input: "第一行\n第二行\t第三行", output: "第一行\n第二行\t第三行" },
+	{ input: "# 偏好\r\n\r\n- 简短  \r\n  嵌套", output: "# 偏好\n\n- 简短  \n  嵌套" },
 	{ input: "甲".repeat(280), output: "甲".repeat(280) },
 	{ input: "甲".repeat(281), error: /记忆必须/ },
 	{ input: "", error: /记忆必须/ },

@@ -1,16 +1,50 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { setImmediate } from "node:timers/promises";
 import { startMailNotifications } from "../dist/mail-notifications.js";
 
-test("桌面邮件提醒跳过启动前历史、合并本批、停止后不再读取", t => {
+test("desktop polling skips history, authenticates API and batches fresh messages", async t => {
   t.mock.timers.enable({ apis: ["setInterval"] });
-  const cursors: number[] = [], sent: string[] = [];
-  const stop = startMailNotifications(after => {
-    cursors.push(after);
-    return after === 0 ? { latest: 10, items: [] } : after === 10 ? { latest: 12, items: [11, 12].map(sequence => ({ sequence,
-      message: { id: String(sequence), sender: "张三", subject: `主题${sequence}`, receivedAt: "", address: "", preview: "", isRead: false, hasAttachments: false } })) } : { latest: 12, items: [] };
-  }, (title, body) => sent.push(title + "|" + body));
-  t.mock.timers.tick(15000); assert.deepEqual(sent, ["Outlook · 2 封新邮件|张三：主题12"]);
-  t.mock.timers.tick(15000); assert.deepEqual(cursors, [0, 10, 12]); assert.equal(sent.length, 1);
-  stop(); t.mock.timers.tick(15000); assert.equal(cursors.length, 3);
+  const requests: { url: string; init: RequestInit | undefined }[] = [];
+  const sent: string[] = [];
+  const fetcher: typeof fetch = async (url, init) => {
+    requests.push({ url: String(url), init });
+    const after = new URL(String(url)).searchParams.get("after");
+    return new Response(JSON.stringify(after === null ? { latest: 10, items: [] } : after === "10" ? { latest: 12, items: [11, 12].map(sequence => ({ sequence, message: { sender: "张三", subject: `主题${sequence}` } })) } : { latest: 12, items: [] }));
+  };
+  const stop = startMailNotifications("https://assistant.example", "Basic abc", (title, body) => sent.push(title + "|" + body), fetcher);
+  await setImmediate();
+  t.mock.timers.tick(15000); await setImmediate();
+  assert.deepEqual(sent, ["Outlook · 2 封新邮件|张三：主题12"]);
+  t.mock.timers.tick(15000); await setImmediate();
+  assert.deepEqual(requests.map(r => new URL(r.url).searchParams.get("after")), [null, "10", "12"]);
+  for (const request of requests) {
+    assert.equal(new URL(request.url).pathname, "/api/mail/notices");
+    assert.equal(request.init?.redirect, "error");
+    assert.equal(new Headers(request.init?.headers).get("Authorization"), "Basic abc");
+  }
+  stop(); t.mock.timers.tick(15000); await setImmediate(); assert.equal(requests.length, 3);
+});
+
+test("a zero initial cursor still delivers the first new message and retries offline", async t => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let calls = 0; const sent: string[] = [];
+  const fetcher: typeof fetch = async () => {
+    calls++;
+    if (calls === 2) throw new Error("offline or refused redirect");
+    return new Response(JSON.stringify(calls === 1 ? { latest: 0, items: [] } : { latest: 1, items: [{ sequence: 1, message: { subject: "First", address: "alice" } }] }));
+  };
+  const stop = startMailNotifications("http://127.0.0.1:8080", undefined, (_title, body) => sent.push(body), fetcher);
+  await setImmediate(); t.mock.timers.tick(15000); await setImmediate();
+  t.mock.timers.tick(15000); await setImmediate();
+  assert.deepEqual(sent, ["alice：First"]); stop();
+});
+
+test("stopping in-flight polling suppresses late notifications", async t => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let resolve: ((response: Response) => void) | undefined;
+  const sent: string[] = [];
+  const stop = startMailNotifications("https://assistant.example", undefined, title => sent.push(title), async () => new Promise<Response>(done => { resolve = done; }));
+  stop(); resolve!(new Response(JSON.stringify({ latest: 1, items: [] }))); await setImmediate();
+  assert.deepEqual(sent, []);
 });

@@ -1,5 +1,5 @@
 import { Index, Meta } from "@assistant/runtime";
-import { personalError } from "@assistant/features";
+import { personalError, EditConflictError, Notes, editNotesInTx } from "@assistant/features";
 import type { AppContext } from "./context.js";
 import { HttpError } from "../errors.js";
 import { createConversations } from "./conversations.js";
@@ -10,6 +10,8 @@ import { createPersonalService } from "./personal.js";
 import { createViews } from "./views.js";
 import { mailApi } from "../mail-api.js";
 import { createDailyReports } from "../daily-reports.js";
+import { daylightApi } from "../daylight-api.js";
+import { notificationApi } from "../notification-api.js";
 
 // HTTP 与 WebSocket 共用用例和错误语义。
 export function createApi(context: AppContext) {
@@ -19,8 +21,12 @@ export function createApi(context: AppContext) {
   const dailyReports = createDailyReports(config.dataDir);
   async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}) {
     const path = url.pathname;
+    const daylightResult = daylightApi(context.daylight, method, url, body);
+    if (daylightResult) return daylightResult;
     const mailResult = mailApi(context.mail, method, url, body);
     if (mailResult) return await mailResult;
+    const notificationResult = notificationApi(context, method, url, body);
+    if (notificationResult) return notificationResult;
     if (method === "GET" && path === "/api/daily-reports") return { status: 200, data: dailyReports.list() };
     const report = path.match(/^\/api\/daily-reports\/([^/]+)$/);
     if (report) {
@@ -35,7 +41,9 @@ export function createApi(context: AppContext) {
       if (method === "GET") return { status: 200, data: context.wechatSettings.get() };
       if (method === "POST") return { status: 200, data: context.wechatSettings.save(body) };
     }
-    if (method === "POST" && path.startsWith("/api/conversations") && !context.modelConfigured) throw new HttpError(409, "请先在设置中保存模型配置，再重启应用");
+    const notesPath = path.match(/^\/api\/conversations\/(\d+)\/notes$/);
+    // 纯数据会话入口与笔记不触发生成；其它模型任务仍须配置模型。
+    if (method === "POST" && path.startsWith("/api/conversations") && !notesPath && path !== "/api/conversations/direct" && !context.modelConfigured) throw new HttpError(409, "请先在设置中保存模型配置，再重启应用");
     if (method === "GET" && path === "/api/info") {
       const meta = await harness.snapshot(Meta, ctx);
       return { status: 200, data: { model: modelLabel, api: config.model.api, configured: context.modelConfigured, pid: process.pid, startedAt, boots: meta?.boots ?? 0 } };
@@ -52,7 +60,22 @@ export function createApi(context: AppContext) {
           return { status: id ? 200 : 201, data: { item: await personal.save(kind, body, id, action) } };
         }
       } catch (error) {
+        if (error instanceof EditConflictError) throw new HttpError(409, error.message);
         if (personalError(error)) throw new HttpError(400, error.message);
+        throw error;
+      }
+    }
+    if (notesPath && (method === "GET" || method === "POST")) {
+      const conversation = await conversations.getConversation(Number(notesPath[1]));
+      if (method === "GET") {
+        const notes = await harness.snapshot(Notes, conversation.id, ctx);
+        return { status: 200, data: { todos: notes?.todos ?? [], memos: notes?.memos ?? [] } };
+      }
+      try {
+        return { status: 200, data: await conversation.commit(tx => editNotesInTx(tx, conversation.id, body.notes, body.base), ctx) };
+      } catch (error) {
+        if (error instanceof EditConflictError) throw new HttpError(409, error.message);
+        if (error instanceof Error && /笔记|待办/.test(error.message)) throw new HttpError(400, error.message);
         throw error;
       }
     }
@@ -75,7 +98,7 @@ export function createApi(context: AppContext) {
       await conversation.abort(ctx);
       return { status: 200, data: { ok: true } };
     }
-    const manage = path.match(/^\/api\/conversations\/(\d+)\/(management|schedules|background|reminders)(?:\/([0-9a-f-]+))?(?:\/(pause|resume|cancel|stop))?$/);
+    const manage = path.match(/^\/api\/conversations\/(\d+)\/(management|schedules|background|reminders)(?:\/([0-9a-f-]+))?(?:\/(pause|resume|cancel|stop|edit))?$/);
     if (manage) {
       const conversation = await conversations.getConversation(Number(manage[1]));
       const [, , resource, id, action] = manage;
@@ -84,11 +107,15 @@ export function createApi(context: AppContext) {
         try {
           if (resource === "schedules" && !id) return { status: 201, data: { item: await tasks.schedule(conversation, body) } };
           if (resource === "schedules" && id && ["pause", "resume", "cancel"].includes(action)) return { status: 200, data: { item: await tasks.manageSchedule(conversation, id, action) } };
+          if (resource === "schedules" && id && action === "edit") return { status: 200, data: { item: await tasks.editSchedule(conversation, id, body) } };
+          if (resource === "reminders" && !id) return { status: 201, data: { item: await tasks.reminder(conversation, body) } };
+          if (resource === "reminders" && id && action === "edit") return { status: 200, data: { item: await tasks.editReminder(conversation, id, body) } };
           if (resource === "reminders" && id && action === "cancel") return { status: 200, data: { item: await tasks.cancelReminder(conversation, id) } };
           if (resource === "background" && !id) return { status: 201, data: { item: await tasks.background(conversation, body) } };
           if (resource === "background" && id && action === "stop") return { status: 200, data: { item: await tasks.stopBackground(conversation, id) } };
         } catch (error) {
-          if (error instanceof Error && /任务内容|首次执行|重复间隔|requestId|计划任务不存在|当前状态|后台任务说明/.test(error.message)) throw new HttpError(400, error.message);
+          if (error instanceof HttpError) throw error;
+          if (error instanceof Error && /任务内容|首次执行|重复间隔|requestId|计划任务不存在|当前状态|后台任务说明|提醒内容|提醒时间/.test(error.message)) throw new HttpError(400, error.message);
           throw error;
         }
       }

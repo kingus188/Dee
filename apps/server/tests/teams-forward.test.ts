@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openTeamsStore } from "../../server/dist/teams-store.js";
+import { openTeamsStore } from "../dist/teams-store.js";
 import { startTeamsForward } from "../dist/teams-forward.js";
 
 test("提醒注入失败不回退重复发送；非文本消息也绑定来源；刷新后已回复不注入", async () => {
@@ -71,4 +71,25 @@ test("工作状态自动代回：只回私聊、每人一次，通知里带上�
     assert.equal(store.message("dm:1")?.repliedAt, null, "代回不算用户已回复");
     assert.ok(store.message("dm:1")?.pushedAt, "通知照常推送");
   } finally { stop(); globalThis.fetch = originalFetch; store.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("停止期间等待的同步完成后，不再注入、读取微信发件箱或发出通知", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-forward-stop-"));
+  const store = openTeamsStore(directory);
+  let finish!: (value: { ok: boolean; lastSuccessAt: string | null }) => void;
+  const refreshed = new Promise<{ ok: boolean; lastSuccessAt: string | null }>(resolve => { finish = resolve; });
+  let injections = 0, outboxReads = 0, notices = 0;
+  const stop = startTeamsForward({ dir: directory, store, getToken: async () => { throw new Error("must not acquire token"); },
+    sendURL: "http://localhost:1/unused", sendToken: "test",
+    sync: { status: () => ({ lastSuccessAt: null }), refresh: () => refreshed },
+    inject: async () => { injections++; }, undelivered: async () => { outboxReads++; return [{ text: "pending" }]; },
+    onStuck: () => { notices++; } });
+  try {
+    const stopped = stop();
+    finish({ ok: true, lastSuccessAt: null });
+    await stopped;
+    assert.equal(injections, 0);
+    assert.equal(outboxReads, 0);
+    assert.equal(notices, 0);
+  } finally { finish({ ok: true, lastSuccessAt: null }); await stop(); store.close(); await rm(directory, { recursive: true, force: true }); }
 });

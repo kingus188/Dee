@@ -7,6 +7,7 @@ export function readConfig(env: NodeJS.ProcessEnv) {
     // PI_OFFLINE=1：无论数据库里怎么配，都强制关闭微信通道、Teams 发送和 Webhook 通知。测试和数据副本必须开启，避免连到真实账号。
     offline: env.PI_OFFLINE === "1",
     mailAccountFile: env.MAIL_ACCOUNT_FILE || "",
+    teamsConfigDir: env.TEAMS_CONFIG_DIR || "",
     model: { api, baseUrl: env.LLM_BASE_URL || "", model: env.LLM_MODEL || "",
       apiKey: env.LLM_API_KEY || "", contextWindow: Number(env.LLM_CONTEXT_WINDOW || 128000), maxTokens: Number(env.LLM_MAX_TOKENS || 8192) },
     materialsRoot: env.MATERIALS_ROOT || "",

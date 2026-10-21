@@ -1,0 +1,2850 @@
+.daylight-workspace {
+  font-family: inherit;
+  color: var(--text-main);
+  background: var(--bg-page);
+  font-size: 13px;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --muted: var(--text-muted);
+  --line: var(--border);
+  --purple: var(--primary);
+  --ink: var(--text-main);
+}
+
+.daylight-workspace * {
+  box-sizing: border-box;
+}
+
+.daylight-workspace {
+  margin: 0;
+}
+
+.daylight-workspace button,
+.daylight-workspace input,
+.daylight-workspace textarea,
+.daylight-workspace select {
+  font: inherit;
+}
+
+.daylight-workspace button {
+  cursor: pointer;
+}
+
+.daylight-workspace button,
+.daylight-workspace input,
+.daylight-workspace select,
+.daylight-workspace textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.daylight-workspace button {
+  color: inherit;
+}
+
+.daylight-workspace button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.daylight-workspace button {
+  transition:
+    background 0.15s,
+    box-shadow 0.15s,
+    color 0.15s;
+}
+
+.daylight-workspace button:focus-visible,
+.daylight-workspace a:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.daylight-workspace input:focus,
+.daylight-workspace textarea:focus,
+.daylight-workspace select:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.daylight-workspace button .anticon {
+  pointer-events: none;
+}
+
+.daylight-workspace input[type='checkbox'] {
+  accent-color: var(--purple);
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.daylight-workspace button {
+  border: 0;
+  background: none;
+}
+
+.daylight-workspace h1,
+.daylight-workspace h2,
+.daylight-workspace p {
+  margin: 0;
+}
+
+.daylight-workspace ::selection {
+  background: var(--primary-light);
+}
+
+.daylight-workspace ::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.daylight-workspace ::-webkit-scrollbar-thumb {
+  background: var(--primary-border);
+  border-radius: 10px;
+}
+
+.daylight-workspace .desktop-backdrop {
+  min-height: 100dvh;
+}
+
+.daylight-workspace .app-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 0;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.daylight-workspace .sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  padding: 22px 16px 16px;
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+}
+
+.daylight-workspace .sidebar-heading {
+  margin: 0 8px 20px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.daylight-workspace .search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-subtle);
+  border-radius: 9px;
+  height: 36px;
+  padding: 0 9px;
+  color: var(--text-muted);
+}
+
+.daylight-workspace .search-box input {
+  width: 100%;
+  min-width: 0;
+  background: none;
+  border: 0;
+  font-size: 11px;
+  padding: 5px 0;
+  color: var(--ink);
+}
+
+.daylight-workspace .search-box input::placeholder {
+  color: var(--text-muted);
+}
+
+.daylight-workspace .search-box kbd {
+  font: 9px inherit;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.daylight-workspace .sidebar-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 27px 8px 10px;
+  letter-spacing: 1px;
+}
+
+.daylight-workspace .nav-item {
+  min-height: 39px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 7px;
+  width: 100%;
+  padding: 9px 10px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--text-muted);
+  margin: 2px 0;
+}
+
+.daylight-workspace .nav-item > span:not(.anticon) {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daylight-workspace .nav-item > .anticon {
+  font-size: 14px;
+}
+
+.daylight-workspace .nav-item small {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.daylight-workspace .nav-item:hover {
+  background: var(--bg-subtle);
+  color: var(--ink);
+}
+
+.daylight-workspace .nav-item.selected {
+  background: var(--primary-light);
+  color: var(--primary);
+  box-shadow: none;
+}
+
+.daylight-workspace .nav-item.selected small {
+  color: var(--primary);
+}
+
+.daylight-workspace .project-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 22px;
+  margin-bottom: 5px;
+}
+
+.daylight-workspace .project-heading small {
+  margin-left: 4px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.daylight-workspace .project-navigation {
+  padding-left: 2px;
+}
+
+.daylight-workspace .project-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.daylight-workspace .project-dot.lavender {
+  background: #b397e6;
+}
+
+.daylight-workspace .project-dot.sky {
+  background: #87c1d1;
+}
+
+.daylight-workspace .project-dot.mint {
+  background: #8fc6a5;
+}
+
+.daylight-workspace .project-dot.peach {
+  background: #e9af80;
+}
+
+.daylight-workspace .project-dot.rose {
+  background: #d69fb3;
+}
+
+.daylight-workspace .add-project {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 9px;
+}
+
+.daylight-workspace .sidebar-bottom {
+  margin-top: auto;
+  padding-top: 30px;
+}
+
+.daylight-workspace .storage-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  color: #8b9290;
+  margin: 12px 10px 0;
+}
+
+.daylight-workspace .storage-status i {
+  width: 5px;
+  height: 5px;
+  background: #86b19a;
+  border-radius: 50%;
+}
+
+.daylight-workspace .main-area {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-surface);
+}
+
+.daylight-workspace .topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 0 30px;
+  gap: 12px;
+  background: var(--bg-surface);
+  position: relative;
+  z-index: 5;
+}
+
+.daylight-workspace .breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.daylight-workspace .breadcrumbs strong {
+  color: var(--text-main);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daylight-workspace .topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.daylight-workspace .project-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 30px 30px 24px;
+  flex-shrink: 0;
+}
+
+.daylight-workspace .title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.daylight-workspace .title-row h1 {
+  font-size: 25px;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.daylight-workspace .title-row .icon-button {
+  color: #a49bb3;
+  font-size: 13px;
+}
+
+.daylight-workspace .project-intro {
+  min-width: 0;
+}
+
+.daylight-workspace .project-intro p {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 10px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.daylight-workspace .button {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 14px;
+  min-height: 36px;
+  background: var(--bg-surface);
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.daylight-workspace .button:hover {
+  background: var(--bg-subtle);
+  border-color: var(--primary-border);
+}
+
+.daylight-workspace .button.primary {
+  background: var(--primary);
+  color: var(--user-text);
+  border-color: var(--primary);
+  box-shadow: var(--shadow-xs);
+}
+
+.daylight-workspace .button.primary:hover {
+  background: var(--primary-hover);
+}
+
+.daylight-workspace .new-task {
+  padding: 10px 16px;
+}
+
+.daylight-workspace .icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+  height: 30px;
+  min-height: 30px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.daylight-workspace .icon-button:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.daylight-workspace .board-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 30px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.daylight-workspace .view-tabs {
+  display: flex;
+  align-items: center;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 4px;
+}
+
+.daylight-workspace .view-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.daylight-workspace .view-tabs button.active {
+  color: var(--primary);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.daylight-workspace .board-filters {
+  display: flex;
+  gap: 8px;
+}
+
+.daylight-workspace .board-filters select,
+.daylight-workspace .list-view select {
+  max-width: 130px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  padding: 7px 10px;
+  color: var(--text-muted);
+  border-radius: 9px;
+  font-size: 11px;
+  cursor: pointer;
+  min-height: 32px;
+}
+
+.daylight-workspace .board-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 17px 30px 16px;
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.daylight-workspace .board-summary > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.daylight-workspace .board-summary b {
+  font-weight: 400;
+  margin: 0 3px;
+}
+
+.daylight-workspace .small-purple-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  background: var(--primary);
+  border-radius: 50%;
+  margin-right: 2px;
+}
+
+.daylight-workspace .summary-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.daylight-workspace .summary-progress > div {
+  height: 4px;
+  width: 67px;
+  background: var(--primary-light);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.daylight-workspace .summary-progress i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+  border-radius: 10px;
+}
+
+.daylight-workspace .summary-progress strong {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--primary);
+}
+
+.daylight-workspace .filter-result {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.daylight-workspace .preview-notice {
+  font-size: 10px;
+  color: #9383ad;
+  background: #faf8fe;
+  border-top: 1px solid #f6f1fd;
+  padding: 6px 30px;
+  flex-shrink: 0;
+}
+
+.daylight-workspace .board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 13px;
+  padding: 10px 24px 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.daylight-workspace .board-column {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-page);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.daylight-workspace .board-column.drag-over {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.daylight-workspace .column-header {
+  padding: 17px 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  gap: 6px;
+}
+
+.daylight-workspace .column-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.daylight-workspace .column-header h2 > i {
+  width: 6px;
+  height: 6px;
+  display: inline-block;
+  border-radius: 50%;
+}
+
+.daylight-workspace .column-header h2 > span {
+  font-size: 9px;
+  color: #a097ad;
+  border: 1px solid #eae6ef;
+  min-width: 18px;
+  text-align: center;
+  border-radius: 5px;
+  padding: 2px 3px;
+  font-weight: 400;
+  background: #fff;
+}
+
+.daylight-workspace .column-header p {
+  font-size: 9px;
+  margin: 7px 0 0 12px;
+  color: #a59baa;
+}
+
+.daylight-workspace .column-add {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  background: var(--primary-light);
+  color: var(--primary);
+  border-radius: 6px;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.daylight-workspace .column-add:hover {
+  background: var(--primary-border);
+}
+
+.daylight-workspace .column-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 9px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.daylight-workspace .drop-indicator {
+  height: 3px;
+  margin: -7.5px 0;
+  border-radius: 2px;
+  background: var(--primary);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.daylight-workspace .task-card {
+  padding: 12px 11px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--card-ink);
+  flex-shrink: 0;
+  box-shadow: 0 2px 3px #31204102;
+  transition:
+    box-shadow 0.15s,
+    border-color 0.15s;
+}
+
+.daylight-workspace .task-card:hover {
+  box-shadow: 0 5px 16px #4030480b;
+  border-color: var(--card-ink);
+}
+
+.daylight-workspace .task-card[draggable='true'] {
+  cursor: grab;
+}
+
+.daylight-workspace .task-card:active[draggable='true'] {
+  cursor: grabbing;
+}
+
+.daylight-workspace .peach {
+  --card-bg: #fff1e6;
+  --card-ink: #a65b2b;
+  --card-border: #fce6d6;
+  --card-soft: #f7d7bf;
+}
+
+.daylight-workspace .lavender {
+  --card-bg: var(--primary-light);
+  --card-ink: var(--primary);
+  --card-border: var(--primary-border);
+  --card-soft: var(--primary-border);
+}
+
+.daylight-workspace .mint {
+  --card-bg: #eaf7ed;
+  --card-ink: #3e8456;
+  --card-border: #def0e2;
+  --card-soft: #c8e5cf;
+}
+
+.daylight-workspace .sky {
+  --card-bg: #e9f7fa;
+  --card-ink: #367e93;
+  --card-border: #dbf0f4;
+  --card-soft: #bee3ed;
+}
+
+.daylight-workspace .rose {
+  --card-bg: #fcecf2;
+  --card-ink: #a85276;
+  --card-border: #f6dfe9;
+  --card-soft: #f0cadd;
+}
+
+.daylight-workspace .card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 5px;
+  margin-bottom: 8px;
+  min-height: 24px;
+}
+
+.daylight-workspace .tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.daylight-workspace .tag {
+  font-size: 8px;
+  line-height: 1.4;
+  background: #ffffffa6;
+  border: 1px solid #ffffffcc;
+  padding: 3px 5px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.daylight-workspace .card-menu {
+  height: 23px;
+  width: 23px;
+  min-height: 23px;
+  color: var(--card-ink);
+  background: #ffffff63;
+  border: 1px solid #ffffffae;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.daylight-workspace .card-menu:hover {
+  background: #fff;
+  color: var(--card-ink);
+}
+
+.daylight-workspace .card-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.7;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+  color: var(--card-ink);
+  overflow-wrap: anywhere;
+}
+
+.daylight-workspace .card-title:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.daylight-workspace .card-description {
+  font-size: 10px;
+  line-height: 1.8;
+  margin-top: 6px;
+  opacity: 0.85;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.daylight-workspace .card-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.daylight-workspace .card-checklist label {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 9px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.daylight-workspace .card-checklist input {
+  width: 11px;
+  height: 11px;
+  margin: 1px 0 0;
+  accent-color: var(--card-ink);
+}
+
+.daylight-workspace .card-checklist label span {
+  overflow-wrap: anywhere;
+}
+
+.daylight-workspace .card-checklist label.checked span {
+  opacity: 0.7;
+}
+
+.daylight-workspace .more-checks {
+  color: var(--card-ink);
+  font-size: 9px;
+  text-align: left;
+  padding: 2px 0;
+}
+
+.daylight-workspace .card-date {
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 15px;
+}
+
+.daylight-workspace .card-date .anticon {
+  font-size: 10px;
+}
+
+.daylight-workspace .overdue {
+  color: #b35a45 !important;
+}
+
+.daylight-workspace .progress-section {
+  margin-top: 15px;
+}
+
+.daylight-workspace .progress-section > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8px;
+  margin-bottom: 6px;
+}
+
+.daylight-workspace .dotted-progress {
+  height: 7px;
+  background: radial-gradient(circle, var(--card-soft) 2.6px, transparent 3px)
+    left center/8px 7px repeat-x;
+  overflow: hidden;
+}
+
+.daylight-workspace .dotted-progress i {
+  display: block;
+  height: 100%;
+  background: radial-gradient(circle, var(--card-ink) 2.6px, transparent 3px)
+    left center/8px 7px repeat-x;
+}
+
+.daylight-workspace .card-footer {
+  margin-top: 13px;
+  padding-top: 10px;
+  border-top: 1px solid var(--card-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 5px;
+}
+
+.daylight-workspace .priority-label {
+  font-size: 8px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  border: 1px solid #ffffffa0;
+  background: #ffffff60;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.daylight-workspace .priority-high {
+  font-weight: 600;
+}
+
+.daylight-workspace .card-footer-right {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.daylight-workspace .card-footer-right > span {
+  font-size: 8px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.daylight-workspace .complete-button {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  border: 1px solid var(--card-border);
+  background: #ffffff60;
+  border-radius: 6px;
+  color: var(--card-ink);
+  font-size: 10px;
+}
+
+.daylight-workspace .complete-button:hover,
+.daylight-workspace .complete-button.is-done {
+  background: var(--card-ink);
+  color: white;
+}
+
+.daylight-workspace .add-card {
+  border: 1px dashed #e4deec;
+  padding: 11px 5px;
+  border-radius: 7px;
+  font-size: 10px;
+  color: #a093ad;
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+  flex-shrink: 0;
+  min-height: 34px;
+}
+
+.daylight-workspace .add-card:hover {
+  background: #f2edf8;
+  border-color: #bda9d5;
+  color: #83679d;
+}
+
+.daylight-workspace .column-empty {
+  padding: 28px 9px;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.8;
+  color: #aaa0b2;
+}
+
+.daylight-workspace .main-footer {
+  height: 38px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 30px;
+  font-size: 9px;
+  color: #aaa1b3;
+  gap: 12px;
+}
+
+.daylight-workspace .list-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 24px 20px;
+}
+
+.daylight-workspace .list-view table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 710px;
+  font-size: 11px;
+}
+
+.daylight-workspace .list-view th {
+  text-align: left;
+  color: #968b9f;
+  font-weight: 400;
+  padding: 14px 10px;
+  border-bottom: 1px solid var(--line);
+  background: #faf9fc;
+  white-space: nowrap;
+}
+
+.daylight-workspace .list-view td {
+  padding: 16px 10px;
+  border-bottom: 1px solid var(--line);
+  color: #80718e;
+}
+
+.daylight-workspace .list-view td:first-child {
+  min-width: 220px;
+  max-width: 360px;
+}
+
+.daylight-workspace .list-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.daylight-workspace .list-task-name {
+  padding: 0;
+  line-height: 1.7;
+  text-align: left;
+  font-size: 12px;
+  color: #5e4c70;
+}
+
+.daylight-workspace .list-task-name:hover {
+  text-decoration: underline;
+}
+
+.daylight-workspace .list-check {
+  width: 20px;
+  height: 20px;
+  border: 1px solid #e5dceb;
+  color: #c7bad4;
+  border-radius: 6px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+}
+
+.daylight-workspace .list-check.is-done {
+  background: #a78bc7;
+  border-color: #a78bc7;
+  color: #fff;
+}
+
+.daylight-workspace .list-view .priority-label {
+  border-color: #ece5f0;
+  background: #f6f1fa;
+  color: #9681a8;
+}
+
+.daylight-workspace .list-view .priority-high {
+  background: #fff0e6;
+  color: #b67a55;
+}
+
+.daylight-workspace .empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+  gap: 18px;
+  min-height: 220px;
+}
+
+.daylight-workspace .empty-state > .anticon {
+  font-size: 33px;
+  color: #b19acb;
+}
+
+.daylight-workspace .empty-state h2 {
+  font-size: 17px;
+  font-weight: 500;
+  color: #796486;
+}
+
+.daylight-workspace .empty-state p {
+  font-size: 12px;
+  color: #a292ae;
+  max-width: 450px;
+  line-height: 1.8;
+}
+
+.daylight-workspace .loading-orbit {
+  height: 28px;
+  width: 28px;
+  border: 2px solid #eee7f7;
+  border-top-color: #a28bc8;
+  border-radius: 50%;
+  animation: daylight-spin 0.8s linear infinite;
+}
+
+@keyframes daylight-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.daylight-workspace .editor-form {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.daylight-workspace .editor-fields {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.daylight-workspace .editor-form fieldset {
+  border: 0;
+  padding: 6px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+  min-width: 0;
+}
+
+.daylight-workspace .editor-form label,
+.daylight-workspace .field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #756580;
+}
+
+.daylight-workspace .editor-form input:not([type='checkbox']):not(.ant-picker input),
+.daylight-workspace .editor-form textarea,
+.daylight-workspace .editor-form select {
+  border: 1px solid #e5dfed;
+  padding: 10px 12px;
+  background: #fff;
+  border-radius: 7px;
+  width: 100%;
+  min-width: 0;
+  color: #54405e;
+  font-size: 13px;
+  min-height: 40px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.daylight-workspace .editor-form input[type='date'] {
+  color-scheme: light;
+  accent-color: #9c7dbb;
+}
+
+.daylight-workspace .editor-form input[type='date']::-webkit-calendar-picker-indicator {
+  opacity: 0.65;
+  cursor: pointer;
+}
+
+.daylight-workspace .editor-form .ant-picker {
+  width: 100%;
+  min-height: 40px;
+  border-color: #e5dfed;
+  border-radius: 7px;
+  color: #54405e;
+  box-shadow: none;
+}
+
+.daylight-workspace .editor-form .ant-picker:hover,
+.daylight-workspace .editor-form .ant-picker-focused {
+  border-color: #bda8ed;
+  box-shadow: 0 0 0 2px rgb(189 168 237 / 15%);
+}
+
+.daylight-workspace .editor-form input::placeholder,
+.daylight-workspace .editor-form textarea::placeholder {
+  color: #b4a8bf;
+}
+
+.daylight-workspace .form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.daylight-workspace .color-picker {
+  display: flex;
+  gap: 9px;
+}
+
+.daylight-workspace .color-swatch {
+  width: 32px;
+  height: 32px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 50%;
+  color: var(--card-ink);
+}
+
+.daylight-workspace .color-swatch.selected {
+  box-shadow:
+    0 0 0 2px white,
+    0 0 0 3px var(--card-ink);
+}
+
+.daylight-workspace .field-hint {
+  font-size: 10px;
+  color: #a194ac;
+  font-weight: 400;
+  line-height: 1.8;
+}
+
+.daylight-workspace .editor-form label > .field-hint {
+  margin-top: -5px;
+}
+
+.daylight-workspace .section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: #82708e;
+  font-size: 12px;
+}
+
+.daylight-workspace .section-label small {
+  color: #b2a4bd;
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.daylight-workspace .text-button {
+  font-size: 10px;
+  color: #9c7dbb;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.daylight-workspace .text-button:hover {
+  color: #6e4a94;
+}
+
+.daylight-workspace .checklist-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.daylight-workspace .checklist-edit-row input[type='checkbox'] {
+  margin: 0;
+}
+
+.daylight-workspace .editor-form .checklist-edit-row input:not([type='checkbox']) {
+  font-size: 12px;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.daylight-workspace .modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid #f0eaf5;
+  margin-top: 24px;
+  padding-top: 18px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.daylight-workspace .action-spacer {
+  flex: 1;
+}
+
+.daylight-workspace .danger {
+  color: #b8616d;
+}
+
+.daylight-workspace .form-error {
+  font-size: 12px;
+  color: #b35365;
+  margin-top: 14px;
+  flex-shrink: 0;
+}
+
+.daylight-workspace .settings-content {
+  color: #85718f;
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.daylight-workspace .settings-icon {
+  font-size: 30px;
+  color: #9c80ba;
+  margin: 15px 0;
+}
+
+.daylight-workspace .settings-content label {
+  display: block;
+  font-size: 11px;
+  color: #ac9ab7;
+  margin-top: 24px;
+}
+
+.daylight-workspace .settings-content code {
+  font-size: 11px;
+  display: block;
+  overflow-wrap: anywhere;
+  background: #f7f3fa;
+  border: 1px solid #ece4f1;
+  padding: 12px;
+  margin-top: 8px;
+  border-radius: 7px;
+}
+
+.daylight-workspace .settings-content .field-hint {
+  margin-top: 12px;
+}
+
+.daylight-workspace .settings-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #aa98b6;
+  margin-top: 26px;
+  border-top: 1px solid #eee6f5;
+  padding-top: 16px;
+}
+
+.daylight-workspace .ant-modal .ant-modal-title {
+  font-weight: 500;
+  color: #6c567e !important;
+}
+
+.daylight-workspace .ant-modal.ant-modal {
+  top: 24px;
+  padding-bottom: 0;
+}
+
+.daylight-workspace .ant-modal .ant-modal-container {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 48px);
+  padding: 25px;
+}
+
+.daylight-workspace .ant-modal .ant-modal-header {
+  padding-right: 32px;
+}
+
+.daylight-workspace .ant-modal .ant-modal-header,
+.daylight-workspace .ant-modal .ant-modal-footer {
+  flex-shrink: 0;
+}
+
+.daylight-workspace .ant-modal .ant-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.daylight-workspace .ant-modal .ant-modal-body:has(> .editor-form) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.daylight-workspace .mobile-menu,
+.daylight-workspace .sidebar-scrim {
+  display: none;
+}
+
+.daylight-workspace .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.daylight-workspace .markdown-editor {
+  min-width: 0;
+  font-weight: 400;
+}
+
+.daylight-workspace .markdown-content,
+.daylight-workspace .editor-form textarea.markdown-source {
+  min-height: 150px;
+  max-height: 340px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border: 1px solid #e5dfed;
+  border-radius: 10px;
+  background: white;
+  color: #54405e;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.daylight-workspace .markdown-content:empty::before {
+  content: '写下任务备注，支持 Markdown……';
+  color: #b4a8bf;
+  pointer-events: none;
+}
+
+.daylight-workspace .markdown-content:focus {
+  outline: 2px solid #bda8ed;
+  outline-offset: 1px;
+}
+
+.daylight-workspace .markdown-content[contenteditable='false'] {
+  opacity: 0.65;
+}
+
+.daylight-workspace .markdown-content > * + * {
+  margin-top: 10px;
+}
+
+.daylight-workspace .markdown-content h1 {
+  font-size: 1.6em;
+}
+
+.daylight-workspace .markdown-content h2 {
+  font-size: 1.3em;
+}
+
+.daylight-workspace .markdown-content h3 {
+  font-size: 1.1em;
+}
+
+.daylight-workspace .markdown-content ul,
+.daylight-workspace .markdown-content ol {
+  padding-left: 24px;
+}
+
+.daylight-workspace .markdown-content li p {
+  margin: 0;
+}
+
+.daylight-workspace .markdown-content blockquote {
+  border-left: 3px solid #bda8ed;
+  margin-left: 0;
+  padding-left: 12px;
+  color: #85718f;
+}
+
+.daylight-workspace .markdown-content pre {
+  white-space: pre-wrap;
+  background: #f7f3fa;
+  border-radius: 5px;
+  padding: 10px;
+}
+
+.daylight-workspace .markdown-content code,
+.daylight-workspace .editor-form textarea.markdown-source {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.daylight-workspace .markdown-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  max-height: 280px;
+  object-fit: contain;
+  border-radius: 5px;
+}
+
+.daylight-workspace .markdown-content .ProseMirror-selectednode {
+  outline: 2px solid #bda8ed;
+}
+
+.daylight-workspace .markdown-editor > .field-hint {
+  margin-top: 6px;
+}
+
+.daylight-workspace .calendar-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.daylight-workspace .calendar-toolbar,
+.daylight-workspace .calendar-period,
+.daylight-workspace .calendar-controls,
+.daylight-workspace .calendar-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.daylight-workspace .calendar-toolbar {
+  justify-content: space-between;
+  padding: 0 30px 20px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.daylight-workspace .calendar-period h2 {
+  font-size: 18px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.daylight-workspace .calendar-arrow {
+  width: 36px;
+  padding: 0;
+  color: #8c7da5;
+}
+
+.daylight-workspace .calendar-view-tabs button {
+  min-width: 52px;
+  justify-content: center;
+}
+
+.daylight-workspace .calendar-view-tabs button.active {
+  color: var(--purple);
+  background: var(--primary-light);
+  box-shadow: none;
+}
+
+.daylight-workspace .calendar-controls select {
+  min-height: 36px;
+  max-width: 160px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  color: #736984;
+  font-size: 11px;
+}
+
+.daylight-workspace .calendar-search-result {
+  padding: 9px 30px;
+  color: var(--muted);
+  font-size: 11px;
+  border-bottom: 1px solid var(--line);
+}
+
+.daylight-workspace .calendar-month-layout,
+.daylight-workspace .calendar-agenda-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  flex: 1;
+  min-height: 0;
+}
+
+.daylight-workspace .calendar-month {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.daylight-workspace .calendar-weekdays,
+.daylight-workspace .calendar-month-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.daylight-workspace .calendar-weekdays {
+  flex-shrink: 0;
+  min-height: 44px;
+  align-items: center;
+  color: #746c81;
+  font-size: 12px;
+  text-align: center;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: white;
+  border-bottom: 1px solid var(--line);
+}
+
+.daylight-workspace .calendar-month-days {
+  flex: 1;
+  grid-template-rows: repeat(var(--weeks), minmax(114px, 1fr));
+}
+
+.daylight-workspace .calendar-day {
+  min-width: 0;
+  padding: 7px 5px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: white;
+}
+
+.daylight-workspace .calendar-day:nth-child(7n) {
+  border-right: 0;
+}
+
+.daylight-workspace .calendar-day.outside-month {
+  background: #fcfcfd;
+}
+
+.daylight-workspace .outside-month .calendar-date {
+  color: #aaa4b4;
+}
+
+.daylight-workspace .calendar-day.selected-day {
+  background: #f8f5fe;
+}
+
+.daylight-workspace .calendar-day-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  margin-bottom: 5px;
+}
+
+.daylight-workspace .calendar-date {
+  height: 30px;
+  min-width: 30px;
+  padding: 0 5px;
+  border-radius: 50%;
+  font-size: 13px;
+  color: #696075;
+}
+
+.daylight-workspace .calendar-date:hover {
+  background: var(--primary-light);
+}
+
+.daylight-workspace .calendar-date.is-today,
+.daylight-workspace .calendar-week-heading .is-today {
+  background: var(--purple);
+  color: white;
+}
+
+.daylight-workspace .calendar-day-add {
+  opacity: 0;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  font-size: 10px;
+}
+
+.daylight-workspace .calendar-day:hover .calendar-day-add,
+.daylight-workspace .calendar-day:focus-within .calendar-day-add {
+  opacity: 1;
+}
+
+.daylight-workspace .calendar-day-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.daylight-workspace .calendar-task {
+  min-width: 0;
+  display: grid;
+  align-items: start;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  color: var(--card-ink);
+}
+
+.daylight-workspace .calendar-task input[type='checkbox'] {
+  accent-color: var(--card-ink);
+  width: 14px;
+  height: 14px;
+  margin: 3px 0 0;
+}
+
+.daylight-workspace .calendar-task[draggable='true'] {
+  cursor: grab;
+}
+
+.daylight-workspace .calendar-task-title {
+  padding: 0;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 550;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  color: inherit;
+}
+
+.daylight-workspace .calendar-task-title:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.daylight-workspace .calendar-task.is-done .calendar-task-title {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.daylight-workspace .calendar-task-chip {
+  padding: 5px;
+  border-radius: 5px;
+  gap: 4px;
+  grid-template-columns: 13px minmax(0, 1fr);
+  background: var(--card-bg);
+}
+
+.daylight-workspace .calendar-task-chip .calendar-task-title {
+  font-size: 12px;
+  line-height: 1.6;
+  font-weight: 450;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.daylight-workspace .calendar-task-chip input[type='checkbox'] {
+  width: 11px;
+  height: 11px;
+  margin-top: 2px;
+}
+
+.daylight-workspace .calendar-task-card {
+  border-radius: 9px;
+  background: var(--card-bg);
+  padding: 14px 12px;
+  flex-shrink: 0;
+}
+
+.daylight-workspace .calendar-task-description {
+  grid-column: 2;
+  color: #706479;
+  font-size: 12px;
+  line-height: 1.75;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.daylight-workspace .calendar-project {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  grid-column: 2;
+  font-size: 10px;
+  color: #706479;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.daylight-workspace .calendar-status {
+  grid-column: 2;
+  font-size: 10px;
+  color: #7654a6;
+  white-space: nowrap;
+}
+
+.daylight-workspace .calendar-status.status-doing {
+  color: #4f7585;
+}
+
+.daylight-workspace .calendar-status.status-review {
+  color: #95633d;
+}
+
+.daylight-workspace .calendar-status.status-done {
+  color: #437858;
+}
+
+.daylight-workspace .calendar-checklist {
+  grid-column: 2;
+  font-size: 10px;
+}
+
+.daylight-workspace .calendar-aside {
+  border-left: 1px solid var(--line);
+  overflow: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 22px 20px;
+}
+
+.daylight-workspace .calendar-section-heading {
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.daylight-workspace .calendar-section-heading h2 {
+  font-size: 16px;
+  font-weight: 550;
+}
+
+.daylight-workspace .calendar-section-heading h2 > span {
+  color: #9686aa;
+  font-size: 10px;
+  padding: 2px 5px;
+  background: #f5f2f9;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+
+.daylight-workspace .calendar-today-badge {
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: var(--purple);
+  background: #f1ebfc;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.daylight-workspace .calendar-task-count {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 14px;
+}
+
+.daylight-workspace .calendar-detail-tasks,
+.daylight-workspace .calendar-unscheduled-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.daylight-workspace .calendar-add-task {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: #706479;
+  padding: 10px 6px;
+  font-size: 11px;
+  min-height: 36px;
+  margin-top: 10px;
+}
+
+.daylight-workspace .calendar-add-task:hover {
+  color: var(--purple);
+  background: #f7f3fd;
+}
+
+.daylight-workspace .calendar-empty {
+  color: #706479;
+  font-size: 11px;
+  line-height: 1.8;
+  padding: 16px 0;
+}
+
+.daylight-workspace .calendar-empty > .anticon {
+  margin-right: 5px;
+}
+
+.daylight-workspace .calendar-unscheduled {
+  border-top: 1px solid var(--line);
+  margin-top: 20px;
+  padding-top: 16px;
+}
+
+.daylight-workspace .calendar-more {
+  text-align: left;
+  color: #706479;
+  font-size: 10px;
+  padding: 3px;
+}
+
+.daylight-workspace .calendar-more-mobile,
+.daylight-workspace .calendar-more-mobile-only {
+  display: none;
+}
+
+.daylight-workspace .calendar-week-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.daylight-workspace .calendar-week-scroll {
+  flex: 1;
+  min-height: 210px;
+  overflow: auto;
+}
+
+.daylight-workspace .calendar-week-columns {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(124px, 1fr));
+  min-height: 100%;
+}
+
+.daylight-workspace .calendar-week-day {
+  min-width: 0;
+  padding: 14px 7px 20px;
+  border-right: 1px solid var(--line);
+}
+
+.daylight-workspace .calendar-week-day.today-column {
+  background: #fbf9ff;
+}
+
+.daylight-workspace .calendar-week-heading {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  color: #7e748b;
+  font-size: 11px;
+  padding: 0 0 20px;
+}
+
+.daylight-workspace .calendar-week-heading strong {
+  font-size: 20px;
+  font-weight: 550;
+  width: 36px;
+  height: 36px;
+  line-height: 36px;
+  border-radius: 50%;
+  color: var(--ink);
+}
+
+.daylight-workspace .calendar-week-heading[aria-pressed='true'] strong:not(.is-today) {
+  background: var(--primary-light);
+  color: var(--purple);
+}
+
+.daylight-workspace .calendar-week-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.daylight-workspace .calendar-week-tasks .calendar-task-card {
+  padding: 12px 9px;
+  gap: 9px 5px;
+}
+
+.daylight-workspace .calendar-week-tasks .calendar-task-description {
+  display: none;
+}
+
+.daylight-workspace .calendar-week-tasks .calendar-task-title {
+  font-size: 13px;
+}
+
+.daylight-workspace .calendar-week-tasks .calendar-add-task {
+  border: 0;
+  margin: 0;
+}
+
+.daylight-workspace .calendar-week-layout > .calendar-unscheduled {
+  margin-top: 0;
+  padding: 14px 30px;
+  max-height: 210px;
+  overflow: auto;
+  flex-shrink: 0;
+}
+
+.daylight-workspace .calendar-week-layout .calendar-unscheduled-items {
+  flex-direction: row;
+  overflow: auto;
+}
+
+.daylight-workspace .calendar-week-layout .calendar-unscheduled-items > .calendar-task {
+  width: 225px;
+  min-width: 200px;
+}
+
+.daylight-workspace .calendar-week-layout .calendar-unscheduled-items .calendar-task-description {
+  display: none;
+}
+
+.daylight-workspace .calendar-agenda {
+  overflow: auto;
+  min-height: 0;
+  padding: 12px 28px 24px;
+}
+
+.daylight-workspace .calendar-agenda-range {
+  color: #706479;
+  font-size: 10px;
+  margin: 0 0 14px 21px;
+}
+
+.daylight-workspace .calendar-agenda-day {
+  border-left: 1px solid var(--line);
+  padding: 0 0 18px 20px;
+}
+
+.daylight-workspace .calendar-agenda-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.daylight-workspace .calendar-agenda-heading::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c9c2d7;
+  position: absolute;
+  left: -25px;
+}
+
+.daylight-workspace .today-agenda .calendar-agenda-heading::before {
+  background: var(--purple);
+}
+
+.daylight-workspace .calendar-agenda-heading h2 {
+  font-size: 13px;
+  color: #706479;
+  font-weight: 450;
+}
+
+.daylight-workspace .calendar-agenda-heading h2 b {
+  font-size: 15px;
+  font-weight: 550;
+  color: var(--purple);
+  margin-right: 12px;
+}
+
+.daylight-workspace .calendar-task-row {
+  grid-template-columns: 16px minmax(0, 1fr) minmax(70px, 105px) 54px;
+  align-items: center;
+  padding: 16px 10px;
+  border-bottom: 1px solid var(--line);
+  gap: 12px;
+  color: var(--ink);
+}
+
+.daylight-workspace .calendar-task-row .calendar-project,
+.daylight-workspace .calendar-task-row .calendar-status {
+  grid-column: auto;
+}
+
+.daylight-workspace .calendar-task-row .calendar-task-title {
+  font-weight: 450;
+}
+
+.daylight-workspace .calendar-task-row .calendar-status {
+  text-align: right;
+}
+
+.daylight-workspace .today-agenda .calendar-task-row:not(.is-done) {
+  background: #f9f6fe;
+  border-radius: 7px;
+}
+
+.daylight-workspace .calendar-aside .calendar-task-row {
+  grid-template-columns: 16px minmax(0, 1fr);
+  padding: 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  gap: 6px;
+}
+
+.daylight-workspace .calendar-aside .calendar-task-row .calendar-project {
+  grid-column: 2;
+}
+
+.daylight-workspace .calendar-aside .calendar-task-row .calendar-status {
+  display: none;
+}
+
+.daylight-workspace .calendar-mini-month .calendar-month {
+  height: auto;
+  overflow: visible;
+}
+
+.daylight-workspace .is-compact .calendar-month-days {
+  grid-template-rows: repeat(var(--weeks), 41px);
+}
+
+.daylight-workspace .is-compact .calendar-weekdays {
+  position: static;
+  min-height: 36px;
+  border: 0;
+  font-size: 11px;
+}
+
+.daylight-workspace .is-compact .calendar-day {
+  padding: 0;
+  border: 0;
+  background: white;
+}
+
+.daylight-workspace .is-compact .calendar-day-heading {
+  justify-content: center;
+  margin: 0;
+}
+
+.daylight-workspace .is-compact .selected-day .calendar-date:not(.is-today) {
+  background: var(--primary-light);
+  color: var(--purple);
+}
+
+.daylight-workspace .calendar-day-dots {
+  display: flex;
+  justify-content: center;
+  gap: 3px;
+}
+
+.daylight-workspace .calendar-day-dots .project-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+}
+
+.daylight-workspace .calendar-drop-over {
+  background: #eee7fb !important;
+  outline: 2px solid #b29bdf;
+  outline-offset: -2px;
+}
+
+@media (max-width: 1190px) {.daylight-workspace .calendar-month-layout,
+.daylight-workspace .calendar-agenda-layout {
+    grid-template-columns: minmax(0, 1fr) 230px;
+  }
+
+.daylight-workspace .calendar-toolbar {
+    padding: 0 22px 16px;
+    gap: 12px;
+  }
+
+.daylight-workspace .calendar-period h2 {
+    font-size: 15px;
+  }
+
+.daylight-workspace .calendar-aside {
+    padding: 18px 14px;
+  }
+
+.daylight-workspace .calendar-task-row {
+    grid-template-columns: 16px minmax(0, 1fr) 54px;
+    gap: 8px;
+  }
+
+.daylight-workspace .calendar-agenda .calendar-task-row .calendar-project {
+    display: none;
+  }
+}
+
+@media (max-width: 950px) {.daylight-workspace .calendar-month-layout,
+.daylight-workspace .calendar-agenda-layout {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+
+.daylight-workspace .calendar-month-layout > .calendar-month {
+    min-height: 560px;
+    flex-shrink: 0;
+    overflow: visible;
+  }
+
+.daylight-workspace .calendar-aside {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    overflow: visible;
+    flex-shrink: 0;
+  }
+
+.daylight-workspace .calendar-agenda {
+    overflow: visible;
+    flex-shrink: 0;
+  }
+
+.daylight-workspace .calendar-agenda-aside {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 24px;
+  }
+
+.daylight-workspace .calendar-agenda-aside .calendar-unscheduled {
+    border: 0;
+    margin-top: 0;
+    padding-top: 0;
+  }
+}
+
+@media (max-width: 760px) {.daylight-workspace .calendar-toolbar {
+    padding: 0 16px 14px;
+  }
+
+.daylight-workspace .calendar-controls,
+.daylight-workspace .calendar-period {
+    gap: 6px;
+  }
+
+.daylight-workspace .calendar-period h2 {
+    font-size: 13px;
+  }
+
+.daylight-workspace .calendar-view-tabs button {
+    min-width: 44px;
+  }
+
+.daylight-workspace .calendar-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+.daylight-workspace .calendar-month-layout > .calendar-month {
+    min-height: 490px;
+  }
+
+.daylight-workspace .calendar-month-days {
+    grid-template-rows: repeat(var(--weeks), minmax(82px, 1fr));
+  }
+
+.daylight-workspace .calendar-day {
+    padding: 4px 2px;
+  }
+
+.daylight-workspace .calendar-day-heading {
+    margin-bottom: 2px;
+  }
+
+.daylight-workspace .calendar-day-add {
+    display: none;
+  }
+
+.daylight-workspace .calendar-date {
+    font-size: 10px;
+    min-width: 26px;
+    height: 26px;
+  }
+
+.daylight-workspace .calendar-weekdays {
+    font-size: 10px;
+    min-height: 34px;
+  }
+
+.daylight-workspace .calendar-task-chip {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 4px;
+  }
+
+.daylight-workspace .calendar-task-chip input {
+    display: none;
+  }
+
+.daylight-workspace .calendar-task-chip .calendar-task-title {
+    font-size: 9px;
+  }
+
+.daylight-workspace .calendar-day-tasks .calendar-task:nth-child(n + 2) {
+    display: none;
+  }
+
+.daylight-workspace .calendar-more {
+    font-size: 9px;
+  }
+
+.daylight-workspace .calendar-more-mobile-only,
+.daylight-workspace .calendar-more-mobile {
+    display: block;
+  }
+
+.daylight-workspace .calendar-more-desktop {
+    display: none;
+  }
+
+.daylight-workspace .calendar-agenda {
+    padding: 12px 15px;
+  }
+
+.daylight-workspace .calendar-agenda-day {
+    padding-left: 14px;
+  }
+
+.daylight-workspace .calendar-agenda-heading::before {
+    left: -19px;
+  }
+
+.daylight-workspace .calendar-agenda-aside {
+    display: block;
+  }
+
+.daylight-workspace .calendar-agenda-aside .calendar-unscheduled {
+    border-top: 1px solid var(--line);
+    margin-top: 20px;
+    padding-top: 16px;
+  }
+
+.daylight-workspace .calendar-mini-month {
+    max-width: 320px;
+  }
+
+.daylight-workspace .calendar-week-layout > .calendar-unscheduled {
+    padding: 12px 16px;
+    max-height: 155px;
+  }
+
+.daylight-workspace .calendar-search-result {
+    padding: 8px 16px;
+  }
+}
+
+.daylight-workspace .calendar-nav.selected {
+  color: var(--purple);
+  background: #f0eafb;
+  box-shadow: none;
+}
+
+.daylight-workspace .calendar-task-meta {
+  display: contents;
+}
+
+.daylight-workspace .calendar-task-card .calendar-task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  grid-column: 2;
+}
+
+.daylight-workspace .calendar-task-card .calendar-task-meta .calendar-project {
+  width: 100%;
+}
+
+.daylight-workspace .calendar-task-meta .calendar-project,
+.daylight-workspace .calendar-task-meta .calendar-status,
+.daylight-workspace .calendar-task-meta .calendar-checklist {
+  font-size: 11px;
+}
+
+.daylight-workspace .calendar-day-detail > .calendar-section-heading h2 {
+  font-size: 18px;
+}
+
+@media (min-width: 1550px) {.daylight-workspace .app-shell {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+
+.daylight-workspace .sidebar {
+    padding: 25px 22px;
+  }
+
+.daylight-workspace .board {
+    gap: 18px;
+    padding: 10px 30px 0;
+  }
+
+.daylight-workspace .column-content {
+    padding: 14px 12px;
+    gap: 15px;
+  }
+
+.daylight-workspace .task-card {
+    padding: 15px;
+  }
+
+.daylight-workspace .card-title {
+    font-size: 15px;
+  }
+
+.daylight-workspace .card-description,
+.daylight-workspace .card-checklist label {
+    font-size: 12px;
+  }
+
+.daylight-workspace .tag,
+.daylight-workspace .card-date,
+.daylight-workspace .priority-label {
+    font-size: 10px;
+  }
+
+.daylight-workspace .column-header {
+    padding: 20px 16px;
+  }
+
+.daylight-workspace .column-header h2 {
+    font-size: 14px;
+  }
+
+.daylight-workspace .column-header p {
+    font-size: 10px;
+  }
+
+.daylight-workspace .card-checklist input {
+    width: 13px;
+    height: 13px;
+  }
+
+.daylight-workspace .progress-section > div:first-child {
+    font-size: 10px;
+  }
+
+.daylight-workspace .card-footer-right > span {
+    font-size: 10px;
+  }
+
+.daylight-workspace .nav-item {
+    font-size: 13px;
+  }
+
+}
+
+@media (max-width: 1190px) {.daylight-workspace .app-shell {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+.daylight-workspace .sidebar {
+    padding: 20px 12px;
+  }
+
+.daylight-workspace .topbar,
+.daylight-workspace .project-header {
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+
+.daylight-workspace .board-toolbar,
+.daylight-workspace .board-summary {
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+
+.daylight-workspace .board {
+    padding-left: 16px;
+    padding-right: 16px;
+    gap: 9px;
+  }
+
+.daylight-workspace .column-content {
+    padding: 9px 6px;
+  }
+
+.daylight-workspace .column-header {
+    padding: 14px 8px;
+  }
+
+.daylight-workspace .column-header p {
+    font-size: 8px;
+  }
+
+.daylight-workspace .task-card {
+    padding: 10px 8px;
+  }
+
+.daylight-workspace .card-title {
+    font-size: 12px;
+  }
+
+
+.daylight-workspace .card-checklist label {
+    font-size: 9px;
+  }
+
+.daylight-workspace .topbar {
+    height: 54px;
+  }
+
+.daylight-workspace .project-header {
+    padding-top: 24px;
+    padding-bottom: 20px;
+  }
+
+.daylight-workspace .title-row h1 {
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 1000px) {.daylight-workspace .app-shell {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+.daylight-workspace .board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: auto;
+    align-content: start;
+    padding-bottom: 16px;
+  }
+
+.daylight-workspace .board-column {
+    min-height: 200px;
+    overflow: visible;
+  }
+
+.daylight-workspace .column-content {
+    overflow: visible;
+  }
+
+.daylight-workspace .card-title {
+    font-size: 14px;
+  }
+
+.daylight-workspace .card-description,
+.daylight-workspace .card-checklist label {
+    font-size: 11px;
+  }
+
+.daylight-workspace .tag,
+.daylight-workspace .card-date {
+    font-size: 9px;
+  }
+
+.daylight-workspace .column-header h2 {
+    font-size: 13px;
+  }
+
+.daylight-workspace .column-header p {
+    font-size: 9px;
+  }
+
+.daylight-workspace .card-footer {
+    font-size: 10px;
+  }
+
+.daylight-workspace .summary-progress {
+    display: none;
+  }
+
+.daylight-workspace .project-header {
+    gap: 8px;
+  }
+
+.daylight-workspace .new-task {
+    font-size: 10px;
+    padding: 8px 10px;
+  }
+
+.daylight-workspace .project-intro p {
+    font-size: 10px;
+  }
+
+}
+
+@media (max-width: 760px) {.daylight-workspace .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+.daylight-workspace .sidebar {
+    display: none;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 230px;
+    z-index: 6;
+    box-shadow: 8px 0 25px #493a5520;
+  }
+
+.daylight-workspace .sidebar.is-open {
+    display: flex;
+  }
+
+.daylight-workspace .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: #32293f35;
+    z-index: 5;
+  }
+
+.daylight-workspace .mobile-menu {
+    display: grid;
+  }
+
+.daylight-workspace .topbar {
+    padding: 0 14px;
+    justify-content: flex-start;
+  }
+
+.daylight-workspace .breadcrumbs {
+    flex: 1;
+    gap: 8px;
+    font-size: 10px;
+  }
+
+.daylight-workspace .topbar-right {
+    gap: 0;
+  }
+
+
+.daylight-workspace .project-header {
+    padding: 24px 17px 20px;
+    align-items: flex-start;
+  }
+
+.daylight-workspace .title-row h1 {
+    font-size: 20px;
+  }
+
+.daylight-workspace .project-intro p {
+    font-size: 10px;
+  }
+
+.daylight-workspace .project-header .new-task {
+    margin-top: 20px;
+    min-height: 34px;
+    padding: 8px;
+  }
+
+.daylight-workspace .board-toolbar {
+    padding: 0 17px 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+.daylight-workspace .view-tabs button {
+    padding: 6px 10px;
+  }
+
+.daylight-workspace .board-filters {
+    gap: 5px;
+  }
+
+.daylight-workspace .board-filters select {
+    font-size: 9px;
+    padding: 6px;
+    max-width: 98px;
+  }
+
+.daylight-workspace .board-summary {
+    padding: 14px 17px;
+    font-size: 9px;
+  }
+
+.daylight-workspace .preview-notice {
+    padding: 6px 17px;
+    font-size: 9px;
+  }
+
+.daylight-workspace .board {
+    padding: 8px 12px 16px;
+    gap: 10px;
+  }
+
+.daylight-workspace .main-footer {
+    padding: 0 17px;
+    font-size: 8px;
+  }
+
+.daylight-workspace .main-footer span:first-child {
+    display: none;
+  }
+
+.daylight-workspace .main-footer span:last-child {
+    margin-left: auto;
+  }
+
+.daylight-workspace .list-view {
+    padding: 8px 12px;
+  }
+
+
+.daylight-workspace .column-content {
+    padding: 10px;
+  }
+
+.daylight-workspace .task-card {
+    padding: 12px;
+  }
+
+.daylight-workspace .ant-modal {
+    max-width: calc(100vw - 24px) !important;
+  }
+
+.daylight-workspace .editor-form label,
+.daylight-workspace .editor-form input:not([type='checkbox']),
+.daylight-workspace .editor-form textarea,
+.daylight-workspace .editor-form select {
+    font-size: 16px;
+  }
+
+.daylight-workspace .form-row {
+    gap: 10px;
+  }
+
+.daylight-workspace .modal-actions {
+    gap: 7px;
+  }
+
+.daylight-workspace .ant-modal .ant-modal-container {
+    padding: 19px;
+  }
+}
+
+@media (max-width: 520px) {.daylight-workspace .board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+.daylight-workspace .column-header {
+    padding: 16px;
+  }
+
+.daylight-workspace .card-title {
+    font-size: 15px;
+  }
+
+.daylight-workspace .card-description,
+.daylight-workspace .card-checklist label {
+    font-size: 12px;
+  }
+
+.daylight-workspace .tag,
+.daylight-workspace .card-date,
+.daylight-workspace .priority-label {
+    font-size: 10px;
+  }
+
+.daylight-workspace .card-top {
+    margin-bottom: 12px;
+  }
+
+.daylight-workspace .card-checklist input {
+    width: 14px;
+    height: 14px;
+  }
+
+.daylight-workspace .card-checklist {
+    gap: 9px;
+  }
+
+.daylight-workspace .card-footer-right > span {
+    font-size: 10px;
+  }
+
+.daylight-workspace .task-card {
+    padding: 15px;
+  }
+
+.daylight-workspace .card-menu,
+.daylight-workspace .complete-button {
+    width: 30px;
+    height: 30px;
+    min-height: 30px;
+  }
+
+.daylight-workspace .column-add {
+    width: 30px;
+    height: 30px;
+  }
+
+.daylight-workspace .card-footer {
+    padding-top: 12px;
+    margin-top: 16px;
+  }
+
+.daylight-workspace .board-toolbar {
+    gap: 10px;
+  }
+
+.daylight-workspace .view-tabs button {
+    padding: 7px 12px;
+  }
+
+.daylight-workspace .project-header {
+    display: block;
+  }
+
+.daylight-workspace .project-header .new-task {
+    margin-top: 16px;
+  }
+
+.daylight-workspace .title-row h1 {
+    font-size: 23px;
+  }
+
+.daylight-workspace .project-intro p {
+    font-size: 11px;
+  }
+
+.daylight-workspace .form-row {
+    grid-template-columns: 1fr;
+  }
+
+
+.daylight-workspace .button {
+    min-height: 40px;
+  }
+
+.daylight-workspace .add-card {
+    min-height: 40px;
+  }
+
+.daylight-workspace .column-header h2 {
+    font-size: 14px;
+  }
+
+.daylight-workspace .column-header p {
+    font-size: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {.daylight-workspace *,
+.daylight-workspace *::before,
+.daylight-workspace *::after {
+    
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+
+.daylight-workspace .ant-picker-dropdown {
+    
+    transition: none !important;
+  }
+}
+
+/* The assistant owns the viewport; Daylight owns only its panel and portals. */
+.daylight-workspace {
+  position: relative;
+  isolation: isolate;
+  container-type: inline-size;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+.daylight-workspace[hidden] { display: none !important; }
+.daylight-workspace .desktop-backdrop { min-height: 0; height: 100%; }
+.daylight-workspace .app-shell { height: 100%; min-height: 0; }
+.daylight-workspace .ant-modal-root .ant-modal-mask,
+.daylight-workspace .ant-modal-root .ant-modal-wrap { position: absolute; }
+.daylight-workspace .sidebar-scrim,
+.daylight-workspace .sidebar.is-open { position: absolute; }
+@container (max-width: 760px) {
+  .daylight-workspace .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .daylight-workspace .sidebar { display: none; position: absolute; top: 0; bottom: 0; left: 0; width: 235px; z-index: 6; }
+  .daylight-workspace .sidebar.is-open { display: flex; }
+  .daylight-workspace .sidebar-scrim { display: block; inset: 0; background: #32293f35; z-index: 5; }
+  .daylight-workspace .mobile-menu { display: inline-flex; }
+  .daylight-workspace .board { grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: auto; align-content: start; padding-bottom: 16px; }
+  .daylight-workspace .board-column { min-height: 200px; overflow: visible; }
+  .daylight-workspace .column-content { overflow: visible; }
+  .daylight-workspace .topbar-right { display: flex; flex-shrink: 0; }
+}
+@container (max-width: 520px) {
+  .daylight-workspace .board { grid-template-columns: minmax(0, 1fr); }
+  .daylight-workspace .project-header { flex-wrap: wrap; }
+  .daylight-workspace .board-toolbar { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .daylight-workspace .summary-progress { display: none; }
+}

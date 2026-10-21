@@ -4,6 +4,7 @@ import { request } from "../api/request.js";
 import { Icon } from "../ui/Icon.js";
 import { MailSettings } from "./MailSettings.js";
 import { WechatSettings } from "./WechatSettings.js";
+import { NotificationSettings } from "./NotificationSettings.js";
 
 const providers: { value: ModelProvider; label: string; hint: string }[] = [
   { value: "openai-completions", label: "OpenAI 兼容 · Chat Completions", hint: "适用于使用 Chat Completions 接口的服务。" },
@@ -71,6 +72,7 @@ export function ModelSettings({ onBack }: { onBack: () => void }) {
       </>}
       <WechatSettings />
       <MailSettings />
+      <NotificationSettings />
     </div>
   </section>;
 }

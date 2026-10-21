@@ -1,10 +1,10 @@
 # 微信 iLink 接入（Pi Durable + wx-bot）
 
-> 状态：已编写通道、部署配置与模拟消息回归测试；尚未在真实微信/iLink 上扫码或进行生产 VPS 验收。
+> 状态：当前隔离服务端实例已启用固定版本 wx-bot 并迁移现有登录状态，桌面端微信服务已关闭。已通过真实微信 `Hello` 入站、模型生成正常问候及发送接口接受回复的链路验证；长期稳定性与重启恢复尚未验收，详见[本轮部署记录](DEPLOYMENT.md#5-运行验收)。
 
 ## 架构
 
-本仓库管理两个独立容器：Node.js Pi Durable（网页、会话、Durable Runtime、任务）和 Go wx-bot（微信扫码、轮询、媒体协议）。两个容器使用 `network_mode: service:pi-durable-assistant` 共用网络命名空间，仅通过 `127.0.0.1` 内部 HTTP 访问，**不对公网开放 wx-bot 的 18790 端口**。
+Compose 分别运行 Web、Node.js API 后端和可选 Go wx-bot。wx-bot（微信扫码、轮询、媒体协议）与后端使用 `network_mode: service:pi-durable-assistant` 共用网络命名空间，仅通过 `127.0.0.1` 内部 HTTP 通信，**不对公网开放 wx-bot 的 18790 端口**。桌面端只作为 API 客户端，不启动或管理微信桥接进程。
 
 `wx-bot` 来自 [lawrencewzen/wx-bot](https://github.com/lawrencewzen/wx-bot) 的固定提交 `57ed5f56eedce782e378483f762c7565c45ade5d`。Docker 构建时执行 `deploy/wechat/patch_upstream.py`，修复“先推进游标、后投递 Webhook”导致的漏消息，并参考 [腾讯官方协议](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md) 更新二维码为 POST。若上游变更导致补丁不匹配，构建会失败而非静默忽略。其余 iLink 协议细节仍由 wx-bot 维护。
 
@@ -37,7 +37,7 @@ docker compose --profile wechat up -d
 docker compose --profile wechat logs -f wx-bot
 ```
 
-用扫码微信给 **ClawBot 会话** 发送一条文本。Pi Durable 会创建“微信：primary”会话并自动发回最终回答。网页与微信共用同一 Durable Runtime。扫码后 `bot_token`、消息游标、`context_token` 保存在 `wx-bot-state` Docker 持久卷；Agent SQLite 保存在 `pi-durable-assistant-data`。切勿 `docker compose down -v`。
+用扫码微信给 **ClawBot 会话** 发送一条文本。Pi Durable 会创建“微信：primary”会话并自动发回最终回答。网页、桌面端与微信共用同一服务端 Durable Runtime。扫码后 `bot_token`、消息游标、`context_token` 保存在 `wx-bot-state` Docker 持久卷；Agent SQLite 保存在 `pi-durable-assistant-data`。切勿 `docker compose down -v`。
 
 ## 3. 查看状态与排障
 
@@ -63,7 +63,7 @@ curl -u demo:<DEMO_PASSWORD> https://YOUR_DOMAIN/api/wechat/status
 
 ## 5. 从微信回复 Teams
 
-Teams 发送需要桌面端启用发送口；离线模式不会发送。
+Teams 发送需要后端启用发送口：`TEAMS_CONFIG_DIR` 指向包含 `teams-forward-config.json` 的目录，配置有效 account 或 ginaHome；离线模式不会发送。Teams 采集不依赖微信，微信转发另需启用微信通道及独立桥接服务。
 
 - `回复 Haibo Sun：好的，周五前给你。`：姓名唯一且草稿与原文完全一致时，直接发送，不额外确认。
 - 请助手拟稿或通过引用上下文推断目标：先展示 `草稿 N`、完整目标标签和全文。目标已明确且只有一份待发草稿时，`发吧` 即可；推断目标使用 `确认发送 Haibo Sun`，多份或同名目标使用 `确认发送 草稿 N`。复制成 `「确认发送 Haibo Sun」` 也支持。
@@ -76,7 +76,7 @@ Teams 发送需要桌面端启用发送口；离线模式不会发送。
 
 Teams 的「已回复」按聊天时间线计算：同一聊天里第一条晚于来信的本人消息会标记此前来信。它不等于工作事项已完成，群聊中尤其如此。入库顺序不影响结果；应用打开时也会用已有发出记录修复旧标记。通过本应用发送成功后，使用 Graph 返回的真实 ID 和时间保存回执；远端已接受但本地回执保存失败时，只等待同步补录，不放开草稿重发。
 
-桌面轮询、`teams_messages` 查询和自动提醒投递共用一个采集器。聊天及消息列表沿 `nextLink` 分页，某聊天所需页面失败时不推进该聊天水位。既有聊天在启动后首次同步会回看水位前 24 小时，并覆盖更早的本地未回复来信；后续保留 5 分钟重叠，按消息 ID 去重。新发现的聊天仍从本次启动时间开始，不回灌全部历史。查询先刷新并显示最后完整成功的同步时间；刷新失败时明确标为缓存，不能把空结果当成实时没有待办。
+后端定时轮询、`teams_messages` 查询和自动提醒投递共用一个采集器。聊天及消息列表沿 `nextLink` 分页，某聊天所需页面失败时不推进该聊天水位。既有聊天在启动后首次同步会回看水位前 24 小时，并覆盖更早的本地未回复来信；后续保留 5 分钟重叠，按消息 ID 去重。新发现的聊天仍从本次启动时间开始，不回灌全部历史。查询先刷新并显示最后完整成功的同步时间；刷新失败时明确标为缓存。桌面退出不影响采集。
 
 自动提醒走内部带来源的注入入口，把 Teams 消息 ID 绑定到 Durable 输入和最终回答，再写入 Outbox。公网入站 Webhook 不能通过自带 `source` 字段获得这一身份。这是内部投递来源记录，不是微信引用协议的稳定消息 ID，因此不改变第 5 节的引用授权限制。
 
@@ -89,11 +89,11 @@ Teams 的「已回复」按聊天时间线计算：同一聊天里第一条晚�
 
 ## 7. 工作状态自动代回
 
-需要的那天在对话里说一句「我今天出差，帮我自动回复找我的人」，助手调用 `set_away_reply` 保存状态和一句安抚语，并把全文展示给你确认。不说的日子不代回，按正常流程走。之后桌面端轮询到的 **Teams 私聊** 新来信会先代发这句安抚语，再把原文和「已按『出差中』自动代回一句」一起推给你。
+需要的那天在对话里说一句「我今天出差，帮我自动回复找我的人」，助手调用 `set_away_reply` 保存状态和一句安抚语，并把全文展示给你确认。不说的日子不代回，按正常流程走。之后后端轮询到的 **Teams 私聊** 新来信会先代发这句安抚语，再把原文和「已按『出差中』自动代回一句」一起推给你。
 
 - 必须由你本人的原话开启（含「自动回复 / 替我回 / 帮我回」等），模型不能自行开启；第三方消息里的同样要求无效。
 - 默认只管当天：到当天结束自动失效，第二天你不再交代状态就按正常流程把消息转给你，不代回。给了明确时长（如「出差三天」）就按时长，也可以随时说「停止自动回复」。
 - 只回私聊，群聊不回；同一个人在同一状态期内只代回一次；换状态后可以再代回一次。
 - 代回**不算**你已处理：这些来信仍留在「未回复」清单和提醒里，`teams_messages` 的已回复标记会排除代发的安抚语。
-- 依赖桌面端的 Teams 发送口（需要 `ChatMessage.Send`）和微信通道；离线模式或未登录 Teams 时不会代回。代回失败只写入 `teams-forward.log`，不阻塞给你的通知。
+- 依赖后端的 Teams 发送口（需要 `ChatMessage.Send`）和微信通道；离线模式或未登录 Teams 时不会代回。代回失败只写入 `teams-forward.log`，不阻塞给你的通知。
 - 代回文本是你确认过的固定一句，不由模型按对方消息临时生成，避免对外发出未经你确认的内容。

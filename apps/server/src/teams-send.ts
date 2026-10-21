@@ -1,12 +1,14 @@
-import type { TeamsStore } from "@assistant/server";
+import type { TeamsStore } from "./teams-store.js";
 import { GRAPH, messageText, type GraphMessage } from "./teams-sync.js";
 
 // 向指定聊天发一条纯文本消息。调用方必须已经完成用户确认；这里不做任何确认判断。
 // 返回已入库的消息 ID（回执未保存时为 undefined），调用方可用它标记这条是代发消息。
-export async function sendTeamsMessage(getToken: () => Promise<string>, chatId: string, text: string, store: TeamsStore): Promise<string | undefined> {
+export async function sendTeamsMessage(getToken: () => Promise<string>, chatId: string, text: string, store: TeamsStore, signal?: AbortSignal): Promise<string | undefined> {
+  const token = await getToken();
+  signal?.throwIfAborted();
   const response = await fetch(`${GRAPH}/chats/${encodeURIComponent(chatId)}/messages`, {
-    method: "POST", signal: AbortSignal.timeout(30_000),
-    headers: { Authorization: `Bearer ${await getToken()}`, "Content-Type": "application/json" },
+    method: "POST", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ body: { contentType: "text", content: text } }),
   });
   // 只报状态码，不回显响应体。

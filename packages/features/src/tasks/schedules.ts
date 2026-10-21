@@ -42,6 +42,8 @@ const ScheduleTask: Task<ScheduleInput, ScheduleCheckpoint, string | null, objec
         requestId: "schedule:" + task.input.scheduleId + ":" + task.input.at,
         whenBusy: "followUp",
       }, context);
+      await notifyEvent({ id: "schedule:" + task.input.scheduleId + ":" + task.input.at,
+        type: "schedule", text: "计划任务已触发：" + task.input.text });
       await runtime.commit(async (tx) => {
         const doc = await tx.doc(Schedules, runtime.conversationId);
         const item = doc.items.find((it) => it.id === task.input.scheduleId);
@@ -62,8 +64,6 @@ const ScheduleTask: Task<ScheduleInput, ScheduleCheckpoint, string | null, objec
         }
         return finish();
       }, context);
-      await notifyEvent({ id: "schedule:" + task.input.scheduleId + ":" + task.input.at,
-        type: "schedule", text: "计划任务已触发：" + task.input.text });
     },
   },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),

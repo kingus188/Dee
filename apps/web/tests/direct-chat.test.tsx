@@ -112,20 +112,36 @@ test("发送未确认保留草稿，重试相同消息使用同一 requestId", a
   assert.equal(dom.window.document.querySelector("textarea")!.value, "");
 });
 
-test("React 导航保留当前分组，提示只填入草稿，首页不丢弃对话", async t => {
+test("菜单直接展示个人数据，切换分类不显示对话且不发送消息", async t => {
   t.mock.method(apiClient, "connect", async () => {});
-  t.mock.method(apiClient, "request", async (path: string) => path === "/api/personal" ? { memory: [], skills: [], knowledge: { enabled: false, allow: [] } } : { schedules: [], reminders: [], background: [] });
+  const writes: string[] = [];
+  t.mock.method(apiClient, "request", async (path: string, body?: unknown) => {
+    if (body !== undefined) writes.push(path);
+    return path === "/api/personal" ? {
+      memory: [{ id: "preference", text: "每周五整理项目", status: "approved" }],
+      skills: [{ id: "review", name: "项目复盘", description: "核对完成情况", body: "逐项核对交付", status: "approved" }],
+      knowledge: { enabled: false, allow: [] },
+    } : { schedules: [], reminders: [], background: [] };
+  });
   const { dom } = await mount(t, <App />);
   const document = dom.window.document;
-  await act(async () => { (document.querySelector('[aria-label="长期记忆"]') as HTMLButtonElement).click(); });
-  assert.equal(document.getElementById("workspace")!.dataset.view, "chat");
-  assert.match(document.getElementById("conversation-cards")!.textContent!, /让小 D 更了解你/);
-  await act(async () => { (document.querySelector('[aria-label="长期记忆"]') as HTMLButtonElement).click(); });
-  assert.match(document.getElementById("conversation-cards")!.textContent!, /让小 D 更了解你/);
-  await act(async () => { (document.querySelector('[aria-label="首页"]') as HTMLButtonElement).click(); });
-  assert.equal(document.getElementById("workspace")!.dataset.view, "home");
-  await act(async () => { (document.querySelector(".prompt-chip") as HTMLButtonElement).click(); });
-  assert.match(document.querySelector("textarea")!.value, /待办清单/);
+  for (const [label, text, excluded] of [["长期记忆", "每周五整理项目", "项目复盘"], ["我的技能", "项目复盘", "每周五整理项目"]]) {
+    await act(async () => { document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click(); });
+    assert.equal(document.getElementById("workspace")!.dataset.view, "data");
+    assert.equal(document.querySelector(".data-panel h1")!.textContent, label);
+    const visiblePage = [...document.querySelectorAll<HTMLElement>(".workspace-editor-layout")].find(element => !element.parentElement!.hidden)!;
+    assert.match(visiblePage.textContent!, new RegExp(text));
+    assert.doesNotMatch(visiblePage.textContent!, new RegExp(excluded));
+    assert.equal(document.getElementById("message-history"), null);
+    assert.equal(document.querySelector(`[aria-label="${label}"]`)!.getAttribute("aria-current"), "page");
+  }
+  assert.deepEqual(writes, []);
+  await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="继续对话"]')!.click(); });
+  assert.ok(document.getElementById("message-history"));
+  assert.equal(document.querySelector(".data-panel"), null);
+  await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="首页"]')!.click(); });
+  await act(async () => { document.querySelector<HTMLButtonElement>(".prompt-chip")!.click(); });
+  assert.match(document.querySelector<HTMLTextAreaElement>("#chat-textarea")!.value, /待办清单/);
   assert.equal(document.getElementById("workspace")!.dataset.view, "home");
 });
 
@@ -162,7 +178,7 @@ test("React 卡片忽略旧会话回包，操作绑定原会话且重复点击�
     return { schedules: [{ id: "plan", text, status: "active", nextAt: 10000, everyMinutes: 30, runs: 0, lastRunAt: null, createdAt: 1, revision: 1 }], reminders: [], background: [] };
   }
   const view = (id: number) => ({ conversationId: id, entries: [{ id: 1, kind: "user", text: "安排提醒" }, { id: 2, kind: "assistant", text: "", toolCalls: [{ id: "s", name: "schedule_task", args: {} }] }], notes: { todos: [], memos: [] }, live: {}, busy: false, inbox: 0, usage: null, tasks: [], reminders: [], subagents: [], parentId: null }) satisfies ConversationView;
-  const panel = (id: number) => <CardPanel view={view(id)} group={null} setGroup={() => {}} onPrompt={() => {}} />;
+  const panel = (id: number) => <CardPanel view={view(id)} onPrompt={() => {}} />;
   const { dom, render } = await mount(t, panel(8));
   assert.equal(requests.length, 2);
   await render(panel(9)); assert.equal(requests.length, 4);

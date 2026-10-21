@@ -66,6 +66,9 @@ const BackgroundTask: Task<BackgroundInput, BackgroundCheckpoint, string | null,
         type: "input", content: "[后台任务结果] " + task.input.text + "\n" + checkpoint.summary,
         requestId: "background-report:" + task.input.jobId, whenBusy: "followUp",
       }, context);
+      await notifyEvent({ id: "background:" + task.input.jobId, type: "background",
+        text: (checkpoint.failed ? "后台任务失败：" : "后台任务完成：") + task.input.text + "\n" + checkpoint.summary,
+        failed: checkpoint.failed });
       await runtime.commit(async (tx) => {
         const item = (await tx.doc(BackgroundJobs, runtime.conversationId)).items.find((it) => it.id === task.input.jobId);
         if (item && item.status !== "cancelled") {
@@ -75,9 +78,6 @@ const BackgroundTask: Task<BackgroundInput, BackgroundCheckpoint, string | null,
         }
         return finish();
       }, context);
-      await notifyEvent({ id: "background:" + task.input.jobId, type: "background",
-        text: (checkpoint.failed ? "后台任务失败：" : "后台任务完成：") + task.input.text + "\n" + checkpoint.summary,
-        failed: checkpoint.failed });
     },
   },
   abort: (_task, runtime, context) => runtime.commit(async (tx) => {

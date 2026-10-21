@@ -29,7 +29,7 @@ API Key 输入为空时保留原值；更换 Provider 或 Base URL 时必须重�
 | `NOTIFY_WEBHOOK_URL` | 空 | 通用 Webhook 或飞书机器人的完整 URL，含签名时视为敏感凭据 |
 | `NOTIFY_WEBHOOK_KIND` | `generic` | `generic` JSON / `feishu` 文本机器人 |
 | `NOTIFY_MODE` | `errors` | `errors`：仅明确失败的后台任务；`all`：也发成功/提醒/计划触发；`off`：不发送 |
-| `MAIL_ACCOUNT_FILE` | 空 | Web 服务复用现有账号 JSON 的路径（建议绝对路径）；桌面端默认使用应用数据目录下的 `wechat/teams-forward-config.json`。不在网页配置密码 |
+| `MAIL_ACCOUNT_FILE` | 空 | 后端复用现有账号 JSON 的路径（建议绝对路径）；桌面端不自动读取旧账号文件。不在网页配置密码 |
 | `WECHAT_ENABLED` | `0` | 是否启用微信入站转发；需同时启动 `wx-bot` profile |
 | `WECHAT_WEBHOOK_KEY` | 空 | 微信桥到 Node 的入站 Bearer token |
 | `WECHAT_SEND_TOKEN` | 空 | Node 到微信桥本地发送接口的令牌，必须与入站令牌不同 |
@@ -38,6 +38,10 @@ API Key 输入为空时保留原值；更换 Provider 或 Base URL 时必须重�
 | `OBSIDIAN_ALLOW` | 空 | 额外允许的相对路径，用英文逗号分隔。默认已包含 AI学习、X灵感、VPS小白教程 |
 | `PI_OFFLINE` | 空 | 设为 `1` 时强制关闭微信通道、Teams 发送和 Webhook 通知，不受数据库里保存的配置影响。**用真实数据目录的副本做测试或调试时必须开启**，否则副本会连到真实的微信和 Teams |
 | `INVESTIGATE_REPOS` | 空 | 允许开发任务的本机仓库，`名称=绝对路径[#测试命令]`，逗号分隔，如 `erp=/Users/me/erp#pnpm test`。助手可在隔离 git worktree 里启动后台 Claude Code 排查修复（fix）或开发功能（feature），成果提交到新分支 `fix/pi-<id>` / `feat/pi-<id>`（工作目录 `$DATA_DIR/investigations/`），不推送、不发布。基于仓库当前 HEAD 的已提交代码；主仓库的 `node_modules` 会链接进去供测试使用；同时最多 2 个任务、单个预算 5 美元。你回复「确认合并 任务ID」后才会本地合并到仓库当前分支（仓库须无未提交改动）。完成通知走 Webhook，需 `NOTIFY_MODE=all`；微信回复令牌约 30 分钟过期，不能依赖微信推送完成消息 |
+| `TEAMS_CONFIG_DIR` | 空 | 后端 Teams 配置目录，含 `teams-forward-config.json`；未指定时不启用 Teams 同步、发送与转发 |
+| `API_ORIGIN` | `http://127.0.0.1:3000` | 独立 Web 固定代理上游，不含路径或凭据 |
+| `WEB_HOST` / `WEB_PORT` | `127.0.0.1` / `8080` | 独立 Web 监听地址与端口；容器中监听 `0.0.0.0` |
+| `ASSISTANT_WEB_URL` | `http://127.0.0.1:8080` | 桌面客户端连接的 Web 根地址；远程必须 HTTPS，不向该地址内嵌凭据 |
 | `INVESTIGATE_AGENT` | `codex` | 开发任务默认使用的编码 Agent，对话里也可以按任务指定（如“用 claude 做”）。可选：`codex`（通过 ACP 驱动）或 `claude`（Claude Code 的 `claude -p`）。Codex 会话固定为 `workspace-write`：工作区内可写，网络和工作区外写入被拒绝；仅 git 的 add/commit/diff/status/log、printf/echo 和该仓库配置的测试命令会被自动批准。两种 Agent 都由服务进程持有，**服务重启会中断正在运行的任务**（分支上已提交的内容保留）。新增 Agent 只需在 `packages/features/src/investigate/agents.ts` 实现一个 runner |
 | `INVESTIGATE_CODEX_BIN` | `codex-acp` | ACP 适配器 `@agentclientprotocol/codex-acp`（建议固定版本 `npm i -g @agentclientprotocol/codex-acp@2.2.2`），需已登录 Codex；服务进程的 PATH 里要能找到，否则填绝对路径 |
 | `INVESTIGATE_CLAUDE_BIN` | `claude` | `INVESTIGATE_AGENT=claude` 时使用的 Claude Code 可执行文件；需已登录 |
@@ -74,13 +78,42 @@ LLM_MODEL=your-model-id
 
 `POST /api/crash` 已移除，通过鉴权的同源请求在所有环境返回 404；旧 `ENABLE_CRASH_DEMO` 配置不再生效。自动化测试可以显式使用 `NODE_ENV=test` 和 `LLM_API=faux`，正式服务和桌面应用不使用该模式。
 
-**通知：**不配置 `NOTIFY_WEBHOOK_URL` 时后台任务照常进行，只是不会主动向手机或飞书群发送事件。主分支的 Webhook / 飞书仍是尽力发送：**没有持久通用 Outbox**；出错可能丢失消息。带幂等重试的改造仍在 [PR #6](https://github.com/xiaomoBoy/pi-durable-assistant/pull/6)，不要把未合并功能当作当前能力。Webhook 对端应按 `X-Pi-Event-ID` 去重。
+**通知：**不配置 `NOTIFY_WEBHOOK_URL` 时后台任务照常进行，只是不产生外部通知。Webhook / 飞书事件先写入 SQLite，再异步发送；详见下方[通知队列与失败记录](#通知队列与失败记录)。Webhook 对端应按 `X-Pi-Event-ID` 去重。
 
 **微信：**默认不开启。启用前分别用 `openssl rand -hex 32` 生成 `WECHAT_WEBHOOK_KEY` 与 `WECHAT_SEND_TOKEN`，将 `WECHAT_ENABLED=1` 放入 `.env`，按 [微信接入手册](WECHAT.md) 使用 `--profile wechat` 启动。微信扫码凭据保存在专用 Docker 命名卷，不应导出到仓库。
 
 **笔记检索：**设置 `OBSIDIAN_ROOT` 后，助手只能只读检索白名单笔记，回答带来源路径和行号，不会写回 Obsidian。默认只开放 AI学习、X灵感、VPS小白教程；财务、个人档案和服务器资产不在范围内。这与未合并的 [PR #4](https://github.com/xiaomoBoy/pi-durable-assistant/pull/4) 不是同一份代码。
 
 **工作区审批：**仍在待验收的 [PR #5](https://github.com/xiaomoBoy/pi-durable-assistant/pull/5) 中。当前 `main` 没有对应配置，请勿按待合并分支的参数尝试启用。
+
+## 通知队列与失败记录
+
+通用 Webhook 和飞书共用 `DATA_DIR/agent.sqlite` 中的 `notification_outbox` 表，与微信发送队列独立，不需要新增配置或依赖。提醒、计划和后台任务在提交完成检查点前先入队；同一目标和事件 ID 只保留一份正文，成功后重放也不会重新入队。
+
+- 服务运行时每秒检查待发队列，每次最多处理 20 条。单次发送超时 8 秒；最多尝试 5 次，失败后的间隔依次为 15 秒、1 分钟、5 分钟、15 分钟。重启后恢复待发记录；发送中崩溃的尝试也计数，其记录在 30 秒租约到期后继续处理。
+- 网络故障、超时、HTTP 408/429/5xx 及飞书 HTTP 成功但业务 `code` 非零或响应不合法时重试；其他非成功 HTTP 状态直接记为失败。达到上限后停止自动发送，保留 `failed` 记录；可在「设置 → 通知投递」查看并手动重新投递。
+- 可重试的 HTTP 错误若带有有效 `Retry-After`（整数秒数或 HTTP 日期），下次投递取接收端指定时间和本地退避时间中较晚的一个，并持久保存，重启不提前发送。无效、已过期或较短的值不缩短本地退避；仍最多尝试 5 次。
+- `NOTIFY_MODE` 在新事件入队时过滤；`off`、未配置 URL 或 `PI_OFFLINE=1` 时不发送已排队事件。重新启用会继续待发队列；从 `all` 改为 `errors` 不删除此前已入队的正常事件。
+- URL 与消息格式共同决定目标指纹，数据库不保存 Webhook URL。更换 URL 或格式不会把旧消息发往新目标；旧队列保留，恢复原配置后可继续。失败详情仅保存固定类别或 HTTP 状态码，不保存原始异常、URL 或接收端正文。
+- 已发送和失败记录目前不自动清理，以保留去重与排障依据；通知正文包含任务内容，与数据库备份一起按私有数据管理。
+- 管理界面默认查看失败记录，可切换全部、待发送、已送达和失败；每种视图显示当前目标最近 100 条记录，每 5 秒自动刷新，也可手动刷新。只展示事件 ID、状态、次数、时间和脱敏错误，不返回正文、URL 或目标指纹。
+- 只有当前目标的失败记录可以重新投递：保留原事件 ID、正文及创建时间，清空上一轮错误和完成时间，尝试次数归零，重新获得最多 5 次投递机会。操作先持久入队，再由后台发送；“已入队”不表示已送达。待发送和已送达事件不能重发；关闭通知、未配置 URL 或离线时拒绝重试。重新投递仍可能重复送达，接收方需按事件 ID 去重。
+
+管理 API 沿用 Basic Auth 和同源写保护，不依赖模型配置：
+
+| 方法 | 路径 | 行为 |
+| --- | --- | --- |
+| GET | `/api/notifications` | 当前目标最近 100 条；可选 `status=pending\|sent\|failed`，先筛选再限制条数；非法状态返回 400 |
+| POST | `/api/notifications/retry` | JSON `{ "id": "事件 ID" }`；成功入队返回 202；非法 ID 返回 400，不存在或属于其他目标返回 404，停用或非失败状态返回 409 |
+
+
+本机可只读查看最近记录（将路径替换为实际数据目录，不要输出 `body`）：
+
+```bash
+sqlite3 -readonly /path/to/data/agent.sqlite 'SELECT id, status, attempts, last_error FROM notification_outbox ORDER BY created_at DESC LIMIT 50;'
+```
+
+`pending` 表示等待首次发送或重试，`sent` 表示接收端已确认，`failed` 表示永久拒绝或次数耗尽。发送已成功但本地尚未记账即崩溃仍可能重复投递；接收方应使用 `X-Pi-Event-ID` 去重，generic JSON 也包含同一 `id`。飞书机器人不保证按此 Header 去重。本功能不承诺端到端恰好一次或必达；代码任务本身仍不具备重启恢复能力，尚未入队的完成通知也无法凭空补建。
 
 ## 安全建议
 
@@ -94,11 +127,11 @@ LLM_MODEL=your-model-id
 
 ## Outlook / Microsoft 365 邮件（当前工作区）
 
-桌面端和独立 Web 服务都能在「设置 → Outlook 邮件」管理，不依赖 Teams 或微信是否启用。两端的令牌、缓存各自保存在当前实例的数据目录，不会自动跨设备同步。
+桌面端和浏览器均在「设置 → Outlook 邮件」管理同一后端。令牌、缓存和同步游标只保存在后端数据目录；桌面端只经 API 读取通知。
 
 ### 复用已有公司账号
 
-桌面端自动使用应用数据目录下的 `wechat/teams-forward-config.json`；独立 Web 服务用 `MAIL_ACCOUNT_FILE=/绝对路径/teams-forward-config.json` 指定同格式的本地文件。文件中的 `account` 需已有 `tenantId`、`clientId`、`username`、`password` 四个字符串，网页不接收或显示密码，也不另存一份密码。无需复制账号信息到聊天或邮件设置。
+后端用 `MAIL_ACCOUNT_FILE=/绝对路径/teams-forward-config.json` 指定本地账号文件，不自动探测旧桌面目录。文件中的 `account` 需已有 `tenantId`、`clientId`、`username`、`password` 四个字符串，网页不接收或显示密码，也不另存一份密码。无需复制账号信息到聊天或邮件设置。
 
 仅在**当前实例从未保存过邮件配置**且找得到该文件时，自动启用邮件监听、申请 `Mail.Read offline_access` 并开始同步。已有手动配置、已保存的暂停或断开操作不会被启动覆盖。设置页的「使用现有账号连接」可显式重新启用或切换回已有账号；连接完成后后台自动同步，通常用刷新令牌续期，不每分钟提交密码。
 
@@ -122,7 +155,7 @@ LLM_MODEL=your-model-id
 - 可以问「查看最新邮件」「今天张三发了哪些邮件」「找主题包含报价的未读邮件」「读一下这封邮件的正文」。工具为 `outlook_messages` 和 `outlook_read`，查询前会尝试同步，失败时明确说明只读本地缓存与最后同步时间。
 - 本地缓存最多保留 90 天；邮件列表默认最多 20 封、单次最多 50 封；正文只保存纯文本，最多 20000 字。如果 Graph 未按要求返回纯文本，则只保留纯文本预览，不呈现 HTML 或加载外部图片。附件仅展示是否存在，不下载。
 - Web 在页面打开时显示新邮件横幅；桌面端另有系统通知，macOS 窗口关闭但应用仍运行时也可提醒。需要允许系统通知。通知按批合并，不保证每封单独弹窗；提醒不自动写进聊天，也不转发微信或 Webhook。
-- 程序启动、网页刷新时跳过此前已有的通知；网页短暂断线后可继续读取近 7 天通知。提醒是尽力展示，不是跨重启保证投递的持久通知队列。停止独立服务或完全退出桌面应用后不再监听。
+- 客户端启动、网页刷新时跳过此前已有的通知；网页短暂断线后可继续读取近 7 天通知。提醒是尽力展示，不是跨重启保证投递的持久通知队列。退出桌面仅停止桌面轮询，后端仍同步；停止后端才停止邮件监听。
 
 ### 暂停、退出与数据处理
 

@@ -1,146 +1,122 @@
-import { startMailNotifications } from "./mail-notifications.js";
-import { createTeamsSync } from "./teams-sync.js";
-import { app, BrowserWindow, dialog, Notification, session, shell } from "electron";
-import type { WebContents } from "electron";
-import { randomBytes } from "node:crypto";
-import { join } from "node:path";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session, shell } from "electron";
+import type { IpcMainInvokeEvent } from "electron";
 import { fileURLToPath } from "node:url";
-import { readConfig, startServer } from "@assistant/server";
-import { existsSync, readFileSync } from "node:fs";
-import { createGinaTokenProvider } from "./teams-gina.js";
-import { createTeamsTokenProvider, SEND_SCOPE, type TeamsAccount } from "./teams-auth.js";
-import { sendTeamsMessage } from "./teams-send.js";
-import type { ImportantRules } from "./teams-rules.js";
-import { startTeamsForward } from "./teams-forward.js";
-import { startWechatBot } from "./wechat-bot.js";
-import { isAppConnection, isAppUrl, isExternalUrl } from "./policy.js";
+import { loadConnection, saveConnection } from "./connection.js";
+import { basicAuth, type ConnectionConfig } from "./connection-config.js";
+import { isAppConnection, isAppUrl, isExternalUrl, validateWebUrl } from "./policy.js";
+import { startMailNotifications } from "./mail-notifications.js";
 
 app.setName("Pi Durable Assistant");
 const icon = fileURLToPath(new URL("../assets/icon.png", import.meta.url));
-let service: Awaited<ReturnType<typeof startServer>> | undefined;
+const connectionPage = new URL("../connection.html", import.meta.url).href;
 let window: BrowserWindow | undefined;
-let quitting = false;
-let stopped = false;
-let stopWechat = () => {};
-let stopMailNotifications = () => {};
+let settings: BrowserWindow | undefined;
+let config: ConnectionConfig = { url: "http://127.0.0.1:8080" };
+let password: string | undefined;
+let stopNotifications = () => {};
 
-function fail(message: string) {
-  dialog.showErrorBox("小 D 启动失败", message);
-  app.quit();
+function showConnection() {
+  if (settings) { settings.show(); settings.focus(); return; }
+  const current = new BrowserWindow({ title: "连接小 D", width: 660, height: 650, icon,
+    webPreferences: { preload: fileURLToPath(new URL("./preload.cjs", import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false } });
+  settings = current;
+  current.on("closed", () => { settings = undefined; });
+  current.webContents.on("will-navigate", event => event.preventDefault());
+  current.webContents.on("will-redirect", event => event.preventDefault());
+  current.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  void current.loadURL(connectionPage);
 }
 
-function secureContents(contents: WebContents, origin: string) {
-  contents.on("will-navigate", (event, url) => { if (!isAppUrl(url, origin)) event.preventDefault(); });
-  contents.on("will-redirect", (event, url) => { if (!isAppUrl(url, origin)) event.preventDefault(); });
-  contents.setWindowOpenHandler(({ url }) => {
-    // Image previews use same-origin links that open in a separate window.
-    if (isAppUrl(url, origin)) return { action: "allow", overrideBrowserWindowOptions: {
-      webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false, partition: "desktop" },
-    } };
-    if (isExternalUrl(url)) {
-      void shell.openExternal(url).catch(() => dialog.showErrorBox("无法打开链接", "请检查系统默认浏览器。"));
-    }
+function trustedSettings(event: IpcMainInvokeEvent) {
+  return Boolean(settings && event.sender === settings.webContents && event.senderFrame === settings.webContents.mainFrame && event.senderFrame.url === connectionPage);
+}
+
+async function connect() {
+  stopNotifications();
+  if (window) { window.destroy(); window = undefined; }
+  const current = new BrowserWindow({ title: "小 D · 个人数字人助手", width: 1200, height: 820, minWidth: 720, minHeight: 560, icon, show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false, partition: "desktop-web" } });
+  window = current;
+  const origin = config.url;
+  current.on("closed", () => { if (window === current) window = undefined; });
+  current.webContents.on("will-navigate", (event, url) => { if (!isAppUrl(url, origin)) event.preventDefault(); });
+  current.webContents.on("will-redirect", (event, url) => { if (!isAppUrl(url, origin)) event.preventDefault(); });
+  current.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalUrl(url)) void shell.openExternal(url).catch(() => {});
     return { action: "deny" };
   });
-  contents.on("did-create-window", child => secureContents(child.webContents, origin));
-}
-
-async function openWindow() {
-  if (!service || quitting) return;
-  if (window) { window.show(); window.focus(); return; }
-  const current = new BrowserWindow({
-    title: "小 D · 个人数字人助手", width: 1200, height: 820, minWidth: 720, minHeight: 560,
-    show: false, backgroundColor: "#f7f7f8", icon,
-    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false, partition: "desktop" },
+  current.webContents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => {
+    if (mainFrame && code !== -3 && window === current) { current.hide(); showConnection(); }
   });
-  window = current;
-  current.on("closed", () => { window = undefined; });
-  current.once("ready-to-show", () => { if (!quitting) current.show(); });
-  secureContents(current.webContents, service.origin);
-  await current.loadURL(service.origin);
-}
-
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
-} else {
-  app.on("second-instance", () => { if (window?.isMinimized()) window.restore(); void openWindow().catch(() => fail("界面加载失败，请重启应用。")); });
-  app.on("activate", () => { void openWindow().catch(() => fail("界面加载失败，请重启应用。")); });
-  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-  app.on("before-quit", event => {
-    if (stopped) return;
-    event.preventDefault();
-    if (quitting) return;
-    quitting = true;
-    // Wait for startup too, so quitting during initialization cannot leave storage open.
-    const timeout = setTimeout(() => app.exit(1), 10_000);
-    void startup.then(() => { stopMailNotifications(); stopWechat(); return service?.close(); }).catch(() => {
-      dialog.showErrorBox("小 D 退出异常", "本地服务未正常关闭，下次启动时将尝试恢复持久化任务。");
-    }).finally(() => { clearTimeout(timeout); stopped = true; app.quit(); });
-  });
-  const startup = app.whenReady().then(async () => {
-    if (quitting) return;
-    app.dock?.setIcon(icon);
-    // 桌面应用从 Finder 启动，读不到 .env；开发任务配置放在数据目录的 investigate-config.json：{ repos, agent?, codexBin?, claudeBin? }（字段含义同 INVESTIGATE_* 环境变量）。
-    const investigateFile = join(app.getPath("userData"), "investigate-config.json");
-    const investigate = existsSync(investigateFile) ? JSON.parse(readFileSync(investigateFile, "utf8")) as { repos?: string; agent?: string; codexBin?: string; claudeBin?: string; path?: string } : {};
-    // Finder 启动的应用 PATH 很短，codex-acp 需要能找到 node 和 codex；path 会加到 PATH 前面，只影响本应用及其子进程。
-    if (investigate.path) process.env.PATH = `${investigate.path}:${process.env.PATH ?? ""}`;
-    const env: NodeJS.ProcessEnv = { ...process.env, INVESTIGATE_REPOS: investigate.repos ?? process.env.INVESTIGATE_REPOS, INVESTIGATE_AGENT: investigate.agent ?? process.env.INVESTIGATE_AGENT,
-      INVESTIGATE_CODEX_BIN: investigate.codexBin ?? process.env.INVESTIGATE_CODEX_BIN, INVESTIGATE_CLAUDE_BIN: investigate.claudeBin ?? process.env.INVESTIGATE_CLAUDE_BIN };
-    const config = readConfig({ ...env, NODE_ENV: "production" });
-    config.port = 0;
-    config.dataDir = join(app.getPath("userData"), "data");
-    config.mailAccountFile ||= join(app.getPath("userData"), "wechat", "teams-forward-config.json");
-    config.password = randomBytes(32).toString("hex");
-    config.production = true;
-    service = await startServer(config, "127.0.0.1", new URL("../../web/dist/", import.meta.url));
-    const origin = service.origin;
-    stopMailNotifications = startMailNotifications(service.mail.notices, (title, body) => {
+  try {
+    await current.loadURL(origin);
+    if (window !== current) return;
+    current.show(); settings?.close();
+    stopNotifications = startMailNotifications(origin, basicAuth(config.username, password), (title, body) => {
       if (Notification.isSupported()) new Notification({ title, body }).show();
     });
-    if (service.wechat.enabled) {
-      stopWechat = startWechatBot({
-        binary: env.WX_BOT_PATH || (app.isPackaged ? join(process.resourcesPath, "wx-bot") : fileURLToPath(new URL("../../../deploy/wechat/bin/wx-bot", import.meta.url))),
-        dir: join(app.getPath("userData"), "wechat"), origin, env, wechat: service.wechat,
-        openFile: path => { void shell.openPath(path); },
-        onError: message => dialog.showErrorBox("微信 Bot", message),
-      });
-      // 存在 teams-forward-config.json 才启用 Teams → 微信转发：{ account } 监听自己的账号，{ ginaHome } 监听 Gina；important 为筛选规则。
-      const dir = join(app.getPath("userData"), "wechat");
-      const forwardConfig = join(dir, "teams-forward-config.json");
-      if (existsSync(forwardConfig)) {
-        const { account, ginaHome, important } = JSON.parse(readFileSync(forwardConfig, "utf8")) as { account?: TeamsAccount; ginaHome?: string; important?: ImportantRules };
-        const getToken = account ? createTeamsTokenProvider(account) : ginaHome ? createGinaTokenProvider(ginaHome, env) : undefined;
-        if (!getToken) dialog.showErrorBox("Teams 转发", "teams-forward-config.json 需要 account 或 ginaHome");
-        else {
-          const sendToken = account ? createTeamsTokenProvider(account, SEND_SCOPE) : getToken;
-          service.teamsSender.send = async (chatId, text) => { await sendTeamsMessage(sendToken, chatId, text, service!.teamsStore); };
-          const sync = createTeamsSync({ dir, store: service.teamsStore, getToken, rules: important });
-          service.teamsSender.refresh = () => sync.refresh();
-          service.teamsSender.syncStatus = () => sync.status();
-          const stopBot = stopWechat;
-          const stopForward = startTeamsForward({ dir, store: service.teamsStore, getToken, rules: important, sendURL: service.wechat.sendURL, sendToken: service.wechat.sendToken,
-            sync, inject: service.wechatNotify,
-            undelivered: service.wechatUndelivered,
-            onStuck: (pending, reason, preview) => new Notification({ title: `微信暂时发不出去（${pending} 条）`, body: `${preview}\n${reason}` }).show() });
-          stopWechat = () => { stopForward(); stopBot(); };
-        }
-      }
+  } catch { if (window === current) { current.hide(); showConnection(); } }
+}
+
+if (!app.requestSingleInstanceLock()) app.quit();
+else {
+  app.on("second-instance", () => { if (window?.isVisible()) { window.restore(); window.focus(); } else showConnection(); });
+  app.on("activate", () => { if (window?.isVisible()) window.focus(); else showConnection(); });
+  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+  app.on("before-quit", () => { stopNotifications(); });
+  void app.whenReady().then(async () => {
+    app.dock?.setIcon(icon);
+    const loaded = loadConnection();
+    if (loaded.config) config = loaded.config;
+    password = loaded.password;
+    let invalidEnvironment = false;
+    if (process.env.ASSISTANT_WEB_URL) {
+      try {
+        const url = validateWebUrl(process.env.ASSISTANT_WEB_URL);
+        // Never reuse saved credentials for an environment-selected different origin.
+        if (url !== config.url) { config = { url }; password = undefined; } else config.url = url;
+      } catch { invalidEnvironment = true; }
     }
-    const desktopSession = session.fromPartition("desktop");
-    desktopSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-    desktopSession.setPermissionCheckHandler(() => false);
-    desktopSession.webRequest.onBeforeSendHeaders((details, callback) => {
-      if (isAppConnection(details.url, origin)) details.requestHeaders.Authorization = `Basic ${Buffer.from("demo:" + config.password).toString("base64")}`;
-      callback({ requestHeaders: details.requestHeaders });
+    const web = session.fromPartition("desktop-web");
+    web.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+    web.setPermissionCheckHandler(() => false);
+    web.webRequest.onBeforeSendHeaders((details, callback) => {
+      const headers = details.requestHeaders;
+      for (const name of Object.keys(headers)) if (name.toLowerCase() === "authorization") delete headers[name];
+      const authorization = basicAuth(config.username, password);
+      if (authorization && isAppConnection(details.url, config.url)) headers.Authorization = authorization;
+      callback({ requestHeaders: headers });
     });
-    desktopSession.webRequest.onHeadersReceived((details, callback) => {
-      const headers = details.responseHeaders ?? {};
-      // Explicitly allow the local WebSocket origin across Chromium CSP implementations.
-      if (isAppUrl(details.url, origin)) headers["Content-Security-Policy"] = [`default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ${origin.replace(/^http/, "ws")}; object-src 'none'; frame-src 'none'; base-uri 'none'`];
-      callback({ responseHeaders: headers });
+    // Do not amend response headers: the independent Web service owns its CSP.
+    ipcMain.handle("desktop:connection-load", event => {
+      if (!trustedSettings(event)) throw new Error("Untrusted connection window");
+      return config;
     });
-    await openWindow();
-  });
-  void startup.catch(() => fail("本地服务或界面启动失败，请检查模型环境变量及应用数据目录的写入权限。"));
+    ipcMain.handle("desktop:connection-save", (event, input: unknown) => {
+      if (!trustedSettings(event)) throw new Error("Untrusted connection window");
+      try {
+        if (!input || typeof input !== "object") throw new Error("连接配置无效");
+        const value = input as Record<string, unknown>;
+        if (typeof value.url !== "string" || (value.username !== undefined && typeof value.username !== "string") || (value.password !== undefined && typeof value.password !== "string")) throw new Error("连接配置无效");
+        if (typeof value.username === "string" && /[:\r\n]/.test(value.username)) throw new Error("用户名不得包含冒号或换行");
+        const next = { url: validateWebUrl(value.url), username: value.username as string | undefined };
+        const nextPassword = value.password as string | undefined;
+        const saved = saveConnection(next, nextPassword);
+        config = next; password = nextPassword;
+        return { ok: true, persistedPassword: saved.persistedPassword };
+      } catch { return { ok: false, error: "无法保存连接。请使用 HTTPS 或本机 HTTP 根地址，并检查配置目录权限。" }; }
+    });
+    ipcMain.handle("desktop:connection-retry", async event => {
+      if (!trustedSettings(event)) throw new Error("Untrusted connection window");
+      await connect();
+    });
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { label: app.name, submenu: [{ label: "连接设置…", click: showConnection }, { type: "separator" }, { role: "quit" }] },
+      { role: "editMenu" }, { role: "viewMenu" },
+    ]));
+    if (invalidEnvironment) {
+      showConnection();
+      dialog.showErrorBox("连接地址无效", "ASSISTANT_WEB_URL 必须为 HTTPS 或本机 HTTP 根地址。请重新设置连接。");
+    } else await connect();
+  }).catch(() => { showConnection(); dialog.showErrorBox("连接配置无效", "请重新设置 Web 服务地址。"); });
 }

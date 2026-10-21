@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTeamsSync, GRAPH } from "../dist/teams-sync.js";
 import { sendTeamsMessage } from "../dist/teams-send.js";
-import type { TeamsStore } from "@assistant/server";
+import type { TeamsStore } from "../dist/teams-store.js";
 
 const at = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const message = (id: string, createdDateTime: string, mine = false) => ({ id, createdDateTime, messageType: "message", from: { user: { id: mine ? "me" : "peer" } }, body: { content: "text" } });

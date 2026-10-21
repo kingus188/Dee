@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { decideMemoryInTx, editMemoryInTx, proposeMemoryInTx, normalizeMemoryText, normalizeSkill, selectMemoryForPrompt } from "@assistant/features";
 
 test("记忆和技能有字数边界", () => {
-	assert.equal(normalizeMemoryText("  记住   这件事  "), "记住 这件事");
+	assert.equal(normalizeMemoryText("  记住   这件事  "), "记住   这件事");
 	assert.throws(() => normalizeMemoryText(""), /记忆必须/);
 	assert.throws(() => normalizeMemoryText("甲".repeat(281)), /记忆必须/);
 	assert.throws(() => normalizeMemoryText("我的 key 是 sk-abcdefghijklmnopqrstuv"), /不能包含密码/);

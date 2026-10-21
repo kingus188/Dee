@@ -1,6 +1,6 @@
 import type { Conversation } from "@earendil-works/pi-durable";
 import type { Management } from "@assistant/contracts";
-import { Schedules, BackgroundJobs, Reminders } from "@assistant/features";
+import { Schedules, BackgroundJobs, Reminders, normalizeSchedule, normalizeReminder } from "@assistant/features";
 import { HttpError } from "../errors.js";
 import type { AppContext } from "./context.js";
 import type { createViews } from "./views.js";
@@ -56,6 +56,51 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
    if (action !== "resume") await harness.abortTask(item.jobId!, ctx);
    return item;
  }
+ async function editSchedule(conversation: Conversation, id: string, body: Record<string, unknown>) {
+   if (typeof body.revision !== "number" || !Number.isInteger(body.revision) || body.revision < 1) throw new HttpError(400, "计划版本 revision 必须是正整数");
+   if (typeof body.text !== "string" || typeof body.minutesFromNow !== "number" || (body.everyMinutes !== undefined && typeof body.everyMinutes !== "number")) throw new HttpError(400, "计划内容和执行时间格式不正确");
+   const normalized = normalizeSchedule(body);
+   const reserved = await conversation.commit(async tx => {
+     const item = (await tx.doc(Schedules, conversation.id)).items.find(entry => entry.id === id);
+     if (!item) throw new HttpError(404, "计划任务不存在");
+     if (item.revision !== body.revision || !["active", "paused"].includes(item.status)) throw new HttpError(409, "计划已更新或结束，请重新载入");
+     const previousStatus = item.status;
+     item.status = "paused";
+     item.revision += 1;
+     return { ...item, previousStatus };
+   }, ctx);
+   // 先让旧任务失效，再 signal/join；替换失败时保留暂停，绝不显示虚假的运行状态。
+   if (reserved.jobId != null) await harness.abortTask(reserved.jobId, ctx);
+   return conversation.commit(async tx => {
+     const item = (await tx.doc(Schedules, conversation.id)).items.find(entry => entry.id === id);
+     if (!item || item.revision !== reserved.revision || item.status !== "paused") throw new HttpError(409, "计划已更新，请重新载入");
+     item.text = normalized.text;
+     item.nextAt = normalized.at;
+     item.everyMinutes = normalized.everyMinutes;
+     item.status = reserved.previousStatus;
+     if (item.status === "active") item.jobId = await tx.createTask(tasks.ScheduleTask, {
+       scheduleId: item.id, text: item.text, at: normalized.at, revision: item.revision,
+     }, { ownership: { kind: "conversation" }, background: true });
+     return { ...item };
+   }, ctx);
+ }
+ async function reminder(conversation: Conversation, body: Record<string, unknown>) {
+   return conversation.commit(tx => tasks.reminderInTx(tx, conversation.id, body, body.requestId ?? null), ctx);
+ }
+ async function editReminder(conversation: Conversation, id: string, body: Record<string, unknown>) {
+   if (typeof body.at !== "number" || !Number.isSafeInteger(body.at)) throw new HttpError(400, "提醒版本 at 必须是时间戳");
+   normalizeReminder(body);
+   const previous = await conversation.commit(async tx => {
+     const item = (await tx.doc(Reminders, conversation.id)).items.find(entry => String(entry.id) === id);
+     if (!item) throw new HttpError(404, "提醒不存在");
+     if (item.at !== body.at || item.status !== "scheduled") throw new HttpError(409, "提醒已更新或结束，请重新载入");
+     item.status = "cancelled";
+     return { ...item };
+   }, ctx);
+   // 提醒任务的输入不可变：停止并 join 原任务，再真实创建一个新 id 的提醒。
+   await harness.abortTask(previous.id, ctx);
+   return conversation.commit(tx => tasks.reminderInTx(tx, conversation.id, body, null), ctx);
+ }
  async function cancelReminder(conversation: Conversation, id: string) {
    const item = await conversation.commit(async tx => {
      const reminder = (await tx.doc(Reminders, conversation.id)).items.find(it => String(it.id) === id);
@@ -79,5 +124,5 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
    await harness.abortTask(item.taskId!, ctx);
    return item;
  }
- return { get, exportMarkdown, schedule, manageSchedule, cancelReminder, background, stopBackground };
+ return { get, exportMarkdown, schedule, manageSchedule, editSchedule, reminder, editReminder, cancelReminder, background, stopBackground };
 }

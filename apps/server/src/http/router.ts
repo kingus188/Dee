@@ -5,17 +5,14 @@ import { createApi } from "../application/api.js";
 import { HttpError } from "../errors.js";
 import { sameOrigin } from "./auth.js";
 import { readBody, sendJson } from "./io.js";
-import { createStaticHandler } from "./static.js";
 import { createEventStream } from "./events.js";
 
-export function createRouter(context: AppContext, webRoot: URL, api = createApi(context)) {
-  const staticFile = createStaticHandler(webRoot);
+export function createRouter(context: AppContext, api = createApi(context)) {
   const events = createEventStream(context, api.views);
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url!, "http://localhost"), path = url.pathname, method = req.method!;
     if (method !== "GET" && !sameOrigin(req)) throw new HttpError(403, "只接受同源请求");
     if (method === "GET") {
-      if (await staticFile(path, res)) return;
       const stream = path.match(/^\/api\/conversations\/(\d+)\/events$/);
       if (stream) return events(req, res, await api.conversations.getConversation(Number(stream[1])));
       const image = path.match(/^\/api\/conversations\/(\d+)\/images\/(\d+)\/(\d+)$/);
@@ -31,7 +28,10 @@ export function createRouter(context: AppContext, webRoot: URL, api = createApi(
         return res.end(md);
       }
     }
-    const body = method === "POST" ? await readBody(req, /^\/api\/conversations\/\d+\/messages$/.test(path) ? 14_000_000 : 100_000) : {};
+    // notes 同时携带新正文和 base；两份 128000 字正文加 JSON 转义仍有明确上限。
+    const bodyLimit = /^\/api\/conversations\/\d+\/messages$/.test(path) || path === "/api/daylight/tasks/save" ? 14_000_000
+      : /^\/api\/conversations\/\d+\/notes$/.test(path) ? 2_000_000 : 100_000;
+    const body = method === "POST" ? await readBody(req, bodyLimit) : {};
     const result = await api.dispatch(method, url, body);
     sendJson(res, result.status, result.data);
   };

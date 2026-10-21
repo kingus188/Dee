@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { ConversationView, Management, PersonalData } from "@assistant/contracts";
-import type { CardAction, CardGroup, ConversationCard } from "../chat/cards.js";
+import type { CardAction, ConversationCard } from "../chat/cards.js";
 import { managementCards } from "./management.js";
 import { personalCards } from "../personal/panel.js";
 import { noteCards } from "./panels.js";
 import { cardGroupsForTurn, visibleCards } from "./context.js";
-import { emptyCard } from "./layout.js";
 import { request } from "../api/request.js";
 import { Icon } from "../ui/Icon.js";
 
@@ -29,8 +28,8 @@ export function Card({ card, pending, onAction }: { card: ConversationCard; pend
   </article>;
 }
 
-export function CardPanel({ view, group, setGroup, onPrompt }: {
-  view: ConversationView | null; group: CardGroup | null; setGroup: (group: CardGroup | null) => void; onPrompt: (text: string) => void;
+export function CardPanel({ view, onPrompt }: {
+  view: ConversationView | null; onPrompt: (text: string) => void;
 }) {
   const [cards, setCards] = useState<ConversationCard[]>([]), [loaded, setLoaded] = useState(false);
   const [errors, setErrors] = useState(false), [feedback, setFeedback] = useState("");
@@ -53,7 +52,7 @@ export function CardPanel({ view, group, setGroup, onPrompt }: {
   const toolId = view?.entries.findLast(entry => entry.kind === "tool")?.id;
   const userId = view?.entries.findLast(entry => entry.kind === "user")?.id;
   useEffect(() => {
-    if (lastUser.current !== undefined && userId !== lastUser.current) { setGroup(null); setKept(new Set()); }
+    if (lastUser.current !== undefined && userId !== lastUser.current) setKept(new Set());
     lastUser.current = userId;
   }, [userId]);
   useEffect(() => { setCards([]); setLoaded(false); setFeedback(""); setKept(new Set()); }, [owner]);
@@ -62,7 +61,6 @@ export function CardPanel({ view, group, setGroup, onPrompt }: {
     const timer = setInterval(() => { if (!document.hidden) void refresh(); }, 5000);
     return () => { clearInterval(timer); sequence.current++; };
   }, [owner, toolId]);
-  useEffect(() => { if (group) void refresh(); }, [group]);
   async function act(card: ConversationCard, action: CardAction) {
     if (action.kind === "prompt") { onPrompt(action.text); return; }
     if (action.kind === "refresh") { await refresh(); return; }
@@ -77,9 +75,7 @@ export function CardPanel({ view, group, setGroup, onPrompt }: {
       if (owner === currentOwner.current) { setFeedback("操作未能确认，请核对最新状态后再操作。"); await refresh(); }
     } finally { inFlight.current.delete(card.key); setPending(new Set(inFlight.current)); }
   }
-  const shown = visibleCards([...cards, ...noteCards(view?.notes)], group, kept, cardGroupsForTurn(view?.entries ?? []));
-  if (group && loaded && !shown.length && !errors) shown.push(emptyCard(group));
-  if (group === "notes" && owner !== null) shown.push({ key: "export", group: "notes", title: "保存聊天记录", text: "下载你和小 D 的聊天记录。", actions: [{ kind: "link", label: "导出聊天记录", href: `/api/conversations/${owner}/export.md`, download: true }] });
+  const shown = visibleCards([...cards, ...noteCards(view?.notes)], null, kept, cardGroupsForTurn(view?.entries ?? []));
   if (errors) shown.push({ key: "load-error", group: "tasks", title: "暂时无法更新卡片", text: "资料读取失败，请检查连接后重试。", tone: "error", actions: [{ label: "重新读取", kind: "refresh" }] });
-  return <><div id="conversation-cards" aria-label="对话卡片">{shown.map(card => <Card key={card.key} card={card} pending={pending.has(card.key)} onAction={action => void act(card, action)} />)}</div><p id="card-feedback" role="status" aria-live="polite">{feedback}</p></>;
+  return <><div id="conversation-cards" aria-label="对话卡片" aria-busy={!loaded}>{shown.map(card => <Card key={card.key} card={card} pending={pending.has(card.key)} onAction={action => void act(card, action)} />)}</div><p id="card-feedback" role="status" aria-live="polite">{feedback}</p></>;
 }

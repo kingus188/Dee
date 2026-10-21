@@ -25,9 +25,9 @@ test("排查：只接受已配置仓库，在 worktree 分支里运行 claude �
 		await writeFile(bin, '#!/bin/sh\necho fixed > a.txt\ngit add a.txt\ngit -c user.name=t -c user.email=t@t commit -qm fix\necho "根因：a.txt:1"\n');
 		await chmod(bin, 0o755);
 
-		const ext = createInvestigator({ repos: { demo: { path: repo } }, dir: join(root, "runs"), agent: "claude", codexBin: "codex-acp", claudeBin: bin }) as unknown as { tools: { name: string; execute: (a: unknown) => Promise<{ content: { text: string }[] }> }[] };
+		const ext = createInvestigator({ repos: { demo: { path: repo } }, dir: join(root, "runs"), agent: "claude", codexBin: "codex-acp", claudeBin: bin }) as unknown as { tools: { name: string; execute: (a: unknown) => Promise<{ output: { text: string }[] }> }[] };
 		const tool = (name: string) => ext.tools.find((t) => t.name === name)!;
-		const text = async (name: string, args: unknown) => (await tool(name).execute(args)).content[0].text;
+		const text = async (name: string, args: unknown) => (await tool(name).execute(args)).output[0].text;
 
 		assert.match(await text("investigate_issue", { repo: "other", kind: "fix", problem: "x" }), /未配置仓库/);
 		const started = await text("investigate_issue", { repo: "demo", kind: "fix", problem: "登录报错" });

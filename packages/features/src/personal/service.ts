@@ -3,6 +3,7 @@ import type { ConversationId, Tx } from "@earendil-works/pi-durable";
 import { randomUUID } from "node:crypto";
 import { defineDoc } from "@earendil-works/pi-durable";
 import { normalizeRequestId } from "../tasks/parameters.js";
+import { EditConflictError } from "../errors.js";
 
 import { detach } from "../results.js";
 
@@ -43,7 +44,7 @@ export const SkillsDoc = defineDoc<DecisionDoc<SkillItem>>({
 });
 
 export function normalizeMemoryText(value: unknown) {
-	const text = String(value ?? "").replace(/\s+/g, " ").trim();
+	const text = String(value ?? "").replace(/\r\n?/g, "\n").trim();
 	if (!text || text.length > MEMORY_ITEM_MAX) throw new Error(`记忆必须是 1～${MEMORY_ITEM_MAX} 字`);
 	if (SECRET_PATTERN.test(text)) throw new Error("记忆里不能包含密码、密钥或令牌");
 	return text;
@@ -139,10 +140,14 @@ export async function decideMemoryInTx(tx: Tx, id: string, action: string) {
 	return detach(item);
 }
 
-export async function editMemoryInTx(tx: Tx, id: string, input: unknown) {
+export async function editMemoryInTx(tx: Tx, id: string, input: unknown, base?: unknown) {
 	const doc = await tx.doc(MemoryDoc);
 	const item = doc.items.find((entry) => entry.id === id);
-	if (!item || item.status === "rejected") throw new Error("记忆不存在");
+	if (!item) throw new Error("记忆不存在");
+	if (base !== undefined && (!base || typeof base !== "object" || !("text" in base) || !("status" in base) || base.text !== item.text || base.status !== item.status)) {
+		throw new EditConflictError("记忆已更新，请重新载入后再保存");
+	}
+	if (item.status === "rejected") throw new Error("记忆不存在");
 	const text = normalizeMemoryText(input);
 	if (text === item.text) return detach(item);
 	if (doc.items.some((entry) => entry.id !== id && entry.text === text && entry.status !== "rejected")) throw new Error("已有相同记忆");
@@ -192,6 +197,20 @@ export async function decideSkillInTx(tx: Tx, id: string, action: string) {
 	}
 	item.status = next;
 	item.decidedAt = Date.now();
+	return detach(item);
+}
+
+export async function editSkillInTx(tx: Tx, id: string, input: Parameters<typeof normalizeSkill>[0], base?: unknown) {
+	const doc = await tx.doc(SkillsDoc);
+	const item = doc.items.find((entry) => entry.id === id);
+	if (!item) throw new Error("技能不存在");
+	if (base !== undefined && (!base || typeof base !== "object" || !("name" in base) || !("description" in base) || !("body" in base) || !("status" in base) || base.name !== item.name || base.description !== item.description || base.body !== item.body || base.status !== item.status)) {
+		throw new EditConflictError("技能已更新，请重新载入后再保存");
+	}
+	if (item.status === "rejected") throw new Error("技能不存在");
+	const skill = normalizeSkill(input);
+	if (doc.items.some((entry) => entry.id !== id && entry.name === skill.name && entry.status !== "rejected")) throw new Error("已有同名技能");
+	Object.assign(item, skill);
 	return detach(item);
 }
 

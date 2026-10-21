@@ -1,14 +1,15 @@
 import { defineExtension, section } from "@earendil-works/pi-durable";
-import { Notes, todo, memo } from "./notes/index.js";
+import { Notes, memo } from "./notes/index.js";
+import type { DaylightPort } from "@assistant/contracts";
 import { fetchPage } from "./browsing/index.js";
 import { waitSeconds, currentTime } from "./tasks/clock.js";
 import { createReminders } from "./tasks/reminders.js";
 import type { NotifyEvent } from "./tasks/notifications.js";
-export function createAssistant(notifyEvent: NotifyEvent) {
+export function createAssistant(notifyEvent: NotifyEvent, daylight: DaylightPort) {
 const { ReminderTask, remindMe } = createReminders(notifyEvent);
 return defineExtension({
 	name: "assistant",
-	tools: [fetchPage, waitSeconds, todo, memo, currentTime, remindMe],
+	tools: [fetchPage, waitSeconds, memo, currentTime, remindMe],
 	tasks: [ReminderTask],
 	sections: [
 		section(
@@ -19,7 +20,7 @@ return defineExtension({
 					"这是一段持续的聊天。根据用户最新消息判断是在延续、返回还是更换话题，直接回应当前意图；只引用相关的历史，不把上一话题的要求强加到新话题。不要要求用户新建会话、切换会话或给话题起标题。",
 					"换话题不表示取消原有提醒、计划或后台任务；只有用户明确要求取消时才停止。后台结果到来时先说明是哪件事的结果，不要把旧任务结果当成用户新问题的回答。",
 					"用户随时可以插话。优先理解最新消息，只有歧义会影响实际操作时才简短确认，不反复询问是否开始新话题。",
-					"遇到多步骤任务，先用 todo 列出步骤，做完一步标记一步。",
+					"遇到多步骤任务，先用 todo 列出步骤，做完一步标记一步；待办是跨会话共享的 Daylight 任务，不属于当前聊天。",
 					"当场等一会儿再继续用 wait_seconds；几分钟以后才要做的事用 remind_me 设提醒，不要用 wait_seconds 干等。",
 					"收到以 [定时提醒] 开头的消息时，那是你之前设的提醒到点了，用一两句话提醒用户这件事。",
 					"能独立完成、步骤较多的调研可以用 delegate 派给子 Agent；需要后台独立运行用 delegate_background。",
@@ -40,10 +41,9 @@ return defineExtension({
 		),
 		section("notes", async (input, renderContext) => {
 			const notes = await input.read.snapshot(Notes, input.conversationId, renderContext);
-			if (!notes || (notes.todos.length === 0 && notes.memos.length === 0)) return undefined;
-			const todos = notes.todos.map((t) => `${t.done ? "[x]" : "[ ]"} ${t.text}`);
-			const memos = notes.memos.map((m) => `- ${m}`);
-			return ["当前记事本：", ...todos, ...memos].join("\n");
+			const tasks = daylight.snapshot().tasks.filter(task => task.status !== "done").slice(0, 30);
+			if (!tasks.length && !notes?.memos.length) return undefined;
+			return ["全局 Daylight 未完成任务（最多 30 条；完整结果用 list_tasks）：", ...tasks.map(task => `- [${task.status}] ${task.title} (${task.id})`), "当前会话备忘：", ...(notes?.memos ?? []).map(memo => `- ${memo}`)].join("\n");
 		}),
 	],
 });

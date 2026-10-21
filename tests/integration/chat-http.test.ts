@@ -24,7 +24,13 @@ test("聊天附件、SSE、重复提交、分叉、停止和导出保持兼容",
     const user = complete.entries.find(e => e.kind === "user")!;
     assert.equal(user.text, body.text); assert.equal(user.attachments?.length, 2);
     assert.equal(complete.entries.filter(e => e.kind === "user").length, 1);
-    assert.equal(complete.notes.todos.length, 3); assert.ok(complete.notes.todos.every(t => t.done));
+    assert.deepEqual(complete.notes.todos, []);
+    const daylight = await (await fetch(app.origin + "/api/daylight")).json() as { tasks: { title: string; status: string }[] };
+    assert.deepEqual(daylight.tasks.map(task => task.title).sort(), ["第一步：查资料", "第二步：等待 10 秒", "第三步：整理结论"].sort());
+    assert.ok(daylight.tasks.every(task => task.status === "done"));
+    for (const task of daylight.tasks) {
+      assert.ok(complete.entries.some(e => e.kind === "tool" && e.name === "todo" && !e.isError && e.text.includes(task.title)), "工具结果必须保留待办正文，不能只执行副作用却丢失输出");
+    }
     const image = await fetch(app.origin + user.attachments!.find(a => a.kind === "image")!.url);
     assert.equal(image.status, 200); assert.equal(image.headers.get("content-type"), "image/png");
     assert.deepEqual(Buffer.from(await image.arrayBuffer()), png);

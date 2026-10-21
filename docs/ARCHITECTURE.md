@@ -1,14 +1,14 @@
 # 多应用、多模块开发约定
 
-项目使用 pnpm workspaces 和 TypeScript project references。源码分为三个应用、四个私有包，使用 ESM、React、HTTP/WebSocket 和 Pi Durable 1.1.0。根目录命令统一执行构建、依赖检查与回归测试。
+项目使用 pnpm workspaces 和 TypeScript project references。源码分为三个应用、四个私有包，使用 ESM、React、HTTP/WebSocket 和 Pi Durable 1.3.0。根目录命令统一执行构建、依赖检查与回归测试。
 
 ## 应用与包
 
 | 位置 / 包名 | 职责 |
 | --- | --- |
-| `apps/server` / `@assistant/server` | `main.ts` 读取配置并启动、关闭；`application/` 编排会话、消息、任务和个人资料；`http/` 负责路由、鉴权、WebSocket、兼容 SSE 与静态资源 |
-| `apps/desktop` / `@assistant/desktop` | Electron 桌面入口，复用本地服务与网页，提供独立数据目录和桌面打包 |
-| `apps/web` / `@assistant/web` | React 界面，由 esbuild 打包；聊天、附件、会话列表、任务中心、个人资料与界面组件分别组织 |
+| `apps/server` / `@assistant/server` | API、鉴权、HTTP/WebSocket/SSE、持久化、任务调度、Teams/微信/邮件集成；不提供静态页面 |
+| `apps/desktop` / `@assistant/desktop` | Electron 薄客户端、连接配置、安全存储与 API 邮件通知；不依赖后端运行时代码 |
+| `apps/web` / `@assistant/web` | React 界面，由 esbuild 打包；通过独立静态/代理服务 `scripts/web-server.ts` 连接后端 |
 | `packages/contracts` / `@assistant/contracts` | 可序列化的 HTTP/WebSocket 数据类型，浏览器和服务端共同使用；无 Node 或 SDK 依赖 |
 | `packages/runtime` / `@assistant/runtime` | 模型目录、会话索引、Harness 与 SQLite 生命周期；不注册具体助手功能 |
 | `packages/features` / `@assistant/features` | 笔记、网页阅读、附件、计划、提醒、子 Agent、记忆、技能和只读知识检索 |
@@ -27,11 +27,17 @@ flowchart LR
   Wechat --> Runtime
 ```
 
-图中表示代码依赖。Web 的 JSON 请求和对话快照通过同源 WebSocket `/api/socket` 与服务端通信；静态资源、图片与导出文件仍通过 HTTP 获取。原有 HTTP/SSE 接口保留兼容。生产部署由服务端同源提供 Web 构建产物；同一数据库仍由一个后端运行时负责调度。新增 CLI 等客户端时，可以新增应用，通过协议接入已有服务。
+图中表示代码依赖。桌面端加载独立 Web，浏览器与桌面都经 Web 服务同源 `/api` 代理访问后端；WebSocket、SSE、上传和下载保持流式转发。API 后端不读取前端 dist；Web 服务不读取账号或数据目录。只有后端运行时打开数据库、采集消息并调度任务。`start:api`、`start:web`、`desktop` 可分别构建和启动，桌面包只包含客户端。
 
 ## 开发命令
 
 Node.js 最低版本为 22.19，与 Pi SDK 的运行要求一致。开发依赖固定 TypeScript 6.0.3；模块边界检查使用其 JavaScript Compiler API，升级 TypeScript 7 前需迁移该脚本。`@types/node` 保持 22.x，与部署使用的 Node 主版本一致。
+
+2026-10-18 依赖升级：Pi 的 `chord`、`pi-ai`、`pi-durable` 统一固定为 1.3.0，ACP SDK 为 1.9.0，React / React DOM 为 19.3.1，Electron 为 44.9.0，jsdom 为 30.1.3，lucide-static 为 1.59.0。Pi Durable 1.2 起工具执行结果使用 `output` 而非 `content`；统一由 `packages/features/src/results.ts` 生成，持久化转录消息仍使用 `content`。聊天集成测试检查工具结果包含实际待办正文，防止副作用成功但模型与界面收到空输出。
+
+升级 SDK 后先执行 `pnpm exec tsc -b --force`，再执行检查和测试；普通增量构建可能复用旧依赖类型的检查结果，不能单独证明新 SDK 兼容。
+
+2026-10-19 本地验收：`pnpm exec tsc -b --force`、`npm run check` 与 `npm test` 通过，188 项测试全部通过，7 个工作区、134 个源码模块无依赖边界违规或循环依赖。另以临时数据目录启动实际服务，通过 HTTP 提交消息并读取 SSE 会话快照：3 项待办全部完成，6 条 `todo` 工具结果保留添加／完成正文，最终助手回复正常返回；退出后清理临时数据。本次使用本地 `faux` 模型，未验证真实模型、Electron 窗口、真实微信／Teams／邮件或生产部署。
 
 工作区由 `pnpm-workspace.yaml` 声明，内部依赖使用 `workspace:*`；根 `packageManager` 固定 pnpm 12.9.1。通过 Corepack 使用固定版本，安装时只允许 Electron 和 esbuild 执行必要的依赖构建脚本。
 
@@ -85,7 +91,7 @@ pnpm --filter @assistant/web test
 
 单元测试随工作区放在 `tests/` 中，跨应用 HTTP、持久化、崩溃恢复和模拟微信测试位于根目录 `tests/integration/`。生成目录为各工作区的 `dist/`、`dist-tests/`、根目录的 `.build/` 和 `tests/dist/`，不提交生成产物。
 
-Docker 构建阶段安装开发依赖并编译；运行阶段只安装生产依赖并保留七个工作区的包描述、服务端所需产物与 pnpm workspace 链接；Electron 二进制不进入服务端镜像。微信外部 wx-bot 构建继续位于 `deploy/wechat/`。
+Docker 共用构建阶段，分别生成 `server` 与 `web` 目标；Web 镜像只含静态资源和 Node 标准库代理脚本，不含后端依赖、不挂载数据、不注入账号环境。API 镜像保留工作区包描述、生产依赖与服务端产物，不含前端 dist 或 Electron 二进制。Compose 只向宿主发布 Web 端口；微信桥仍与后端共享网络命名空间。外部 wx-bot 构建位于 `deploy/wechat/`。
 
 本次组织结构调整不升级 Pi SDK、不更换数据库、不更换 UI 框架。真实模型、真实微信、浏览器交互和实际 Docker 部署需要分别验收。
 

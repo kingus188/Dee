@@ -7,3 +7,5 @@ export type * from "./model-settings.js";
 export type * from "./wechat-settings.js";
 export type * from "./daily-reports.js";
 export type * from "./mail.js";
+export type * from "./daylight.js";
+export type * from "./notifications.js";

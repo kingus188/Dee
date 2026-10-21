@@ -5138,8 +5138,8 @@
         <text data-detail="context" x="1140" y="629" class="t-muted" font-size="9" text-anchor="middle">可选 · 白名单内只读</text>
         </g>
 
-        <g id="node-notifications" data-node-id="notifications" data-node-label="Webhook / 飞书" tabindex="0" role="button" aria-label="聚焦Webhook / 飞书，可选 · 尽力发送, 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="可选 · 尽力发送" data-node-context="架构组件">
-          <title>Webhook / 飞书 · 可选 · 尽力发送 · 架构组件</title>
+        <g id="node-notifications" data-node-id="notifications" data-node-label="Webhook / 飞书" tabindex="0" role="button" aria-label="聚焦Webhook / 飞书，可选 · 持久队列, 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="可选 · 持久队列" data-node-context="架构组件">
+          <title>Webhook / 飞书 · 可选 · 持久队列 · 架构组件</title>
           <rect x="370" y="570" width="220" height="90" rx="6" class="c-mask"/>
           <rect x="370" y="570" width="220" height="90" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(376 576) scale(0.6875)">
@@ -5147,7 +5147,7 @@
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="480" y="613" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Webhook / 飞书</text>
-        <text data-detail="context" x="480" y="629" class="t-muted" font-size="9" text-anchor="middle">可选 · 尽力发送</text>
+        <text data-detail="context" x="480" y="629" class="t-muted" font-size="9" text-anchor="middle">可选 · 持久队列</text>
         </g>
 
         <!-- Connection labels -->
@@ -5411,7 +5411,7 @@
         </div>
         <ul>
           <li>&bull; 会话、任务检查点、记忆与技能通过 Harness 保存到 SQLite。</li>
-          <li>&bull; 微信回复通过持久队列发送给 wx-bot；通用通知没有可靠 Outbox。</li>
+          <li>&bull; 微信与通用 Webhook 各用持久队列；通用通知最多尝试 5 次，保留失败记录。</li>
         </ul>
       </div>
 

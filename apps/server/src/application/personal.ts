@@ -1,4 +1,4 @@
-import { MemoryDoc, SkillsDoc, decideMemoryInTx, decideSkillInTx, editMemoryInTx, knowledgeStatus,
+import { MemoryDoc, SkillsDoc, decideMemoryInTx, decideSkillInTx, editMemoryInTx, editSkillInTx, knowledgeStatus,
   proposeMemoryInTx, proposeSkillInTx, publicMemory, publicSkills, searchKnowledge, readKnowledge } from "@assistant/features";
 import type { PersonalData } from "@assistant/contracts";
 import type { AppContext } from "./context.js";
@@ -14,8 +14,7 @@ export function createPersonalService({ harness, root, ctx, config }: AppContext
        return kind === "memory" ? proposeMemoryInTx(tx, input) : proposeSkillInTx(tx, input);
      }
      if (action === "edit") {
-       if (kind !== "memory") throw new Error("技能暂不支持修改");
-       return editMemoryInTx(tx, id, body.text);
+       return kind === "memory" ? editMemoryInTx(tx, id, body.text, body.base) : editSkillInTx(tx, id, body, body.base);
      }
      return kind === "memory" ? decideMemoryInTx(tx, id, action!) : decideSkillInTx(tx, id, action!);
    }, ctx);

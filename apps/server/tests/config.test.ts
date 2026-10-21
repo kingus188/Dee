@@ -21,8 +21,11 @@ test("缺少模型配置时提供设置入口，聊天不会回退到模拟剧�
     const info = await (await fetch(service.origin + "/api/info")).json() as ServerInfo;
     assert.equal(info.configured, false);
     assert.equal(info.model, "未配置模型");
-    assert.equal((await fetch(service.origin)).status, 200);
+    assert.equal((await fetch(service.origin)).status, 404);
     assert.equal((await fetch(service.origin + "/api/settings/model")).status, 200);
-    assert.equal((await fetch(service.origin + "/api/conversations/direct", { method: "POST" })).status, 409);
+    const direct = await fetch(service.origin + "/api/conversations/direct", { method: "POST" });
+    assert.equal(direct.status, 200);
+    const conversation = await direct.json() as { id: number };
+    assert.equal((await fetch(`${service.origin}/api/conversations/${conversation.id}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "不应生成模拟回复" }) })).status, 409);
   } finally { await service.close(); await rm(directory, { recursive: true, force: true }); }
 });

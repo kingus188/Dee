@@ -146,7 +146,7 @@ test("生产鉴权与危险调试入口保护", { timeout: 20000 }, async () => 
     });
     assert.equal(res.status, 403);
     res = await fetch(app.origin + "/v3.js", { headers: { authorization: basic } });
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 404);
   } finally {
     if (app) await stop(app.child);
     await rm(dir, { recursive: true, force: true });

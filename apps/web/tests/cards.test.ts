@@ -53,12 +53,11 @@ test("记忆和技能只有待确认项提供批准动作，默认只显示候�
   assert.equal(visibleCards(cards, "skills", new Set(), new Set()).length, 1);
 });
 
-test("记录卡从真实待办与备忘生成，空记录不制造完成状态", () => {
+test("记录卡保留会话备忘，不再展示已迁移的待办", () => {
   assert.deepEqual(noteCards(undefined), []);
   assert.deepEqual(noteCards({ todos: [], memos: [] }), []);
-  const cards = noteCards({ todos: [{ text: "写周报", done: true }, { text: "发周报", done: false }], memos: ["先确认数据"] });
-  assert.equal(cards[0].meta, "已完成 1 / 2 项");
-  assert.equal(cards[1].text, "先确认数据");
+  const cards = noteCards({ todos: [{ text: "写周报", done: true }], memos: ["先确认数据"] });
+  assert.deepEqual(cards.map(card => card.text), ["先确认数据"]);
 });
 
 test("失败提示保留原因且外部内容不会变成 HTML", () => {

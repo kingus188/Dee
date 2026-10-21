@@ -48,7 +48,7 @@ export function attachWebSocket(server: Server, context: AppContext, api: Return
         if (pending.has(input.id)) throw new HttpError(409, "请求正在处理");
         if (pending.size >= 16) throw new HttpError(429, "请求过多，请稍后重试");
         const url = new URL(input.path, "http://localhost");
-        if (!/^\/api\/conversations\/\d+\/messages$/.test(url.pathname) && Buffer.byteLength(text) > 100_000) throw new HttpError(413, "请求太大");
+        if (!/^\/api\/conversations\/\d+\/messages$/.test(url.pathname) && url.pathname !== "/api/daylight/tasks/save" && Buffer.byteLength(text) > 100_000) throw new HttpError(413, "请求太大");
         pending.add(input.id);
         registered = true;
         const subscription = input.method === "GET" && url.pathname.match(/^\/api\/conversations\/(\d+)\/events$/);

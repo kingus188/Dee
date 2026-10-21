@@ -10,10 +10,7 @@
     "test": "pnpm run check && node --test dist-tests/*.test.js",
     "start": "electron ."
   },
-  "dependencies": {
-    "@assistant/server": "workspace:*"
-  },
   "devDependencies": {
-    "electron": "44.7.0"
+    "electron": "44.9.0"
   }
 }

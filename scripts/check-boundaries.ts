@@ -35,7 +35,7 @@ for (const workspace of workspacePaths()) {
   const folder = resolve(root, workspace), src = resolve(folder, "src");
   const pkg = JSON.parse(await readFile(resolve(folder, "package.json"), "utf8")) as { name: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
   const dependencies = new Set(Object.keys(pkg.dependencies ?? {}));
-  const allowed: Record<string, string[]> = { "packages/contracts": [], "packages/runtime": [], "packages/features": ["@assistant/runtime"], "packages/channel-wechat": ["@assistant/runtime"], "apps/web": ["@assistant/contracts"] };
+  const allowed: Record<string, string[]> = { "packages/contracts": [], "packages/runtime": [], "packages/features": ["@assistant/runtime", "@assistant/contracts"], "packages/channel-wechat": ["@assistant/runtime"], "apps/web": ["@assistant/contracts"], "apps/desktop": ["@assistant/contracts"] };
   for (const dependency of dependencies) {
     if (workspace === "packages/contracts" || (dependency.startsWith("@assistant/") && allowed[workspace] && !allowed[workspace].includes(dependency))) errors.push(pkg.name + ": 禁止依赖 " + dependency);
   }
@@ -58,7 +58,7 @@ for (const workspace of workspacePaths()) {
           if (workspace === "apps/web" || workspace === "packages/contracts") fail("浏览器协议边界禁止 Node 模块");
         } else if (!dependencies.has(name) && !(workspace === "apps/desktop" && name === "electron" && pkg.devDependencies?.electron)) fail("未声明依赖 " + specifier);
         if (name.startsWith("@assistant/") && specifier !== name) fail("只能使用包公开入口 " + specifier);
-        if (workspace === "apps/web" && !["react", "react-dom"].includes(name) && (name !== "@assistant/contracts" || !typeOnly)) fail("网页仅允许 React 和协议类型依赖");
+        if (workspace === "apps/web" && !["react", "react-dom", "antd", "@ant-design/icons", "dayjs", "@tiptap/core", "@tiptap/extension-image", "@tiptap/react", "@tiptap/pm", "@tiptap/starter-kit", "@tiptap/markdown"].includes(name) && (name !== "@assistant/contracts" || !typeOnly)) fail("网页仅允许 React、Daylight 界面、Tiptap 编辑器和协议类型依赖");
       }
     }
     function visit(node: ts.Node) {

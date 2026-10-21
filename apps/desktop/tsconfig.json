@@ -12,11 +12,7 @@
     ]
   },
   "include": [
-    "src/**/*.ts"
-  ],
-  "references": [
-    {
-      "path": "../server"
-    }
+    "src/**/*.ts",
+    "src/**/*.cts"
   ]
 }

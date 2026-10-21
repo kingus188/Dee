@@ -1,27 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { readConfig, startServer } from "../dist/index.js";
 
-test("embedded hosts can serve web assets independently of the server package location", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pi-web-root-test-"));
-  let service: Awaited<ReturnType<typeof startServer>> | undefined;
+test("API backend does not expose web assets", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-api-only-test-"));
+  const service = await startServer(readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: directory, PORT: "0", NOTIFY_MODE: "off", PI_OFFLINE: "1" }));
   try {
-    await writeFile(join(directory, "index.html"), "<h1>Desktop assets</h1>");
-    const config = readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: join(directory, "data"), PORT: "0", NOTIFY_MODE: "off" });
-    service = await startServer(config, "127.0.0.1", pathToFileURL(directory + "/"));
-    const response = await fetch(service.origin);
-    assert.equal(response.status, 200);
-    assert.equal(await response.text(), "<h1>Desktop assets</h1>");
-    assert.equal((await fetch(service.origin + "/api/crash", { method: "POST" })).status, 404);
+    for (const path of ["/", "/index.html", "/app.js", "/style.css", "/assets/icon.png"]) {
+      assert.equal((await fetch(service.origin + path)).status, 404, path);
+    }
     assert.equal((await fetch(service.origin + "/api/info")).status, 200);
-  } finally { await service?.close(); await rm(directory, { recursive: true, force: true }); }
+  } finally { await service.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test("embedded server authenticates, serves web assets, closes and reopens persisted data", async () => {
+test("API server authenticates, closes and reopens persisted data", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "pi-desktop-test-"));
   const config = readConfig({ LLM_API: "openai-completions", LLM_BASE_URL: "http://127.0.0.1:1/v1", LLM_MODEL: "test-unused", DATA_DIR: dataDir, PORT: "0", NODE_ENV: "production", DEMO_PASSWORD: "test-only-password", NOTIFY_MODE: "off" });
   const headers = { authorization: "Basic " + Buffer.from("demo:test-only-password").toString("base64") };
@@ -32,8 +27,7 @@ test("embedded server authenticates, serves web assets, closes and reopens persi
     assert.equal((await fetch(running.origin + "/api/info")).status, 401);
     const info = await (await fetch(running.origin + "/api/info", { headers })).json() as { boots: number };
     const page = await fetch(running.origin, { headers });
-    assert.equal(page.status, 200);
-    assert.match(await page.text(), /\/app\.js/);
+    assert.equal(page.status, 404);
     assert.equal((await fetch(running.origin + "/api/crash", { method: "POST", headers })).status, 404);
     const origin = running.origin;
     await Promise.all([running.close(), running.close()]);

@@ -2,6 +2,7 @@ import { JSDOM } from "jsdom";
 import { act } from "react";
 import type { ReactNode } from "react";
 import type { TestContext } from "node:test";
+import { setTimeout } from "node:timers/promises";
 
 export async function mount(t: TestContext, component: ReactNode) {
   const dom = new JSDOM('<div id="root"></div><div id="toast-container"></div>', { url: "http://localhost/" });
@@ -15,7 +16,10 @@ export async function mount(t: TestContext, component: ReactNode) {
   const root = createRoot(dom.window.document.getElementById("root")!);
   await act(async () => { root.render(component); });
   t.after(async () => {
-    await act(async () => root.unmount()); dom.window.close();
+    await act(async () => root.unmount());
+    // Tiptap delays editor destruction to survive React StrictMode remounts.
+    await setTimeout(10);
+    dom.window.close();
     for (const [key, descriptor] of descriptors) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else Reflect.deleteProperty(globalThis, key);

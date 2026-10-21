@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, readFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import type { TeamsStore } from "@assistant/server";
+import type { TeamsStore } from "./teams-store.js";
 import type { ImportantRules } from "./teams-rules.js";
 import { sendTeamsMessage } from "./teams-send.js";
 import { createTeamsSync } from "./teams-sync.js";
@@ -10,7 +10,7 @@ export { GRAPH } from "./teams-sync.js";
 const POLL_MS = 45_000;
 
 export type TeamsForwardOptions = {
-  dir: string; store: TeamsStore; getToken: () => Promise<string>; rules?: ImportantRules; sendURL: string; sendToken: string;
+  dir: string; store: TeamsStore; getToken: () => Promise<string>; rules?: ImportantRules; sendURL: string; sendToken: string; signal?: AbortSignal;
   // 提供后，命中的消息还会作为入站消息交给微信会话里的 agent，生成摘要和建议回复。
   inject?: (wxid: string, prompt: string, messageId: string) => Promise<void>;
   sync?: ReturnType<typeof createTeamsSync>;
@@ -24,7 +24,10 @@ const CONTEXT_MESSAGES = 6;
 const CONTEXT_TEXT_MAX = 200;
 type PendingItem = ReturnType<TeamsStore["pendingPush"]>[number];
 // 轮询 Teams 聊天新消息，命中重要性规则的转发到已绑定的微信。token 由调用方提供。
-export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendToken, inject, onStuck, undelivered, sync = createTeamsSync({ dir, store, getToken, rules }) }: TeamsForwardOptions) {
+export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendToken, inject, onStuck, undelivered, signal, sync }: TeamsForwardOptions) {
+  const cancellation = new AbortController();
+  signal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
+  const collector = sync ?? createTeamsSync({ dir, store, getToken, rules, signal });
   const logPath = join(dir, "teams-forward.log");
   const log = (message: string) => appendFileSync(logPath, `${new Date().toISOString()} ${message}\n`);
   // 水位线按会话保存；首次出现的会话以启动时间为起点，不回灌历史。
@@ -33,6 +36,7 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
   let notified = 0; // 已就多少条未送达消息提醒过用户；恢复后归零，新增时再提醒
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
+  let running: Promise<void> | undefined;
 
   // 旧版用 JSON 文件做待发队列；一次性导入数据库后改名保留。
   function migrateLegacyQueue() {
@@ -53,7 +57,8 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
   // 回复令牌自用户最后一次给 ClawBot 发消息起算的时长，记入日志以量出令牌实际能用多久。
   const tokenAge = () => { try { return `${Math.round((Date.now() - statSync(join(dir, "state/primary/context_tokens.json")).mtimeMs) / 60_000)}min`; } catch { return "unknown"; } };
   async function send(text: string) {
-    const response = await fetch(sendURL, { method: "POST", signal: AbortSignal.timeout(30_000),
+    if (stopped) return;
+    const response = await fetch(sendURL, { method: "POST", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
       headers: { Authorization: `Bearer ${sendToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ binding: "primary", to: wxid(), text }) });
     if (!response.ok) throw new Error(`wx-bot 发送失败 ${response.status}`);
@@ -80,7 +85,7 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
     const away = store.away();
     if (!away || item.chatType !== "oneOnOne" || store.autoRepliedIn(item.chatId, away.version)) return "";
     try {
-      const id = await sendTeamsMessage(getToken, item.chatId, away.reply, store);
+      const id = await sendTeamsMessage(getToken, item.chatId, away.reply, store, signal);
       // 回执没拿到也要登记，否则下一轮会重复安抚同一个人。
       store.recordAutoReply(item.chatId, id ?? `${item.chatId}:auto:${Date.now()}`, away.version);
       log(`auto reply sent for ${away.status}`);
@@ -107,6 +112,7 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
       const current = store.message(item.id);
       if (!current || current.repliedAt || current.pushedAt) continue;
       const away = await autoReply(item);
+      if (stopped) return;
       let delivered = false;
       if (inject) {
         try { await inject(wxid(), agentPrompt(item, away), item.id); delivered = true; } catch (error) { log(`inject failed, retaining source for retry: ${describe(error)}`); return; }
@@ -115,7 +121,9 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
         if (store.message(item.id)?.repliedAt) continue;
         try {
           await send(rawText(item, away));
+          if (stopped) return;
         } catch (error) {
+          if (stopped) return;
           const reason = describe(error);
           const pending = queue.length - index;
           if (reason !== stuckReason) log(`send failed, ${pending} pending, token age ${tokenAge()}: ${reason}`);
@@ -133,8 +141,9 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
   // 发件箱里没送达的回复显性提醒出来，并带上内容。令牌过期的会自动补发，
   // 被微信拒收（blocked）的不会：那种必须有人处理，提醒文案要说清楚区别。
   async function watchOutbox() {
-    if (!undelivered) return;
+    if (stopped || !undelivered) return;
     const items = await undelivered();
+    if (stopped) return;
     if (!items.length) { if (!stuckReason) notified = 0; return; }
     if (items.length > notified) {
       notified = items.length;
@@ -151,7 +160,7 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
   let skipSummary = "";
   const tick = async () => {
     try {
-      const result = await sync.refresh();
+      const result = await collector.refresh();
       const summary = (result.skipped ?? []).slice(0, 3).join(" | ");
       if (summary !== skipSummary) {
         skipSummary = summary;
@@ -160,9 +169,9 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
       if (!stopped) await flush();
     } catch (error) { log(`poll/flush failed: ${describe(error)}`); }
     try { await watchOutbox(); } catch (error) { log(`outbox check failed: ${describe(error)}`); }
-    if (!stopped) timer = setTimeout(tick, POLL_MS);
+    if (!stopped) timer = setTimeout(() => { running = tick(); }, POLL_MS);
   };
   log("started");
-  void tick();
-  return () => { stopped = true; clearTimeout(timer); };
+  running = tick();
+  return () => { stopped = true; cancellation.abort(); clearTimeout(timer); return running ?? Promise.resolve(); };
 }

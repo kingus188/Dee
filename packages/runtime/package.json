@@ -9,9 +9,9 @@
     "test": "pnpm run check && node --test dist-tests/*.test.js"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.1.0",
-    "@earendil-works/pi-ai": "1.1.0",
-    "@earendil-works/pi-durable": "1.1.0"
+    "@earendil-works/chord": "1.3.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-durable": "1.3.0"
   },
   "exports": {
     ".": {

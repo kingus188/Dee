@@ -4,10 +4,11 @@ import { createApplication } from "./application/index.js";
 import { createHttpServer } from "./http/server.js";
 import { startEpisodeJob } from "./episode-job.js";
 import { conversationBatches, teamsBatches } from "./episode-sources.js";
+import { startServerIntegrations } from "./integrations.js";
 
-export async function startServer(config: AppConfig, host = config.password ? "0.0.0.0" : "127.0.0.1", webRoot = new URL("../../web/dist/", import.meta.url)) {
+export async function startServer(config: AppConfig, host = config.password ? "0.0.0.0" : "127.0.0.1", env: NodeJS.ProcessEnv = {}) {
   const app = await createApplication(config);
-  const server = createHttpServer(app, webRoot);
+  const server = createHttpServer(app);
   // 情景摘要需要真实模型；未配置模型时不启动。
   const stopEpisodes = app.modelConfigured ? startEpisodeJob({
     store: app.episodeStore, summarize: app.summarize,
@@ -15,6 +16,7 @@ export async function startServer(config: AppConfig, host = config.password ? "0
     log: message => console.error("情景摘要：" + app.redact(message)),
   }) : () => {};
   let closing: Promise<void> | undefined;
+  let stopIntegrations: () => void | Promise<void> = () => {};
   function close() {
     return closing ??= (async () => {
       server.closeSockets();
@@ -24,11 +26,15 @@ export async function startServer(config: AppConfig, host = config.password ? "0
         server.closeAllConnections();
       });
       stopEpisodes();
+      await stopIntegrations();
       await app.mail.close();
       app.wechat?.stop();
       app.taskGraph.dispose();
       try { await Promise.all([stopped, app.harness.close(app.ctx)]); }
-      finally { app.wechatSettings.close(); app.teamsStore.close(); app.episodeStore.close(); app.modelSettings.close(); }
+      finally {
+        await app.notifications.close();
+        app.wechatSettings.close(); app.teamsStore.close(); app.episodeStore.close(); app.daylight.close(); app.modelSettings.close();
+      }
     })();
   }
   try {
@@ -39,10 +45,18 @@ export async function startServer(config: AppConfig, host = config.password ? "0
         resolve();
       });
     });
+    stopIntegrations = startServerIntegrations({
+      config: app.config, store: app.teamsStore, teamsSender: app.teamsSender, env,
+      wechat: { ...app.config.wechat,
+        notify: app.wechat ? (wxid, text, messageId) => app.wechat!.notify("primary", wxid, text, { kind: "teams", messageIds: [messageId] }).then(() => {}) : undefined,
+        undelivered: app.wechat ? () => app.wechat!.undelivered() : undefined },
+      onStuck: pending => console.error(`Teams 微信提醒待处理：${pending} 条，请检查桥接服务和接收人配置`),
+    });
   } catch (error) {
     await close();
     throw error;
   }
   app.mail.start();
-  return { mail: app.mail, origin: `http://${host}:${(server.address() as AddressInfo).port}`, modelLabel: app.modelLabel, wechat: app.config.wechat, teamsStore: app.teamsStore, teamsSender: app.teamsSender, wechatNotify: app.wechat ? (wxid: string, text: string, messageId: string) => app.wechat!.notify("primary", wxid, text, { kind: "teams", messageIds: [messageId] }).then(() => {}) : undefined, wechatUndelivered: app.wechat ? () => app.wechat!.undelivered() : undefined, close, redact: app.redact };
+  app.notifications.start();
+  return { mail: app.mail, origin: `http://${host}:${(server.address() as AddressInfo).port}`, modelLabel: app.modelLabel, close, redact: app.redact };
 }

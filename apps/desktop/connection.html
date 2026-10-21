@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>连接小 D</title>
+  <style>
+    body { font: 16px system-ui; max-width: 520px; margin: 6vh auto; padding: 24px; color: #202124; background: #f7f7f8; }
+    label { display: block; margin: 16px 0 6px; }
+    input { box-sizing: border-box; width: 100%; padding: 10px; font: inherit; }
+    button { margin-top: 18px; padding: 10px 18px; font: inherit; cursor: pointer; }
+    #status { color: #a12828; min-height: 1.4em; }
+    .hint { font-size: 14px; color: #555; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h1>连接小 D</h1>
+  <p>连接独立运行的 Web 服务。服务离线时，可重试或更改地址。</p>
+  <form id="form">
+    <label for="url">Web URL</label>
+    <input id="url" required placeholder="http://127.0.0.1:8080" spellcheck="false" aria-describedby="url-hint">
+    <p id="url-hint" class="hint">使用 HTTPS 根地址。本机服务可使用 HTTP，不包含路径、查询或片段。</p>
+    <label for="username">BasicAuth 用户名</label>
+    <input id="username" placeholder="demo（默认）" autocomplete="username">
+    <label for="password">BasicAuth 口令</label>
+    <input id="password" type="password" autocomplete="current-password" aria-describedby="password-hint">
+    <p id="password-hint" class="hint">口令仅以系统安全存储加密后保存；系统安全存储不可用时，仅保留在当前会话内。留空可连接无需鉴权的服务。</p>
+    <button type="submit">保存并连接</button>
+    <button type="button" id="retry">使用已存配置重试</button>
+    <p id="status" role="status" aria-live="polite"></p>
+  </form>
+  <script src="connection.js"></script>
+</body>
+</html>

@@ -2,15 +2,14 @@ name: pi-durable-assistant
 
 services:
   pi-durable-assistant:
-    build: .
+    build:
+      context: .
+      target: server
     image: pi-durable-assistant:local
     container_name: pi-durable-assistant
     # 进程崩溃后自动拉起，这是“断点恢复”演示的一半
     restart: unless-stopped
     env_file: .env
-    # 只绑本机回环；对外请用 nginx 等反向代理，并设置 DEMO_PASSWORD
-    ports:
-      - "127.0.0.1:${HOST_PORT:-3300}:3000"
     volumes:
       - pi-durable-assistant-data:/data
     mem_limit: 1g
@@ -18,6 +17,24 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  web:
+    build:
+      context: .
+      target: web
+    image: pi-durable-web:local
+    restart: unless-stopped
+    depends_on:
+      - pi-durable-assistant
+    environment:
+      API_ORIGIN: http://pi-durable-assistant:3000
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+    ports:
+      - "127.0.0.1:${HOST_PORT:-3300}:8080"
+    read_only: true
     security_opt:
       - no-new-privileges:true
 

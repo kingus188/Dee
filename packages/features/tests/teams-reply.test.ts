@@ -168,10 +168,10 @@ test("工具契约：直接指令不再提示确认，确认时不能重新起�
 	let saves = 0;
 	port.saveDraft = input => { saves++; draft = { ...input, id: 1 }; return 1; };
 	port.pendingDrafts = () => draft ? [draft] : [];
-	const extension = createTeamsReply(port) as unknown as { tools: { name: string; execute: (args: unknown, api: unknown, context: unknown) => Promise<{ content: { text: string }[] }> }[] };
+	const extension = createTeamsReply(port) as unknown as { tools: { name: string; execute: (args: unknown, api: unknown, context: unknown) => Promise<{ output: { text: string }[] }> }[] };
 	let items: unknown[] = [];
 	const api = { conversationId: 7, commit: (fn: (tx: unknown) => unknown) => fn({ scanEntries: async () => ({ items }) }) };
-	const call = async (name: string, args: unknown) => (await extension.tools.find(tool => tool.name === name)!.execute(args, api, {})).content[0].text;
+	const call = async (name: string, args: unknown) => (await extension.tools.find(tool => tool.name === name)!.execute(args, api, {})).output[0].text;
 	const user = (id: number, text: string) => ({ id, kind: "pi.user", model: [{ role: "user", content: text }] });
 	items = [user(100, "回复小周：好的，周五前给你。")];
 	assert.match(await call("draft_teams_reply", { chat: "小周", text: "好的，周五前给你。" }), /无需再确认/);
@@ -202,11 +202,11 @@ test("引用目标回退：展示推断草稿后，一条带引号的点名确�
 	let saved: TeamsDraft | undefined;
 	port.pendingDrafts = () => saved ? [saved] : [];
 	port.saveDraft = input => { saved = { ...input, id: 1 }; return 1; };
-	const extension = createTeamsReply(port) as unknown as { tools: { name: string; execute: (args: unknown, api: unknown, context: unknown) => Promise<{ content: { text: string }[] }> }[] };
+	const extension = createTeamsReply(port) as unknown as { tools: { name: string; execute: (args: unknown, api: unknown, context: unknown) => Promise<{ output: { text: string }[] }> }[] };
 	const entry = (id: number, role: string, content: string) => ({ id, kind: `pi.${role}`, model: [{ role, content }] });
 	let items = [entry(100, "user", "[引用：小周的消息]\n回复：好的，周五前给你。")];
 	const api = { conversationId: 7, commit: (fn: (tx: unknown) => unknown) => fn({ scanEntries: async () => ({ items }) }) };
-	const call = async (name: string, args: unknown) => (await extension.tools.find(tool => tool.name === name)!.execute(args, api, {})).content[0].text;
+	const call = async (name: string, args: unknown) => (await extension.tools.find(tool => tool.name === name)!.execute(args, api, {})).output[0].text;
 	const preview = await call("draft_teams_reply", { chat: "小周", text: "好的，周五前给你。" });
 	assert.match(preview, /需要回复「确认发送 小周」/);
 	assert.match(await call("send_teams_reply", { draftId: 1 }), /未发送/);

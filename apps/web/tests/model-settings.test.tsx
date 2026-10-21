@@ -1,17 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { act } from "react";
-import type { ModelSettings as Settings } from "@assistant/contracts";
+import type { ModelSettings as Settings, NotificationOverview } from "@assistant/contracts";
 import { ModelSettings } from "../dist/settings/ModelSettings.js";
 import { App } from "../dist/ui/App.js";
 import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
 
 const saved: Settings = { provider: "openai-completions", baseUrl: "https://provider.example/v1", model: "model-a", hasKey: true, activeModel: "model-a", restartRequired: false };
+const notifications: NotificationOverview = { enabled: false, mode: "off", kind: "generic", items: [] };
 
 test("设置可从导航打开并返回，保留对话草稿和密码输入语义", async t => {
   t.mock.method(apiClient, "connect", async () => {});
-  t.mock.method(apiClient, "request", async (path: string) => path === "/api/settings/model" ? saved : path === "/api/personal" ? { memory: [], skills: [], knowledge: { enabled: false, allow: [] } } : { schedules: [], reminders: [], background: [] });
+  t.mock.method(apiClient, "request", async (path: string) => path.startsWith("/api/notifications") ? notifications : path === "/api/settings/model" ? saved : path === "/api/personal" ? { memory: [], skills: [], knowledge: { enabled: false, allow: [] } } : { schedules: [], reminders: [], background: [] });
   const { dom } = await mount(t, <App />);
   const document = dom.window.document;
   await act(async () => { document.querySelector<HTMLButtonElement>(".prompt-chip")!.click(); });
@@ -33,6 +34,7 @@ test("保存保留空 Key、重复提交一次，更换协议需新 Key，失败
   let resolve!: (value: Settings) => void;
   let failed = false;
   t.mock.method(apiClient, "request", async (_path: string, body?: unknown) => {
+    if (_path.startsWith("/api/notifications")) return notifications;
     if (body === undefined) return saved;
     calls.push(body);
     if (failed) throw new Error("更换 Provider 或 Base URL 时，请重新填写 API Key");
@@ -73,7 +75,7 @@ test("保存保留空 Key、重复提交一次，更换协议需新 Key，失败
 
 test("读取失败显示重试入口，未加载配置时不能提交", async t => {
   let failed = true;
-  t.mock.method(apiClient, "request", async () => { if (failed) throw new Error("disconnected"); return saved; });
+  t.mock.method(apiClient, "request", async (path: string) => { if (failed) throw new Error("disconnected"); return path.startsWith("/api/notifications") ? notifications : saved; });
   const { dom } = await mount(t, <ModelSettings onBack={() => {}} />);
   assert.match(dom.window.document.querySelector('[role="alert"]')!.textContent!, /无法读取配置/);
   assert.equal(dom.window.document.querySelector("form"), null);
@@ -90,6 +92,7 @@ test("未配置模型时直接进入设置页，不创建聊天或启动生成",
     paths.push(path);
     if (path === "/api/info") return { configured: false, model: "未配置模型", api: "openai-completions", boots: 1, pid: 1, startedAt: "2026-10-13" };
     if (path === "/api/settings/model") return { ...saved, baseUrl: "", model: "", hasKey: false, activeModel: "" };
+    if (path.startsWith("/api/notifications")) return notifications;
     if (path === "/api/personal") return { memory: [], skills: [], knowledge: { enabled: false, allow: [] } };
     throw new Error("Unexpected request: " + path);
   });

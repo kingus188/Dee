@@ -17,7 +17,16 @@ COPY tests ./tests
 COPY scripts ./scripts
 RUN pnpm run build
 
-FROM node:22-slim
+FROM node:22-slim AS web
+WORKDIR /app
+COPY --from=build /app/.build/scripts/web-server.js ./.build/scripts/web-server.js
+COPY --from=build /app/apps/web/dist ./apps/web/dist
+ENV NODE_ENV=production WEB_HOST=0.0.0.0 WEB_PORT=8080
+USER node
+EXPOSE 8080
+CMD ["node", ".build/scripts/web-server.js"]
+
+FROM node:22-slim AS server
 RUN corepack enable
 WORKDIR /app
 COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
@@ -34,7 +43,6 @@ COPY --from=build /app/packages/runtime/dist ./packages/runtime/dist
 COPY --from=build /app/packages/features/dist ./packages/features/dist
 COPY --from=build /app/packages/channel-wechat/dist ./packages/channel-wechat/dist
 COPY --from=build /app/apps/server/dist ./apps/server/dist
-COPY --from=build /app/apps/web/dist ./apps/web/dist
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000 NODE_NO_WARNINGS=1
 RUN mkdir -p /data && chown node:node /data
 USER node

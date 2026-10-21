@@ -1,4 +1,4 @@
-/* 管理动作随结果卡片留在对话中。 */
+/* 对话中的结果卡片与工作空间数据页复用管理动作。 */
 #message-history, #conversation-cards {
   display: flex;
   flex-direction: column;
@@ -172,4 +172,129 @@
   .conversation-card {
     padding: 16px;
   }
+}
+
+.markdown-editor {
+  border: 1px solid var(--primary-border, #cbddeb);
+  border-radius: 12px;
+  background: var(--bg-surface, #fff);
+  overflow: hidden;
+  min-width: 0;
+}
+.markdown-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px;
+  border-bottom: 1px solid var(--primary-border, #cbddeb);
+  background: var(--primary-light, #edf6fc);
+}
+.markdown-editor-toolbar button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary, #203b52);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.markdown-editor-toolbar button:hover:not(:disabled),
+.markdown-editor-toolbar button[aria-pressed="true"] {
+  border-color: var(--primary-border, #bfd7e9);
+  background: var(--bg-surface, #fff);
+  color: var(--primary, #176499);
+}
+.markdown-editor-toolbar button:focus-visible,
+.markdown-editor textarea:focus-visible,
+.markdown-editor .tiptap:focus-visible {
+  outline: 2px solid var(--primary, #176499);
+  outline-offset: -3px;
+}
+.markdown-editor-toolbar button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+.markdown-editor-help, .markdown-editor-label {
+  display: block;
+  margin: 0;
+  padding: 10px 16px 0;
+  font-size: 12px;
+  color: var(--text-muted, #53697c);
+  line-height: 1.6;
+}
+.markdown-editor .tiptap, .markdown-editor textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 320px;
+  margin: 0;
+  padding: 16px 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary, #203b52);
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.markdown-editor textarea {
+  resize: vertical;
+  font: 14px/1.8 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.markdown-editor .tiptap > :first-child { margin-top: 0; }
+.markdown-editor .tiptap > :last-child { margin-bottom: 0; }
+.markdown-editor .tiptap blockquote {
+  margin-left: 0;
+  padding-left: 16px;
+  border-left: 3px solid var(--primary-border, #bfd7e9);
+}
+.markdown-editor .tiptap pre {
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--primary-light, #edf6fc);
+  white-space: pre-wrap;
+}
+.markdown-editor .tiptap[aria-disabled="true"], .markdown-editor textarea:disabled { opacity: .65; }
+@media (max-width: 600px) {
+  .markdown-editor .tiptap, .markdown-editor textarea { padding: 12px; }
+}
+.workspace-editor-layout { display: grid; grid-template-columns: minmax(180px, .75fr) minmax(0, 1.8fr); gap: 24px; align-items: start; }
+.workspace-editor-layout [hidden], .data-panel > [hidden] { display: none; }
+.workspace-records, .workspace-edit-form { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-surface); }
+.workspace-records-heading, .workspace-edit-heading, .workspace-edit-actions, .workspace-task > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.workspace-records h2, .workspace-edit-form h2 { font-size: 15px; font-weight: 600; }
+.workspace-records-heading { margin-bottom: 14px; }
+.workspace-records-heading:not(:first-child) { margin-top: 22px; }
+.workspace-edit-heading { margin-bottom: 20px; }
+.workspace-muted { color: var(--text-muted); font-size: 12px; line-height: 1.8; }
+.workspace-record, .workspace-task { padding-block: 14px; border-bottom: 1px solid var(--border); }
+.workspace-record-select { display: flex; flex-direction: column; gap: 7px; width: 100%; min-height: 44px; padding: 10px; text-align: left; border: 0; border-radius: 7px; background: transparent; color: var(--text-main); font: inherit; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; white-space: pre-wrap; }
+.workspace-record-select strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font-weight: 500; }
+.workspace-record-select span { color: var(--text-muted); font-size: 11px; }
+.workspace-record-select:hover, .workspace-record[data-selected="true"], .workspace-record-select[aria-current="true"] { background: var(--primary-light); }
+.workspace-record-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.workspace-record-actions button { min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--primary); background: var(--bg-surface); font-size: 12px; }
+.workspace-edit-form > label, .workspace-timing label { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; font-size: 13px; font-weight: 500; }
+.workspace-edit-form input, .workspace-edit-form select { width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-page); color: var(--text-main); font: inherit; }
+.workspace-edit-actions { margin-top: 18px; font-size: 12px; color: var(--text-muted); }
+.workspace-edit-actions .settings-save { margin-left: auto; }
+.workspace-error { color: var(--danger); font-size: 13px; line-height: 1.8; margin-top: 16px; overflow-wrap: anywhere; }
+.workspace-todo { display: flex; align-items: flex-start; gap: 5px; }
+.workspace-todo input { width: 16px; height: 16px; flex-shrink: 0; margin-top: 17px; accent-color: var(--primary); }
+.workspace-timing { display: flex; gap: 16px; margin-top: 18px; }
+.workspace-timing > label { flex: 1; min-width: 0; }
+.workspace-task h3 { font-size: 13px; }
+.workspace-task > header { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; }
+.workspace-task .md { font-size: 13px; overflow-wrap: anywhere; }
+.workspace-task details { margin-top: 12px; }
+.workspace-task summary { cursor: pointer; font-size: 12px; color: var(--primary); }
+@media (max-width: 900px) {
+  .workspace-editor-layout { grid-template-columns: minmax(0, 1fr); }
+  .workspace-records { max-height: 320px; overflow-y: auto; }
+}
+@media (max-width: 600px) {
+  .workspace-editor-layout { gap: 16px; }
+  .workspace-records, .workspace-edit-form { padding: 16px; }
+  .workspace-timing { flex-direction: column; gap: 0; }
 }

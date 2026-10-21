@@ -4,14 +4,17 @@ import type { Extension } from "@earendil-works/pi-durable";
 import { resultText } from "../results.js";
 import { createSchedules } from "./schedules.js";
 import { createBackground } from "./background.js";
+import { createReminders } from "./reminders.js";
 import type { NotifyEvent } from "./notifications.js";
 export * from "./documents.js";
 export * from "./parameters.js";
-export { Reminders } from "./reminders.js";
+export { Reminders, normalizeReminder } from "./reminders.js";
+export type { Reminder } from "./reminders.js";
 export { Delegations } from "./delegation.js";
 export function createTaskCenter(notifyEvent: NotifyEvent) {
  const schedules = createSchedules(notifyEvent);
  const background = createBackground(notifyEvent, () => V3);
+ const reminders = createReminders(notifyEvent);
  const { ScheduleTask, scheduleInTx } = schedules;
  const { BackgroundTask, backgroundInTx } = background;
 const V3: Extension = defineExtension({
@@ -42,5 +45,5 @@ const V3: Extension = defineExtension({
   ],
 });
 
-return { extension: V3, ...schedules, ...background };
+return { extension: V3, ...schedules, ...background, reminderInTx: reminders.reminderInTx };
 }

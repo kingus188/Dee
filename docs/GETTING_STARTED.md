@@ -33,14 +33,14 @@ cp .env.example .env
 set -a
 . ./.env
 set +a
-pnpm run dev
+pnpm run start:api
 ```
 
-访问 **http://127.0.0.1:3000**。端口冲突时使用 `PORT=3001 pnpm run dev`，并访问 3001。
+另开终端运行 `pnpm run start:web`，访问 **http://127.0.0.1:8080**。后端端口冲突时使用 `PORT=3001 pnpm run start:api`，并用 `API_ORIGIN=http://127.0.0.1:3001 pnpm run start:web` 连接；前端端口由 `WEB_PORT` 控制。
 
 Shell 导入方式适用于简单的 `KEY=value` 配置；值包含特殊字符时需正确加引号，也可以直接由系统注入环境变量。不要把密钥发到 Issue。
 
-桌面版使用同一套模型环境变量，配置后运行 `pnpm run desktop`。Finder 启动不会继承终端环境变量，详见 [桌面程序](../apps/desktop/README.md)。
+桌面版不读取模型凭据、不启动后端。保持 API 与 Web 服务运行，再执行 `pnpm run desktop`；`ASSISTANT_WEB_URL` 可指向其他已部署 Web 服务，详见 [桌面程序](../apps/desktop/README.md)。
 
 ## 确认实际功能
 
@@ -71,7 +71,7 @@ Shell 导入方式适用于简单的 `KEY=value` 配置；值包含特殊字符�
 - [配置参考](CONFIGURATION.md)：知识库、通知和模型参数。
 - [微信接入](WECHAT.md)：启用通道、扫码及消息送达限制。
 
-关闭网页不会停止服务端任务；退出整个桌面应用会停止其本地服务。周期计划按固定分钟间隔执行，不是按当地时区的日历调度。没有配置通知渠道时，提醒和完成结果仅在应用中显示。
+关闭网页或退出桌面应用不会停止后端任务；后端进程必须持续运行。周期计划按固定分钟间隔执行，不是按当地时区的日历调度。没有配置通知渠道时，提醒和完成结果仅在应用中显示。
 
 ## 自动化检查
 

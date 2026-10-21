@@ -192,7 +192,7 @@
       "id": "notifications",
       "type": "external",
       "label": "Webhook / 飞书",
-      "sublabel": "可选 · 尽力发送",
+      "sublabel": "可选 · 持久队列",
       "pos": [
         370,
         570
@@ -289,7 +289,7 @@
       "title": "持久化与恢复",
       "items": [
         "会话、任务检查点、记忆与技能通过 Harness 保存到 SQLite。",
-        "微信回复通过持久队列发送给 wx-bot；通用通知没有可靠 Outbox。"
+        "微信与通用 Webhook 各用持久队列；通用通知最多尝试 5 次，保留失败记录。"
       ]
     },
     {

@@ -14,7 +14,7 @@
 | 成果导出 | 当前会话的用户和助手文本导出为 Markdown | `export.md` |
 | 回归测试 | TypeScript 严格类型检查、单测、HTTP、安全与崩溃恢复测试 | `pnpm run check`、`pnpm test` |
 
-兼容性约束：继续使用 Node ESM、SQLite、Pi Durable **1.1.0**；保留 v1/v2 的聊天、记事本、Fork、前台子 Agent 和多端 SSE 功能；未引入前端框架或新的 npm 运行时依赖。
+第一阶段交付时的兼容性约束：使用 Node ESM、SQLite、Pi Durable **1.1.0**；保留 v1/v2 的聊天、记事本、Fork、前台子 Agent 和多端 SSE 功能；当时未引入前端框架或新的 npm 运行时依赖。后续依赖版本与开发约定见 [架构文档](ARCHITECTURE.md)。
 
 ## 2. 接口与数据语义
 
@@ -73,7 +73,7 @@ NOTIFY_WEBHOOK_KIND=generic
 NOTIFY_MODE=errors
 ~~~
 
-`errors` 仅对明确失败的后台任务触发通知；如需正常提醒或周期计划触发推送，请设 `NOTIFY_MODE=all`。未设置 URL 则不会外部通知。飞书使用 `feishu` 消息格式，其他接收方使用 `generic` JSON；均为尽力投递，没有 outbox/持久重试。详情见 README。
+`errors` 仅对明确失败的后台任务触发通知；如需正常提醒或周期计划触发推送，请设 `NOTIFY_MODE=all`。未设置 URL 则不会外部通知。飞书使用 `feishu` 消息格式，其他接收方使用 `generic` JSON。当前工作区已增加 SQLite outbox、最多 5 次投递尝试和失败记录，重启后恢复；接收方仍需按事件 ID 去重。配置和限制见 [通知队列](CONFIGURATION.md#通知队列与失败记录)。
 
 ## 4. 质量审计和 Bug 修复记录
 
@@ -93,7 +93,7 @@ NOTIFY_MODE=errors
 ## 5. 第二阶段待办（尚未实现）
 
 - **带时区的日历任务**：Cron/RRULE、按当地时间每日/每周执行，修改任务内容与计划时间。
-- **可靠通知**：持久 outbox、发送重试、失败记录、去重与更丰富的推送渠道。
+- **可靠通知（部分已实现）**：当前工作区已实现持久 outbox、有限重试、失败记录和事件 ID 去重；设置页支持当前目标记录的状态筛选和失败通知人工重新入队，更丰富的渠道与端到端送达验收仍待完成。
 - **模型与成本**：会话级模型选择、真实费率、缓存读写 Token、费用报表。
 - **任务与产物**：可筛选的任务历史、失败重试策略、文件型报告与 Artifacts、审批式外部工具。
 - **长会话性能**：SSE 增量化、历史分页或虚拟列表、数据与后台任务数量限制。

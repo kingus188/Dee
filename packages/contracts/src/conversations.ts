@@ -27,9 +27,13 @@ export type TaskView = {
   id: number; kind: string; status: string; phase: string | null;
   owner: number | null; background: boolean; conversationId: number; conversations: readonly number[];
 };
+export type ConversationNotes = { todos: { text: string; done: boolean }[]; memos: string[] };
+// todos 与 memos 合计最多 1000 条，每条最多 16000 字，总正文最多 128000 字。
+// base 必填；保存事务中与当前笔记逐字段比较，不同返回 409，applied 幂等记录不变。
+export type NotesEditRequest = { notes: ConversationNotes; base: ConversationNotes };
 export type ConversationView = {
   conversationId: number; entries: ViewEntry[]; live: LiveView; busy: boolean; inbox: number;
-  notes: { todos: { text: string; done: boolean }[]; memos: string[] };
+  notes: ConversationNotes;
   usage: Usage | null; tasks: TaskView[]; reminders: Reminder[];
   subagents: { conversationId: number; task: string; status: string }[]; parentId: number | null;
 };
