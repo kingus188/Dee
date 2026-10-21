@@ -6,19 +6,19 @@ function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new HttpError(400, "请求必须包含任务或项目对象");
   return value as Record<string, unknown>;
 }
-export function daylightApi(store: DaylightStore, method: string, url: URL, body: Record<string, unknown>) {
+export async function daylightApi(store: DaylightStore, method: string, url: URL, body: Record<string, unknown>) {
   const path = url.pathname;
   if (!path.startsWith("/api/daylight")) return;
-  if (method === "GET" && path === "/api/daylight") return { status: 200, data: store.snapshot() };
+  if (method === "GET" && path === "/api/daylight") return { status: 200, data: await store.snapshot() };
   if (method === "GET" && path === "/api/daylight/storage") return { status: 200, data: { location: store.location } };
   if (method !== "POST") return;
   try {
     switch (path) {
-      case "/api/daylight/tasks/save": store.saveTask(record(body.task) as unknown as DaylightTask); break;
-      case "/api/daylight/projects/save": store.saveProject(record(body.project) as unknown as DaylightProject); break;
-      case "/api/daylight/tasks/move": store.moveTask(body.id as string, body.status as DaylightStatus, body.position as number | undefined); break;
-      case "/api/daylight/tasks/delete": store.deleteTask(body.id as string); break;
-      case "/api/daylight/projects/delete": store.deleteProject(body.id as string); break;
+      case "/api/daylight/tasks/save": await store.saveTask(record(body.task) as unknown as DaylightTask); break;
+      case "/api/daylight/projects/save": await store.saveProject(record(body.project) as unknown as DaylightProject); break;
+      case "/api/daylight/tasks/move": await store.moveTask(body.id as string, body.status as DaylightStatus, body.position as number | undefined); break;
+      case "/api/daylight/tasks/delete": await store.deleteTask(body.id as string); break;
+      case "/api/daylight/projects/delete": await store.deleteProject(body.id as string); break;
       default: return;
     }
     return { status: 200, data: { ok: true } };

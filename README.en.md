@@ -111,7 +111,7 @@ Future work focuses on identity, expression and sustained collaboration. These a
 
 ## Development
 
-**TypeScript / React / Electron / Node.js / Pi Durable 1.3.0 / SQLite / WebSocket.** The project uses pnpm workspaces, `tsc` and esbuild. The existing build command includes the web bundle; no separate database server is required.
+**TypeScript / React / Electron / Node.js / Pi Durable 1.3.0 / PostgreSQL (pgvector) / SQLite / WebSocket.** The project uses pnpm workspaces, `tsc` and esbuild. Business tasks and daily reports use PostgreSQL; Agent conversations, settings, notification outbox and other persistence remain in SQLite. The existing build command includes the web bundle.
 
 | Directory | Responsibility |
 | --- | --- |
@@ -129,6 +129,8 @@ pnpm run check
 pnpm --recursive --workspace-concurrency=1 run build
 pnpm test
 ```
+
+Tests require reachable PostgreSQL via `DATABASE_URL`; Docker Compose starts `pgvector/pgvector:pg16`. See [Configuration](docs/CONFIGURATION.md).
 
 `pnpm start` and `pnpm run dev` build first. `dev` restarts exited processes but does not watch source files; rebuild after editing. See [Architecture and development](docs/ARCHITECTURE.md) for workspace commands and dependency boundaries.
 

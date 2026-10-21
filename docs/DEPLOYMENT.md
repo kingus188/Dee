@@ -1,6 +1,6 @@
 # Docker / VPS 部署与数据保护
 
-面向已经完成 [本机配置与运行](GETTING_STARTED.md)、准备在自己的 VPS 上长期运行的用户。当前是单用户 Agent，部署默认以 **Docker Compose + SQLite 命名卷 + HTTPS 反向代理** 为基础。请勿把一次模拟进程恢复测试等同于灾难恢复。
+面向已经完成 [本机配置与运行](GETTING_STARTED.md)、准备在自己的 VPS 上长期运行的用户。当前是单用户 Agent，部署默认以 **Docker Compose + PostgreSQL/pgvector 业务数据卷 + SQLite 会话数据卷 + HTTPS 反向代理** 为基础。待办与日报使用 PostgreSQL；Durable 会话、设置和消息等继续使用 SQLite。请勿把一次模拟进程恢复测试等同于灾难恢复。
 
 ## 1. 前置检查
 
@@ -15,7 +15,7 @@ cd pi-durable-assistant
 cp .env.example .env
 ```
 
-编辑 `.env`，至少设置 `DEMO_PASSWORD`、`LLM_API`、`LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`。详见 [全部配置项](CONFIGURATION.md)。**生产模式不允许空密码。**
+编辑 `.env`，至少设置 `DEMO_PASSWORD`、`DATABASE_URL`、`POSTGRES_PASSWORD`、`POSTGRES_APP_PASSWORD`、`LLM_API`、`LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`。详见 [全部配置项](CONFIGURATION.md)。**生产模式不允许空密码。** Compose 首次初始化数据库时启用 `vector` 扩展并建立非超级用户 `assistant_app`；`DATABASE_URL` 应使用该业务账号、容器主机名 `postgres` 和数据库 `assistant`。应用会建立 `assistant` schema，账号需要该数据库的 `CREATE` 权限；不要给业务账号超级用户权限。已有 PostgreSQL 数据卷不会重新运行初始化脚本，修改环境变量也不会自动轮换数据库密码。
 
 ## 2. 部署核心服务
 
@@ -26,7 +26,7 @@ docker compose ps
 docker compose logs --tail=100 pi-durable-assistant
 ```
 
-Compose 分开运行 `pi-durable-assistant` API 后端与 `web` 页面/代理容器。默认 `HOST_PORT=3300`，只发布 Web 的 `127.0.0.1:3300:8080`；后端 3000 仅在容器网络访问。Web 镜像不包含后端依赖，不挂载数据卷、不读取账号文件。验证（例：已经设置了口令）：
+Compose 分开运行 `pi-durable-assistant` API 后端、`web` 页面/代理与 `postgres` 数据库容器。默认 `HOST_PORT=3300`，只发布 Web 的 `127.0.0.1:3300:8080`；后端 3000 与数据库 5432 仅在容器网络访问。Web 镜像不包含后端依赖，不挂载数据卷、不读取账号文件。验证（例：已经设置了口令）：
 
 ```bash
 curl -u demo:YOUR_PASSWORD http://127.0.0.1:3300/api/info
@@ -77,7 +77,7 @@ docker compose --profile wechat up -d
 
 ## 4. 安全升级与备份
 
-**禁止以 `docker compose down -v` 升级。** `-v` 会删除项目命名卷，可能永久丢失 SQLite、已完成任务和微信登录状态。
+**禁止以 `docker compose down -v` 升级。** `-v` 会删除项目命名卷，可能永久丢失 PostgreSQL 业务数据、SQLite 会话与微信登录状态。
 
 项目现阶段没有内置自动化、已演练的 SQLite 在线备份任务。建议：
 
@@ -98,6 +98,17 @@ docker compose up -d pi-durable-assistant
 `backups/` 在执行本例时位于仓库内，**切勿将备份压缩包提交到 Git**；应尽快安全地移到仓库以外（最好离开这台 VPS），并限制访问权限。恢复演练应在**单独的测试环境和新数据卷**进行，不能直接覆盖现有生产数据。
 
 **如果已经启用微信**，只备份 `/data` **不够**：还需要额外备份 `wx-bot-state` 对应的 `/state`（登录凭证、游标）和需要保留的 `wx-bot-media` `/media`；先停止微信服务，再根据 `docker volume ls` 和容器挂载检查实际卷名。这些备份和任何包含对话内容的 SQLite 文件都属于敏感数据。
+
+**启用 PostgreSQL 后，还必须备份业务数据库。** `/data` 不包含 PostgreSQL 中的新待办和日报，保留旧 SQLite 文件不能代替业务库备份。以下示例在权限受限的目录生成自定义格式归档；若同时备份会话和业务库，先停止 API 与已启用的微信服务，避免跨存储写入：
+
+```bash
+umask 077
+mkdir -p backups
+docker compose exec -T postgres pg_dump -U assistant_admin -d assistant -Fc > backups/business-postgres.dump
+docker compose exec -T postgres pg_dumpall -U assistant_admin --globals-only > backups/postgres-roles.sql
+```
+
+角色备份含密码哈希，同样不得提交或公开。将归档、角色备份与 `/data` 备份一起移到服务器之外；恢复演练使用独立 PostgreSQL 实例和新数据卷，先准备相同角色与 `vector` 扩展，再用 `pg_restore` 恢复业务库，并验证应用读写。不要复制运行中的 PostgreSQL 数据目录充当一致性备份。
 
 完成备份后再升级：
 
@@ -124,6 +135,12 @@ docker compose ps
 出站首轮测试曾被上游 `/ilink/bot/sendmessage: ret=-2` 拒绝，原因未确定。随后真实微信发来 `Hello`，此前排队的迁移测试回复及新生成的正常问候“Hello！有什么我可以帮你的吗？”均已标记 `sent`，状态接口确认 `pending=0`、`blocked=0`。迁移文案来自此前注入的测试请求，不是固定回复。至此已验证真实入站、模型生成及微信发送接口接受回复；长期稳定性与重启恢复仍需单独验收。
 
 模型连接复用本机 Pi `~/.pi/agent/models.json` 中已有的 `cpa/gpt-6.1-sol` 配置和对应 Key，协议为 `openai-responses`；不是直接复制 Pi 默认的 `magpie/auto/gpt-6.1-sol`，因为该地址仅监听 Mac 的 `127.0.0.1:3425`。远端直连已有 CPA 服务，不依赖 Mac 持续在线。通过受验证的 HTTPS 设置接口将连接保存到权限为 `0600` 的私有 SQLite；Compose 仅设置非秘密参数 `LLM_CONTEXT_WINDOW=128000`、`LLM_MAX_TOKENS=16384`，不包含模型 Key。已通过实际网页请求收到“模型连接正常。”，容器重建后模型连接和该轮对话均保留；未验证模型工具调用、长上下文和外部渠道。网页访问密码另行轮换，旧密码返回 `401`。本次是一次性配置复制，本机 Pi 后续修改不会自动同步到远端。
+
+PostgreSQL 迁移验收（2026-10-21）：上述服务器实例已切换到独立 `pgvector` PostgreSQL 16 容器，`vector` 扩展版本为 `0.8.3`，应用使用非超级用户 `assistant_app`。桌面 Daylight 的一致性快照已导入：7 个项目、30 条任务记录（22 条未删除）、13 条动作幂等记录；逐字段比对源 SQLite，包含排序、清单和删除标记，均保留。服务器原有 1 篇日报已迁入，日期、正文和原版本在首次迁移时保留。本机两份 `agent.sqlite` 均无日报记录；仓库 Daylight 的 5 个项目、23 条任务是桌面来源的完全一致子集，因此未重复导入。
+
+已通过真实 HTTPS API 创建、移动和删除验收待办，通过浏览器编辑并保存日报；停止并重新启动 PostgreSQL、API 和微信容器后，待办状态与日报内容、版本均保留。验收待办及其删除标记已清除，日报正文恢复为验收前内容，正常保存产生的版本号仍递增。`npm run check` 通过；连接真实 PostgreSQL 的 `npm test` 为 255 项通过、0 失败、0 跳过。`pgvector` 扩展可用不代表已实现向量检索；此次未验证向量检索、数据库备份恢复、长期稳定性或生产 VPS。
+
+本次服务器保留 `/data/backups/pre-postgres-20261021/` 下的迁移前 SQLite 在线备份、`/data/imports/desktop-daylight-20261021.sqlite` 导入快照，以及 `pi-durable-verify-api:pre-postgres-20261021` 旧 API 镜像。需要回滚时先停止业务写入并备份当前 PostgreSQL 与 SQLite，再用旧镜像和隔离恢复卷验证；**迁移后写入 PostgreSQL 的内容不会自动回写旧 SQLite**，不能只换旧镜像便视为无损回滚。
 
 ## 6. 故障与限制
 

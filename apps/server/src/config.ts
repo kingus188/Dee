@@ -3,6 +3,7 @@ export function readConfig(env: NodeJS.ProcessEnv) {
   if (api === "faux" && env.NODE_ENV !== "test") throw new Error("模拟体验已停用，请配置真实模型；faux 仅供自动化测试使用");
   return {
     port: Number(env.PORT || 3000), dataDir: env.DATA_DIR || "./data", password: env.DEMO_PASSWORD || "",
+    databaseUrl: env.DATABASE_URL || process.env.DATABASE_URL || "", test: env.NODE_ENV === "test",
     production: env.NODE_ENV === "production",
     // PI_OFFLINE=1：无论数据库里怎么配，都强制关闭微信通道、Teams 发送和 Webhook 通知。测试和数据副本必须开启，避免连到真实账号。
     offline: env.PI_OFFLINE === "1",

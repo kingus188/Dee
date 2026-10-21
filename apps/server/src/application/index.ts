@@ -14,9 +14,13 @@ import { openEpisodeStore } from "../episode-store.js";
 import { createSummarizer } from "../episode-model.js";
 import { reviewTeamsNotification } from "../teams-notifications.js";
 import { createTeamsReplyPort, type TeamsSender } from "../teams-reply-port.js";
-import { openDaylightStore } from "../daylight-store.js";
+import { openDaylightStore, type DaylightStore } from "../daylight-store.js";
 import { createDaylight, migrateLegacyTodos } from "@assistant/features";
 import { openNotificationOutbox } from "../notification-outbox.js";
+import { openBusinessDatabase } from "../postgres.js";
+import { createDailyReports } from "../daily-reports.js";
+import { existsSync } from "node:fs";
+import type { Pool } from "pg";
 
 export async function createApplication(config: AppConfig): Promise<AppContext> {
   if (config.production && !config.password) throw new Error("生产环境必须设置 DEMO_PASSWORD");
@@ -25,13 +29,19 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
   let teamsStore: ReturnType<typeof openTeamsStore> | undefined;
   let mail: ReturnType<typeof createMailService> | undefined;
   let episodeStore: ReturnType<typeof openEpisodeStore> | undefined;
-  let daylight: ReturnType<typeof openDaylightStore> | undefined;
+  let daylight: DaylightStore | undefined;
+  let businessDatabase: Pool | undefined;
   let notifications: ReturnType<typeof openNotificationOutbox> | undefined;
   try {
     wechatSettings = openWechatSettings(config.dataDir, config.wechat);
     teamsStore = openTeamsStore(config.dataDir);
     episodeStore = openEpisodeStore(config.dataDir);
-    daylight = openDaylightStore(config.dataDir);
+    businessDatabase = await openBusinessDatabase(config.databaseUrl, config.dataDir, config.test);
+    daylight = await openDaylightStore(businessDatabase);
+    const dailyReports = await createDailyReports(businessDatabase);
+    const taskSource = join(config.dataDir, "daylight.sqlite"), reportSource = join(config.dataDir, "agent.sqlite");
+    if (existsSync(taskSource)) await daylight.importSource(taskSource);
+    if (existsSync(reportSource)) await dailyReports.importSource(reportSource);
     mail = createMailService(config.dataDir, config.offline, fetch, config.mailAccountFile);
     config = { ...config, model: modelSettings.model, wechat: wechatSettings.active };
     if (config.offline) config = { ...config, wechat: { ...config.wechat, enabled: false }, notifications: { ...config.notifications, mode: "off" } };
@@ -64,7 +74,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
       await migrateLegacyTodos(runtime.harness, daylight, ctx);
       if (wechat) { await wechat.linkLegacyTeams(teamsStore.notificationIds()); await wechat.start(); }
       const taskGraph = await runtime.harness.taskGraph(ctx);
-      return { ...runtime, config, ctx, taskGraph, tasks, notifications, daylight, wechat, modelSettings, wechatSettings, teamsStore, teamsSender, mail, episodeStore, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
+      return { ...runtime, config, ctx, taskGraph, tasks, notifications, daylight, dailyReports, businessDatabase, wechat, modelSettings, wechatSettings, teamsStore, teamsSender, mail, episodeStore, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
     } catch (error) {
       wechat?.stop();
       await runtime.harness.close(ctx);
@@ -76,7 +86,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     wechatSettings?.close();
     teamsStore?.close();
     episodeStore?.close();
-    daylight?.close();
+    await businessDatabase?.end();
     modelSettings.close();
     throw error;
   }

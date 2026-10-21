@@ -10,6 +10,9 @@ services:
     # 进程崩溃后自动拉起，这是“断点恢复”演示的一半
     restart: unless-stopped
     env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - pi-durable-assistant-data:/data
     mem_limit: 1g
@@ -17,6 +20,27 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: assistant
+      POSTGRES_USER: assistant_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}
+    volumes:
+      - business-postgres:/var/lib/postgresql/data
+      - ./deploy/postgres/init.sh:/docker-entrypoint-initdb.d/01-assistant.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U assistant_admin -d assistant"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    mem_limit: 1g
+    cpus: 1.0
     security_opt:
       - no-new-privileges:true
 
@@ -66,3 +90,4 @@ volumes:
   wx-bot-state:
   wx-bot-media:
   pi-durable-assistant-data:
+  business-postgres:

@@ -10,19 +10,32 @@ function fixture() {
 	const state: DaylightSnapshot = { projects: [], tasks: [] };
 	const applied = new Map<string, unknown>();
 	const imports: number[] = [];
-	const port: DaylightPort = {
-		snapshot: () => structuredClone(state),
-		getTask: (id: string) => { const task = state.tasks.find(item => item.id === id); if (!task) throw new Error("任务已不存在"); return structuredClone(task); },
-		saveProject: project => { const index = state.projects.findIndex(item => item.id === project.id); if (index < 0) state.projects.push(project); else state.projects[index] = project; },
-		saveTask: task => { const index = state.tasks.findIndex(item => item.id === task.id); if (index < 0) state.tasks.push(task); else state.tasks[index] = task; },
-		patchTask: (id, patch) => { const task = { ...port.getTask(id), ...patch }; port.saveTask(task); return structuredClone(task); },
-		moveTask: (id, status, position) => { port.patchTask(id, { status, ...(position === undefined ? {} : { position }) }); },
-		deleteTask: (id: string) => { state.tasks = state.tasks.filter(task => task.id !== id); },
-		deleteProject: (id: string) => { state.projects = state.projects.filter(project => project.id !== id); state.tasks = state.tasks.filter(task => task.projectId !== id); },
-		ensureDefaultProject: () => { const project: DaylightProject = { id: "00000000-0000-5000-8000-000000000001", name: "收件箱", description: "", color: "lavender" }; const found = state.projects.find(item => item.id === project.id); if (found) return found; port.saveProject(project); return project; },
-		replayAction: <T>(key: string, action: () => T): T => { if (!applied.has(key)) applied.set(key, structuredClone(action())); return structuredClone(applied.get(key)) as T; },
-		importLegacy: id => { imports.push(id); return { projects: 1, tasks: 1 }; },
+	let replaying = false;
+	const transaction: DaylightPort = {
+		snapshot: async () => structuredClone(state),
+		getTask: async (id: string) => { const task = state.tasks.find(item => item.id === id); if (!task) throw new Error("任务已不存在"); return structuredClone(task); },
+		saveProject: async project => { const index = state.projects.findIndex(item => item.id === project.id); if (index < 0) state.projects.push(project); else state.projects[index] = project; },
+		saveTask: async task => { const index = state.tasks.findIndex(item => item.id === task.id); if (index < 0) state.tasks.push(task); else state.tasks[index] = task; },
+		patchTask: async (id, patch) => { const task = { ...await transaction.getTask(id), ...patch }; await transaction.saveTask(task); return structuredClone(task); },
+		moveTask: async (id, status, position) => { await transaction.patchTask(id, { status, ...(position === undefined ? {} : { position }) }); },
+		deleteTask: async (id: string) => { state.tasks = state.tasks.filter(task => task.id !== id); },
+		deleteProject: async (id: string) => { state.projects = state.projects.filter(project => project.id !== id); state.tasks = state.tasks.filter(task => task.projectId !== id); },
+		ensureDefaultProject: async () => { const project: DaylightProject = { id: "00000000-0000-5000-8000-000000000001", name: "收件箱", description: "", color: "lavender" }; const found = state.projects.find(item => item.id === project.id); if (found) return found; await transaction.saveProject(project); return project; },
+		replayAction: async <T>(key: string, action: (port: DaylightPort) => Promise<T>): Promise<T> => {
+			if (applied.has(key)) return structuredClone(applied.get(key)) as T;
+			const before = structuredClone(state);
+			replaying = true;
+			try { const value = await action(transaction); applied.set(key, structuredClone(value)); return value; }
+			catch (error) { Object.assign(state, before); throw error; }
+			finally { replaying = false; }
+		},
+		importLegacy: async id => { imports.push(id); return { projects: 1, tasks: 1 }; },
 	};
+	// Root access during replay would escape the database transaction in production.
+	const port = new Proxy(transaction, { get(target, key, receiver) {
+		const method = Reflect.get(target, key, receiver);
+		return typeof method === "function" ? (...args: unknown[]) => { assert.equal(replaying, false, "tool must use its transaction-bound port"); return Reflect.apply(method, target, args); } : method;
+	} });
 	async function invoke(name: string, args: Record<string, unknown>, callId: string = crypto.randomUUID(), extension: Extension = createDaylight(port)) {
 		const tool = extension.tools!.find(item => item.name === name);
 		assert.ok(tool, name);
@@ -58,7 +71,7 @@ test("source MCP tool names, global project/task CRUD and partial updates", asyn
 
 test("list_tasks searches notes/tags and returns source-compatible summaries and paging", async () => {
 	const { invoke, port } = fixture();
-	const project = port.ensureDefaultProject();
+	const project = await port.ensureDefaultProject();
 	for (const title of ["a", "b"]) await invoke("create_task", { projectId: project.id, title, description: "UNIQUE", tags: ["tag"] });
 	const page = JSON.parse(await invoke("list_tasks", { query: "unique", status: "todo", projectId: project.id, limit: 1 }));
 	assert.equal(page.tasks.length, 1);
@@ -70,7 +83,7 @@ test("list_tasks searches notes/tags and returns source-compatible summaries and
 
 test("callId replay survives extension recreation and preserves saved results", async () => {
 	const { invoke, state, port } = fixture();
-	const project = port.ensureDefaultProject();
+	const project = await port.ensureDefaultProject();
 	const first = await invoke("create_task", { projectId: project.id, title: "one" }, "create-call");
 	const id = JSON.parse(first).id;
 	await invoke("update_task", { id, changes: { title: "edited" } });
@@ -91,7 +104,7 @@ test("legacy todo tool now reads/writes global Daylight tasks only", async () =>
 
 test("invalid task patches cannot touch identity and missing checklist items fail", async () => {
 	const { invoke, port } = fixture();
-	const project = port.ensureDefaultProject();
+	const project = await port.ensureDefaultProject();
 	const task = JSON.parse(await invoke("create_task", { projectId: project.id, title: "one" }));
 	await assert.rejects(invoke("update_task", { id: task.id, changes: { id: "other" } }), /字段/);
 	await assert.rejects(invoke("update_task", { id: task.id, changes: {} }), /字段/);
@@ -115,13 +128,13 @@ test("migration pages the actual transaction index and clears only after success
 	await migrateLegacyTodos(harness, port, BACKGROUND_CONTEXT);
 	assert.deepEqual(imports, [7, 8]);
 	notes.get(7)!.todos.push({ text: "not imported", done: false });
-	port.importLegacy = () => { throw new Error("disk full"); };
+	port.importLegacy = async () => { throw new Error("disk full"); };
 	await assert.rejects(migrateLegacyTodos(harness, port, BACKGROUND_CONTEXT), /disk full/);
 	assert.equal(notes.get(7)!.todos[0].text, "not imported");
-	port.importLegacy = () => ({ projects: 0, tasks: 0 });
+	port.importLegacy = async () => ({ projects: 0, tasks: 0 });
 	notes.get(7)!.applied["legacy-call"] = "已添加：legacy";
 	await migrateLegacyTodos(harness, port, BACKGROUND_CONTEXT);
-	assert.equal(port.replayAction("tool:legacy-call", () => { throw new Error("must not rerun"); }), "已添加：legacy");
+	assert.equal(await port.replayAction("tool:legacy-call", async () => { throw new Error("must not rerun"); }), "已添加：legacy");
 });
 
 test("memos retain Notes identity and obsolete todo edits are rejected", async () => {

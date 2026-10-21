@@ -19,7 +19,7 @@ test("固定页面编辑持久化，拒绝过期版本，并真实替换调度�
   async function close() {
     app.wechat?.stop(); app.taskGraph.dispose();
     await app.harness.close(app.ctx);
-    await app.mail.close(); app.daylight.close(); app.modelSettings.close(); app.wechatSettings.close(); app.teamsStore.close(); app.episodeStore.close();
+    await app.mail.close(); await app.businessDatabase.end(); app.modelSettings.close(); app.wechatSettings.close(); app.teamsStore.close(); app.episodeStore.close();
   }
   try {
     let api = createApi(app);

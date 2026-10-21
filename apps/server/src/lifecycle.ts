@@ -33,7 +33,8 @@ export async function startServer(config: AppConfig, host = config.password ? "0
       try { await Promise.all([stopped, app.harness.close(app.ctx)]); }
       finally {
         await app.notifications.close();
-        app.wechatSettings.close(); app.teamsStore.close(); app.episodeStore.close(); app.daylight.close(); app.modelSettings.close();
+        app.wechatSettings.close(); app.teamsStore.close(); app.episodeStore.close(); app.modelSettings.close();
+        await app.businessDatabase.end();
       }
     })();
   }

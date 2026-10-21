@@ -41,7 +41,7 @@
 | “帮我查一下 Teams 里还有哪些消息没回复。” | 检索服务端已采集的 Teams 消息；需要配置账号及相应权限 |
 | “看看今天有哪些 Outlook 邮件，读一下张三那封报价。” | 公司 Microsoft 365 收件箱只读查询与正文读取；可复用现有公司账号配置或在设置页交互授权 |
 
-网页左侧「日报」支持按日期用 Tiptap 编辑 Markdown、预览、保存和查看历史，一天一篇，可补写或修改。日报不需要配置模型，保存到当前实例的 SQLite；切换导航保留未保存草稿，刷新或关闭前仍需点击「保存日报」。多个页面同时修改时会阻止旧版本覆盖，保留当前正文供复制、重新读取后合并。
+网页左侧「日报」支持按日期用 Tiptap 编辑 Markdown、预览、保存和查看历史，一天一篇，可补写或修改。日报不需要配置模型，保存到业务 PostgreSQL；切换导航保留未保存草稿，刷新或关闭前仍需点击「保存日报」。多个页面同时修改时会阻止旧版本覆盖，保留当前正文供复制、重新读取后合并。旧版 SQLite 中的日报会在首次启动时自动导入，导入成功后保留原文件作为备份。
 
 Outlook 邮件由后端统一同步，桌面端和浏览器使用同一缓存。后端可用 `MAIL_ACCOUNT_FILE` 指定公司账号文件；首次无邮件配置时自动连接，后续尊重暂停与断开。也可在「设置 → Outlook 邮件」使用设备代码交互登录（支持 MFA）。首次同步近 30 天收件箱，不提醒历史邮件；之后约每分钟增量同步，Web 显示横幅，桌面端经 API 轮询弹系统通知。不发送、不改变已读、不下载附件。详见[邮件配置与限制](docs/CONFIGURATION.md#outlook--microsoft-365-邮件当前工作区)。
 
@@ -136,7 +136,7 @@ docker compose ps
 
 ## 开发与扩展
 
-技术栈：**TypeScript / React / Electron / Node.js / Pi Durable 1.3.0 / SQLite / WebSocket**。使用 pnpm workspaces、`tsc` 和 esbuild；网页构建已包含在现有 build 命令中，无需独立数据库服务。
+技术栈：**TypeScript / React / Electron / Node.js / Pi Durable 1.3.0 / PostgreSQL（pgvector）/ SQLite / WebSocket**。使用 pnpm workspaces、`tsc` 和 esbuild；网页构建已包含在现有 build 命令中。业务待办与日报使用 PostgreSQL，Agent 会话、设置、通知队列及其他持久化数据仍使用 SQLite。
 
 | 目录 | 职责 |
 | --- | --- |
@@ -154,6 +154,8 @@ pnpm run check
 pnpm --recursive --workspace-concurrency=1 run build
 pnpm test
 ```
+
+测试需要可用的 PostgreSQL（设置 `DATABASE_URL`）；Docker Compose 会启动 `pgvector/pgvector:pg16` 服务。数据库配置见 [配置说明](docs/CONFIGURATION.md)。
 
 `pnpm start` 和 `pnpm run dev` 都会先构建。`dev` 会在进程退出后重启，但不监听源码变化；修改源码后需重新构建。单包开发与依赖边界见 [架构与开发约定](docs/ARCHITECTURE.md)。
 

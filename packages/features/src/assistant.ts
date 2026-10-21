@@ -41,7 +41,7 @@ return defineExtension({
 		),
 		section("notes", async (input, renderContext) => {
 			const notes = await input.read.snapshot(Notes, input.conversationId, renderContext);
-			const tasks = daylight.snapshot().tasks.filter(task => task.status !== "done").slice(0, 30);
+			const tasks = (await daylight.snapshot()).tasks.filter(task => task.status !== "done").slice(0, 30);
 			if (!tasks.length && !notes?.memos.length) return undefined;
 			return ["全局 Daylight 未完成任务（最多 30 条；完整结果用 list_tasks）：", ...tasks.map(task => `- [${task.status}] ${task.title} (${task.id})`), "当前会话备忘：", ...(notes?.memos ?? []).map(memo => `- ${memo}`)].join("\n");
 		}),

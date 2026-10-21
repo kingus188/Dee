@@ -9,7 +9,6 @@ import { createManagement } from "./management.js";
 import { createPersonalService } from "./personal.js";
 import { createViews } from "./views.js";
 import { mailApi } from "../mail-api.js";
-import { createDailyReports } from "../daily-reports.js";
 import { daylightApi } from "../daylight-api.js";
 import { notificationApi } from "../notification-api.js";
 
@@ -18,20 +17,20 @@ export function createApi(context: AppContext) {
   const { harness, ctx, agentModel, config, modelLabel, startedAt, wechat } = context;
   const conversations = createConversations(context), views = createViews(context);
   const messages = createMessages(context, conversations), tasks = createManagement(context, views), personal = createPersonalService(context);
-  const dailyReports = createDailyReports(config.dataDir);
+  const { dailyReports } = context;
   async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}) {
     const path = url.pathname;
-    const daylightResult = daylightApi(context.daylight, method, url, body);
+    const daylightResult = await daylightApi(context.daylight, method, url, body);
     if (daylightResult) return daylightResult;
     const mailResult = mailApi(context.mail, method, url, body);
     if (mailResult) return await mailResult;
     const notificationResult = notificationApi(context, method, url, body);
     if (notificationResult) return notificationResult;
-    if (method === "GET" && path === "/api/daily-reports") return { status: 200, data: dailyReports.list() };
+    if (method === "GET" && path === "/api/daily-reports") return { status: 200, data: await dailyReports.list() };
     const report = path.match(/^\/api\/daily-reports\/([^/]+)$/);
     if (report) {
-      if (method === "GET") return { status: 200, data: dailyReports.get(report[1]) };
-      if (method === "POST") return { status: 200, data: dailyReports.save(report[1], body) };
+      if (method === "GET") return { status: 200, data: await dailyReports.get(report[1]) };
+      if (method === "POST") return { status: 200, data: await dailyReports.save(report[1], body) };
     }
     if (path === "/api/settings/model") {
       if (method === "GET") return { status: 200, data: context.modelSettings.get() };

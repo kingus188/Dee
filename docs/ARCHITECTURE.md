@@ -12,6 +12,7 @@
 | `packages/contracts` / `@assistant/contracts` | 可序列化的 HTTP/WebSocket 数据类型，浏览器和服务端共同使用；无 Node 或 SDK 依赖 |
 | `packages/runtime` / `@assistant/runtime` | 模型目录、会话索引、Harness 与 SQLite 生命周期；不注册具体助手功能 |
 | `packages/features` / `@assistant/features` | 笔记、网页阅读、附件、计划、提醒、子 Agent、记忆、技能和只读知识检索 |
+| `apps/server/src/postgres.ts` / `daily-reports.ts` / `daylight-store.ts` | PostgreSQL 业务数据连接与日报、Daylight 持久化；迁移旧 SQLite 数据时只读源文件，目标写入使用事务和幂等源标记 |
 | `packages/channel-wechat` / `@assistant/channel-wechat` | 微信入站验证、会话绑定、回复游标与发送队列 |
 
 `features` 按能力划分内部目录，通过包入口导出当前实际使用的功能。应用入口显式注册助手、前台委派、任务中心和个人资料扩展。通知与知识库配置由应用注入；模块导入不启动服务、不打开数据库。
@@ -37,7 +38,7 @@ Node.js 最低版本为 22.19，与 Pi SDK 的运行要求一致。开发依赖�
 
 升级 SDK 后先执行 `pnpm exec tsc -b --force`，再执行检查和测试；普通增量构建可能复用旧依赖类型的检查结果，不能单独证明新 SDK 兼容。
 
-2026-10-19 本地验收：`pnpm exec tsc -b --force`、`npm run check` 与 `npm test` 通过，188 项测试全部通过，7 个工作区、134 个源码模块无依赖边界违规或循环依赖。另以临时数据目录启动实际服务，通过 HTTP 提交消息并读取 SSE 会话快照：3 项待办全部完成，6 条 `todo` 工具结果保留添加／完成正文，最终助手回复正常返回；退出后清理临时数据。本次使用本地 `faux` 模型，未验证真实模型、Electron 窗口、真实微信／Teams／邮件或生产部署。
+2026-10-21 业务数据迁移：日报与 Daylight 待办从应用管理的 SQLite 迁移到 PostgreSQL/pgvector；PostgreSQL 使用独立业务账号和事务写入，旧 SQLite 作为只读迁移源保留。测试通过 `DATABASE_URL` 连接隔离 schema，避免依赖开发数据。
 
 工作区由 `pnpm-workspace.yaml` 声明，内部依赖使用 `workspace:*`；根 `packageManager` 固定 pnpm 12.9.1。通过 Corepack 使用固定版本，安装时只允许 Electron 和 esbuild 执行必要的依赖构建脚本。
 

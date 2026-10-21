@@ -11,17 +11,17 @@ export interface DaylightTask {
 }
 export interface DaylightSnapshot { projects: DaylightProject[]; tasks: DaylightTask[] }
 export type DaylightTaskPatch = Partial<Omit<DaylightTask, "id" | "createdAt">>;
-/** Synchronous port: mutations and replay results commit in one SQLite transaction. */
+/** Async port; replay callbacks use the supplied transaction-bound port. */
 export interface DaylightPort {
-  snapshot(): DaylightSnapshot;
-  getTask(id: string): DaylightTask;
-  saveTask(task: DaylightTask): void;
-  saveProject(project: DaylightProject): void;
-  moveTask(id: string, status: DaylightStatus, position?: number): void;
-  deleteTask(id: string): void;
-  deleteProject(id: string): void;
-  patchTask(id: string, patch: DaylightTaskPatch): DaylightTask;
-  ensureDefaultProject(): DaylightProject;
-  importLegacy(conversationId: number, todos: readonly { text: string; done: boolean }[]): { projects: number; tasks: number };
-  replayAction<T>(key: string, action: () => T): T;
+  snapshot(): Promise<DaylightSnapshot>;
+  getTask(id: string): Promise<DaylightTask>;
+  saveTask(task: DaylightTask): Promise<void>;
+  saveProject(project: DaylightProject): Promise<void>;
+  moveTask(id: string, status: DaylightStatus, position?: number): Promise<void>;
+  deleteTask(id: string): Promise<void>;
+  deleteProject(id: string): Promise<void>;
+  patchTask(id: string, patch: DaylightTaskPatch): Promise<DaylightTask>;
+  ensureDefaultProject(): Promise<DaylightProject>;
+  importLegacy(conversationId: number, todos: readonly { text: string; done: boolean }[]): Promise<{ projects: number; tasks: number }>;
+  replayAction<T>(key: string, action: (port: DaylightPort) => Promise<T>): Promise<T>;
 }

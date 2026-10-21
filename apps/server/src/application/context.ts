@@ -12,6 +12,8 @@ import type { MailService } from "../mail-service.js";
 import type { TeamsSender } from "../teams-reply-port.js";
 import type { DaylightStore } from "../daylight-store.js";
 import type { openNotificationOutbox } from "../notification-outbox.js";
+import type { Pool } from "pg";
+import type { DailyReports } from "../daily-reports.js";
 export type AppContext = Runtime & {
   config: AppConfig; ctx: Context; taskGraph: AttachedReplicatedState<TaskGraph>;
   tasks: ReturnType<typeof createTaskCenter>; wechat: WechatChannel | null;
@@ -19,6 +21,8 @@ export type AppContext = Runtime & {
   wechatSettings: ReturnType<typeof openWechatSettings>;
   mail: MailService;
   daylight: DaylightStore;
+  businessDatabase: Pool;
+  dailyReports: DailyReports;
   notifications: ReturnType<typeof openNotificationOutbox>;
   teamsStore: TeamsStore; teamsSender: TeamsSender;
   episodeStore: EpisodeStore; summarize: (prompt: string) => Promise<string>;

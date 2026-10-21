@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -b && node .build/scripts/build.js",
     "check": "tsc -b && node .build/scripts/check-boundaries.js",
-    "test": "pnpm run build && node --experimental-vm-modules --test packages/*/dist-tests/*.test.js apps/*/dist-tests/*.test.js tests/dist/*.test.js",
+    "test": "pnpm run build && NODE_ENV=test node --experimental-vm-modules --test packages/*/dist-tests/*.test.js apps/*/dist-tests/*.test.js tests/dist/*.test.js",
     "start": "pnpm run build && node apps/server/dist/main.js",
     "start:web": "pnpm --filter @assistant/web run build && tsc -b scripts && node .build/scripts/web-server.js",
     "start:api": "pnpm --filter @assistant/server run build && node apps/server/dist/main.js",

@@ -1,12 +1,12 @@
 # 配置参考（当前 main）
 
-本页基于 `.env.example`、`apps/server/src/config.ts`、`packages/features/src/tasks/index.ts`、`packages/channel-wechat/src/index.ts` 和 `compose.yaml` 的**当前主分支实现**。请按 [快速开始](GETTING_STARTED.md) 配置真实模型后启动。产品不提供模拟体验，`faux` 仅允许在自动化测试环境中使用。
+本页基于 `.env.example`、`apps/server/src/config.ts`、`packages/features/src/tasks/index.ts`、`packages/channel-wechat/src/index.ts` 和 `compose.yaml` 的**当前主分支实现**。日报与 Daylight 待办使用 PostgreSQL；会话、设置、通知队列和其他 Agent 数据仍使用 SQLite。请按 [快速开始](GETTING_STARTED.md) 配置真实模型后启动。产品不提供模拟体验，`faux` 仅允许在自动化测试环境中使用。
 
 ## 环境变量
 
 服务启动后，可从网页左侧「设置」打开「模型连接」，配置 Provider（接口协议）、Base URL、模型 ID 和 API Key。支持下表对应的三类模型协议。
 
-网页配置保存后需重启服务生效。模型连接保存在 `DATA_DIR/agent.sqlite` 的私有配置表中，已保存的连接优先于 `LLM_API`、`LLM_BASE_URL`、`LLM_MODEL` 和 `LLM_API_KEY`；上下文窗口和最大输出仍使用环境变量。首次使用有效的模型环境变量启动时，会自动将连接保存到 SQLite，之后不再依赖这四个环境变量。
+网页配置保存后需重启服务生效。模型连接保存在 `DATA_DIR/agent.sqlite` 的私有配置表中，已保存的连接优先于 `LLM_API`、`LLM_BASE_URL`、`LLM_MODEL` 和 `LLM_API_KEY`；上下文窗口和最大输出仍使用环境变量。首次使用有效的模型环境变量启动时，会自动将连接保存到 SQLite。日报与 Daylight 待办不使用模型，但需要 `DATABASE_URL` 指向可写 PostgreSQL。
 
 没有已保存的模型配置时，应用仍可打开设置页。填写连接并保存后重启即可聊天；配置完成前不启动模型生成或恢复后台任务，不提供模拟回复。启用了微信通道的服务需先完成模型配置。
 
@@ -19,14 +19,15 @@ API Key 输入为空时保留原值；更换 Provider 或 Base URL 时必须重�
 | 变量 | 默认 / 示例 | 说明 |
 | --- | --- | --- |
 | `LLM_API` | `openai-completions` | 可选 `openai-completions` / `openai-responses` / `anthropic-messages` |
-| `LLM_BASE_URL` | 空 | 实际服务商提供的 API 基础地址，必须配置 |
+| `LLM_BASE_URL` | 空 | 模型服务 API 地址，需填写服务商提供的完整 Base URL |
+| `DATABASE_URL` | `postgresql://...` | 日报与 Daylight 待办的业务数据库连接；生产环境使用独立业务账号，不要复用超级用户密码。Compose 内部默认地址为 `postgres`。 |
 | `LLM_API_KEY` | 空 | 实际 API Key，不提交到 Git |
 | `LLM_MODEL` | 空 | 模型 ID，须与 API 类型及服务商匹配 |
 | `LLM_CONTEXT_WINDOW` | `128000` | 提供给模型目录的上下文窗口配置，并非真实配额保证 |
 | `LLM_MAX_TOKENS` | `8192` | 模型目录的最大输出 token 配置 |
 | `DEMO_PASSWORD` | 空 | HTTP Basic Auth 密码；生产模式必须配置，用户名固定 `demo` |
 | `HOST_PORT` | `3300` | Docker 映射到宿主机 `127.0.0.1` 的端口 |
-| `NOTIFY_WEBHOOK_URL` | 空 | 通用 Webhook 或飞书机器人的完整 URL，含签名时视为敏感凭据 |
+| `NOTIFY_WEBHOOK_URL` | 空 | 通用 Webhook 或飞书机器人地址；留空时不向外发送通知 |
 | `NOTIFY_WEBHOOK_KIND` | `generic` | `generic` JSON / `feishu` 文本机器人 |
 | `NOTIFY_MODE` | `errors` | `errors`：仅明确失败的后台任务；`all`：也发成功/提醒/计划触发；`off`：不发送 |
 | `MAIL_ACCOUNT_FILE` | 空 | 后端复用现有账号 JSON 的路径（建议绝对路径）；桌面端不自动读取旧账号文件。不在网页配置密码 |
@@ -48,6 +49,14 @@ API Key 输入为空时保留原值；更换 Provider 或 Base URL 时必须重�
 | `MATERIALS_ROOT` | `$DATA_DIR/materials` | 生产资料目录（Markdown），只读检索。路径含「归档」为归档、含「草稿」或「待确认」为草稿，只有其余文件算现行；建议每篇头部写明负责人和更新日期。启动时自动创建。也可以在对话里让助手记入资料：先存入「待确认」，你确认后转为现行，同名旧资料自动归档 |
 
 另外，`PORT`（本地默认 `3000`）和 `DATA_DIR`（本地默认 `./data`、Docker 默认 `/data`）在代码中读取，可用于开发或容器环境；它们不是当前示例 `.env.example` 的主要部署配置。
+
+### 业务数据库与旧数据迁移
+
+服务启动必须提供 `DATABASE_URL`。Compose 使用 `pgvector/pgvector:pg16`，不向宿主机发布数据库端口；API 通过内部地址 `postgres:5432` 连接。分别生成 `POSTGRES_ADMIN_PASSWORD` 与 `POSTGRES_APP_PASSWORD`，并将后者填入 `DATABASE_URL`；具体变量见 `.env.example`。初始化脚本仅在新数据卷首次启动时执行；已有卷需单独创建业务账号与 `vector` 扩展，修改环境变量不会重设数据库密码。
+
+启动时自动将 `DATA_DIR/agent.sqlite` 的日报和 `DATA_DIR/daylight.sqlite` 的 Daylight 数据导入 PostgreSQL。保留项目、任务、排序、删除标记、历史导入标记、幂等动作结果，以及日报正文、版本和时间。每个源独立事务导入，冲突整体回滚；成功记录源路径标记，之后不重复导入，旧文件保留且不再写入业务数据。
+
+测试使用 `NODE_ENV=test` 和 `DATABASE_URL` 指定的数据库；每个临时数据目录使用独立 schema。测试账号需有该数据库的 `CREATE` 权限；不要指向生产业务库。
 
 ### 最小可运行配置
 
