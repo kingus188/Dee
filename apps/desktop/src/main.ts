@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 import { loadConnection, saveConnection } from "./connection.js";
 import { basicAuth, type ConnectionConfig } from "./connection-config.js";
 import { isAppConnection, isAppUrl, isExternalUrl, validateWebUrl } from "./policy.js";
-import { startMailNotifications } from "./mail-notifications.js";
+import { isPinnedCertificate } from "./certificate-trust.js";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { showMailNotification, startMailNotifications } from "./mail-notifications.js";
 
 app.setName("Pi Durable Assistant");
 const icon = fileURLToPath(new URL("../assets/icon.png", import.meta.url));
@@ -53,8 +56,8 @@ async function connect() {
     if (window !== current) return;
     current.show(); settings?.close();
     stopNotifications = startMailNotifications(origin, basicAuth(config.username, password), (title, body) => {
-      if (Notification.isSupported()) new Notification({ title, body }).show();
-    });
+      if (Notification.isSupported()) showMailNotification(new Notification({ title, body, timeoutType: "default" }));
+    }, (input, init) => session.fromPartition("desktop-web").fetch(String(input), init));
   } catch { if (window === current) { current.hide(); showConnection(); } }
 }
 
@@ -78,6 +81,12 @@ else {
       } catch { invalidEnvironment = true; }
     }
     const web = session.fromPartition("desktop-web");
+    const certificatePath = join(app.getPath("userData"), "desktop-certificate.json");
+    const pin: unknown = existsSync(certificatePath) ? JSON.parse(readFileSync(certificatePath, "utf8")) : undefined;
+    web.setCertificateVerifyProc((request, callback) => {
+      const trusted = request.errorCode === 0 || isPinnedCertificate(config.url, pin, request.hostname, request.certificate.data);
+      callback(trusted ? 0 : -2);
+    });
     web.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     web.setPermissionCheckHandler(() => false);
     web.webRequest.onBeforeSendHeaders((details, callback) => {

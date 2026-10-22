@@ -8,6 +8,11 @@ export function verifyDesktopPackage(directory: string) {
     : join(directory, name + (process.platform === "win32" ? ".exe" : ""));
   const resources = process.platform === "darwin" ? name + ".app/Contents/Resources" : "resources";
   const entry = join(directory, resources, "app.asar/apps/desktop/dist/main.js");
+  if (process.platform === "darwin") {
+    const description = execFileSync("/usr/bin/plutil", ["-extract", "NSLocalNetworkUsageDescription", "raw", "-o", "-", join(directory, name + ".app/Contents/Info.plist")], { encoding: "utf8" });
+    if (!description.trim()) throw new Error("Desktop package is missing its local network usage description");
+    execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", join(directory, name + ".app")], { stdio: "inherit" });
+  }
   execFileSync(executable, ["--input-type=module", "-e", `
     import assert from "node:assert/strict";
     import { readFile, readdir } from "node:fs/promises";

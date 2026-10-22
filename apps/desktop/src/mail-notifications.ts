@@ -1,6 +1,13 @@
 type Notice = { sequence: number; message: { sender?: string; address?: string; subject?: string } };
 type NoticeBatch = { latest: number; items: Notice[] };
 
+export function showMailNotification(notification: { show(): void; close(): void; once(event: "close", listener: () => void): unknown }) {
+  const timer = setTimeout(() => notification.close(), 5000);
+  timer.unref();
+  notification.once("close", () => clearTimeout(timer));
+  notification.show();
+}
+
 export function startMailNotifications(
   baseUrl: string,
   authorization: string | undefined,

@@ -22,6 +22,10 @@ pnpm run desktop
 
 远程页面启用 sandbox、context isolation，禁用 Node.js、webview 和权限请求；仅向当前 Web 的 HTTP/WebSocket 请求附加认证。HTTP(S) 外链由系统浏览器打开，跨源导航被阻止。
 
+受控自签名 HTTPS 服务可在 Electron `userData/desktop-certificate.json` 配置公开证书，格式为 `{ "origin": "https://服务器地址:端口", "certificate": "PEM 证书文本" }`。先通过可信管理通道核实证书；客户端仅接受该来源、匹配的主机与证书指纹及有效期，其他连接继续使用系统校验。邮件轮询复用同一会话。证书更换或过期后应重新核实并更新此公开配置。
+
+macOS 安装包声明局域网用途，系统出现访问提示时选择允许。终端可访问服务器不代表桌面已获权限；已保存的凭据可直接重试。打包会构建独立主程序，避免与其他 Electron 应用共享主 UUID 而混用网络权限。
+
 macOS 关闭窗口后应用继续轮询邮件通知；完全退出时停止轮询，但不会停止后端任务。Windows/Linux 关闭最后一个窗口即退出客户端。通知由 `/api/mail/notices` 获取，首次连接跳过历史通知，不读取本机邮件或 Teams 数据库。
 
 ## 旧桌面数据
@@ -33,6 +37,8 @@ macOS 关闭窗口后应用继续轮询邮件通知；完全退出时停止轮�
 Teams 同步/发送由后端 `TEAMS_CONFIG_DIR` 指定包含 `teams-forward-config.json` 的配置目录；Outlook 账号文件由 `MAIL_ACCOUNT_FILE` 指定。旧桌面 `wechat` 目录中的文件不会自动加载，迁移时显式配置对应路径。微信 Bot 必须作为独立服务运行，配置后端发送地址及两个方向的令牌。不要在前端或桌面客户端放模型、公司账号配置。
 
 ## 打包与验证
+
+macOS 打包需安装 Xcode Command Line Tools。主入口从本项目源码构建，保留 Electron 框架、辅助程序及 Node/fuse 行为；最终应用使用本地临时签名，并执行严格签名与包内容检查。
 
 ```bash
 pnpm run desktop:package

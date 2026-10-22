@@ -21,6 +21,11 @@ export function MailNotifications() {
     void poll(); const timer = setInterval(() => void poll(), 15000);
     return () => { live = false; clearInterval(timer); };
   }, []);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   if (!notice) return null;
   return <aside className="mail-notice" role="status" aria-label="新邮件提醒">
     <span>Outlook 新邮件 · {notice.message.sender || notice.message.address}：{notice.message.subject || "（无主题）"}。可在对话中问「查看最新邮件」。</span>

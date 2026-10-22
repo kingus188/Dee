@@ -1,7 +1,41 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
-import { startMailNotifications } from "../dist/mail-notifications.js";
+import { EventEmitter } from "node:events";
+import { showMailNotification, startMailNotifications } from "../dist/mail-notifications.js";
+
+class TestNotification extends EventEmitter {
+  shown = 0;
+  closed = 0;
+  show() { this.shown++; }
+  close() { this.closed++; this.emit("close"); }
+}
+
+test("desktop mail notifications close after five seconds with independent lifetimes", t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const first = new TestNotification(), second = new TestNotification();
+  showMailNotification(first);
+  assert.equal(first.shown, 1);
+  t.mock.timers.tick(2000);
+  showMailNotification(second);
+  t.mock.timers.tick(2999);
+  assert.equal(first.closed, 0); assert.equal(second.closed, 0);
+  t.mock.timers.tick(1);
+  assert.equal(first.closed, 1); assert.equal(second.closed, 0);
+  t.mock.timers.tick(2000);
+  assert.equal(second.closed, 1);
+});
+
+test("manually dismissed desktop mail notifications cancel their auto-close timer", t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const notification = new TestNotification();
+  showMailNotification(notification);
+  t.mock.timers.tick(2000);
+  notification.close();
+  t.mock.timers.tick(5000);
+  assert.equal(notification.closed, 1);
+});
+
 
 test("desktop polling skips history, authenticates API and batches fresh messages", async t => {
   t.mock.timers.enable({ apis: ["setInterval"] });

@@ -95,3 +95,39 @@ test("Web 新邮件提醒跳过历史，断线保留游标，文本转义，可�
   assert.match(document.querySelector("aside")!.textContent!, /<script>/); assert.equal(document.querySelector("script, img"), null);
   await act(async () => document.querySelector<HTMLButtonElement>("aside button")!.click()); assert.equal(document.querySelector("aside"), null);
 });
+
+test("Web 新邮件提醒在 5 秒后消失，新邮件重新计时且仍可手动关闭", async t => {
+  t.mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
+  let sequence = 0;
+  t.mock.method(apiClient, "request", async (path: string) => {
+    const after = new URL(path, "http://localhost").searchParams.get("after");
+    return { latest: sequence, items: after !== null && sequence > Number(after)
+      ? [{ sequence, message: { id: `mail-${sequence}`, sender: "Alice", subject: `新邮件 ${sequence}` } }] : [] };
+  });
+  const { dom } = await mount(t, <MailNotifications />), document = dom.window.document;
+  sequence = 1;
+  await act(async () => { t.mock.timers.tick(15000); });
+  assert.match(document.querySelector("aside")!.textContent!, /新邮件 1/);
+  await act(async () => { t.mock.timers.tick(4999); });
+  assert.notEqual(document.querySelector("aside"), null);
+  await act(async () => { t.mock.timers.tick(1); });
+  assert.equal(document.querySelector("aside"), null);
+
+  sequence = 2;
+  await act(async () => { t.mock.timers.tick(10000); });
+  assert.match(document.querySelector("aside")!.textContent!, /新邮件 2/);
+  await act(async () => document.querySelector<HTMLButtonElement>("aside button")!.click());
+  assert.equal(document.querySelector("aside"), null);
+  await act(async () => { t.mock.timers.tick(5000); });
+  assert.equal(document.querySelector("aside"), null);
+
+  sequence = 3;
+  await act(async () => { t.mock.timers.tick(10000); });
+  assert.match(document.querySelector("aside")!.textContent!, /新邮件 3/);
+  await act(async () => { t.mock.timers.tick(4999); });
+  assert.notEqual(document.querySelector("aside"), null);
+  await act(async () => { t.mock.timers.tick(1); });
+  assert.equal(document.querySelector("aside"), null);
+  await act(async () => { t.mock.timers.tick(10000); });
+  assert.equal(document.querySelector("aside"), null, "已展示的邮件不会在下一次轮询重新弹出");
+});
