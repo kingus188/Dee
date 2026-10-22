@@ -75,6 +75,16 @@ docker compose --profile wechat up -d
 
 `wx-bot` 与 Node 共用 Docker 网络命名空间，18790 仅在内部 loopback 使用。主分支支持微信**文字和语音转写文字**；不代表可以解析微信图片、文件和视频。扫码、消息窗口与微信平台限制需要真实账号验证。
 
+### 迁移 Teams 自动转发到微信
+
+微信收发正常不代表 Teams 自动采集已经启动。API 需要设置 `TEAMS_CONFIG_DIR`（本次服务器为 `/data/teams`），且该目录必须包含已有的 `teams-forward-config.json`；离线模式、目录未设置或配置文件缺失时，现有代码会跳过 Teams 集成。
+
+从桌面迁移时，同时迁入 `teams-forward.json` 同步水位，以及 `agent.sqlite` 中的 `teams_messages`、`teams_auto_replies` 数据，保留 `pushed_at`、`replied_at` 等去重标记。先为目标数据库制作一致性备份，再按相同表结构在事务内合并；不要用桌面数据库覆盖服务端已有的会话、模型设置或业务数据。账号配置、微信状态及数据库备份留在权限受限的持久存储中，不提交到 Git。
+
+转发器从 `TEAMS_CONFIG_DIR/state/primary/context_tokens.json` 的收件人键读取目标。API 因此需要只读访问微信桥的实时状态卷：使用仓库命名卷时，挂载 `wx-bot-state:/data/teams/state:ro`；使用服务器现有目录时，挂载对应的微信状态目录。核对两个容器的实际 UID/GID，并让状态文件所有者与读取进程兼容。本次实例将微信桥运行账号与 API 对齐为 `1000:1000`，同时调整微信桥状态和媒体目录的所有权，保留目录 `0700`、状态文件 `0600`；其他部署应先检查实际身份，不要直接套用 UID。
+
+配置持久化到实际使用的 Compose 文件后，一起重建 API 和微信桥，因为两者共享网络命名空间。验收需依次确认：Teams 同步时间持续更新、新消息进入数据库、符合提醒规则的消息进入微信队列、最终发件箱记录为 `sent`，以及 `/api/wechat/status` 的 `pending`、`blocked` 数量。Teams 的 `pushed_at` 只表示已交给通知链路，不能单独作为微信发送成功的证据；状态文件时间较旧也不能单独证明令牌过期。
+
 ## 4. 安全升级与备份
 
 **禁止以 `docker compose down -v` 升级。** `-v` 会删除项目命名卷，可能永久丢失 PostgreSQL 业务数据、SQLite 会话与微信登录状态。
@@ -143,5 +153,7 @@ PostgreSQL 迁移验收（2026-10-21）：上述服务器实例已切换到独�
 本次服务器保留 `/data/backups/pre-postgres-20261021/` 下的迁移前 SQLite 在线备份、`/data/imports/desktop-daylight-20261021.sqlite` 导入快照，以及 `pi-durable-verify-api:pre-postgres-20261021` 旧 API 镜像。需要回滚时先停止业务写入并备份当前 PostgreSQL 与 SQLite，再用旧镜像和隔离恢复卷验证；**迁移后写入 PostgreSQL 的内容不会自动回写旧 SQLite**，不能只换旧镜像便视为无损回滚。
 
 ## 6. 故障与限制
+
+2026-10-22 微信漏推修复验收：确认前一天迁移遗漏 Teams 配置目录，服务端没有启动 Teams 采集与转发。补齐配置与微信状态只读挂载、迁移 2020 条 Teams 历史记录及同步水位、对齐容器账号后，真实采集恢复，补采当天 37 条消息；其中 2 条重要提醒分别在北京时间 15:27:55、15:29:34 标记 `sent`，每条发送尝试 1 次，最终 `pending=0`、`blocked=0`。3 个无读取权限的 Teams 会议聊天仍返回 Graph 403，按原有逻辑跳过。修复前数据库与 Compose 配置均已备份；这次验收证明采集及发送接口成功，不代表微信用户已读，也不替代长期稳定性验收。
 
 配置、模型、SSE、微信、权限和附件问题见 [故障排查](TROUBLESHOOTING.md)。此项目不包含多用户账户、细粒度权限、自动升级回滚或统一成本上限。公网使用前需自行评估隐私和供应商 API 账单风险。
