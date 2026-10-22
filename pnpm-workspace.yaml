@@ -7,3 +7,6 @@ allowBuilds:
   esbuild: true
   "@google/genai": false
   protobufjs: false
+
+minimumReleaseAgeExclude:
+  - electron@44.9.3

@@ -17,7 +17,7 @@
     "@tiptap/pm": "^3.32.0",
     "@tiptap/react": "^3.32.0",
     "@tiptap/starter-kit": "^3.32.0",
-    "antd": "^6.6.6",
+    "antd": "^6.6.7",
     "dayjs": "^1.11.23",
     "react": "19.3.1",
     "react-dom": "19.3.1"

@@ -40,6 +40,10 @@ Node.js 最低版本为 22.19，与 Pi SDK 的运行要求一致。开发依赖�
 
 2026-10-21 业务数据迁移：日报与 Daylight 待办从应用管理的 SQLite 迁移到 PostgreSQL/pgvector；PostgreSQL 使用独立业务账号和事务写入，旧 SQLite 作为只读迁移源保留。测试通过 `DATABASE_URL` 连接隔离 schema，避免依赖开发数据。
 
+2026-10-22 兼容依赖升级：`pg` 8.16.3 → 8.23.1、`@types/pg` 8.15.6 → 8.23.1、Ant Design 6.6.6 → 6.6.7、lucide-static 1.59.0 → 1.60.0、Electron 44.9.0 → 44.9.3，锁文件同步更新。保持 Node 22 类型基线、TypeScript 6 和 ACP SDK 1；TypeScript 7、ACP SDK 2 与 Electron 45 的跨主版本迁移不包含在本轮。
+
+本轮验证：强制全量编译、依赖边界检查和冻结锁文件安装通过；真实 PostgreSQL 的 8 组 HTTP/WS 操作通过，浏览器完成项目与带标签待办的创建和展示。早先完整回归为 254 项通过、1 项失败，定位为升级前已有的 Teams 回扫测试时间竞争；2026-10-22 提交前连接独立临时 PostgreSQL 再次运行 `npm run check` 和 `npm test`，完整回归 255 项全部通过，本轮未修改该测试。Electron 44.9.3 的 npm 包及类型已安装，但二进制下载先后在 30 秒、240 秒超时，未验证新版桌面运行；浏览器截图也因窗口状态失败，不视为视觉验收通过。
+
 工作区由 `pnpm-workspace.yaml` 声明，内部依赖使用 `workspace:*`；根 `packageManager` 固定 pnpm 12.9.1。通过 Corepack 使用固定版本，安装时只允许 Electron 和 esbuild 执行必要的依赖构建脚本。
 
 在仓库根目录执行：
