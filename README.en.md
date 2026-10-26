@@ -1,15 +1,15 @@
-# Pi Durable Assistant · Xiao D
+# Dee · Xiao D
 
 **A familiar face, a memory of your preferences, and an assistant that keeps working.**
 
 Xiao D is a self-hosted personal AI assistant with an Electron desktop app, a web interface, and optional WeChat iLink and Teams message integrations. Give it a task through conversation, see its working state through an animated avatar, remember preferences, recall past work, and let longer tasks run in the background.
 
-The project, **Pi Durable Assistant**, is built on [Pi Durable](https://github.com/earendil-works/pi). The avatar communicates activity; the durable Agent runtime handles execution. Work can continue after you close the browser, and recoverable tasks resume from persisted state after a server restart.
+The project, **Dee**, is built on [Pi Durable](https://github.com/earendil-works/pi). The avatar communicates activity; the durable Agent runtime handles execution. Work can continue after you close the browser, and recoverable tasks resume from persisted state after a server restart.
 
 [简体中文](README.md) · [Getting started](docs/GETTING_STARTED.md) · [Desktop app](apps/desktop/README.md) · [Configuration](docs/CONFIGURATION.md) · [Architecture](docs/ARCHITECTURE.md)
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B-43853d?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![CI](https://github.com/kingus188/pi-durable-assistant/actions/workflows/v3-ci.yml/badge.svg)](https://github.com/kingus188/pi-durable-assistant/actions/workflows/v3-ci.yml)
+[![CI](https://github.com/kingus188/Dee/actions/workflows/v3-ci.yml/badge.svg)](https://github.com/kingus188/Dee/actions/workflows/v3-ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > An experimental, single-user application. Today, interaction uses text and a two-dimensional animated avatar. Real-time voice, lip synchronization and photorealistic video avatars are not implemented.
@@ -53,8 +53,8 @@ The web interface supports multiple conversations, conversation forks, streamed 
 Requires **Node.js ≥ 22.19**, pnpm 12.9.1 and Git. Chat and background tasks also require a working model service.
 
 ```bash
-git clone https://github.com/kingus188/pi-durable-assistant.git
-cd pi-durable-assistant
+git clone https://github.com/kingus188/Dee.git
+cd Dee
 corepack enable
 pnpm install --frozen-lockfile
 ```

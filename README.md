@@ -1,15 +1,15 @@
-# Pi Durable Assistant · 小 D
+# Dee · 小 D
 
 **有自己的形象，记得你的约定，把交代的事情继续做完。**
 
 小 D 是一个可以自托管的个人 AI 助手，提供 Electron 桌面端和 Web 界面，可接入微信 iLink 与 Teams 消息。你通过对话交代事情，它用动态形象呈现工作状态，记住偏好、回顾历史、安排提醒，并在后台处理需要时间的任务。
 
-项目名称为 **Pi Durable Assistant**，基于 [Pi Durable](https://github.com/earendil-works/pi) 构建。数字形象负责表达，持久化 Agent 负责执行：关闭网页后，服务端仍可继续工作；服务重启后，可恢复的任务从持久化状态继续运行。
+项目名称为 **Dee**，基于 [Pi Durable](https://github.com/earendil-works/pi) 构建。数字形象负责表达，持久化 Agent 负责执行：关闭网页后，服务端仍可继续工作；服务重启后，可恢复的任务从持久化状态继续运行。
 
 [English](README.en.md) · [快速开始](docs/GETTING_STARTED.md) · [桌面程序](apps/desktop/README.md) · [配置说明](docs/CONFIGURATION.md) · [架构与开发](docs/ARCHITECTURE.md)
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B-43853d?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![CI](https://github.com/kingus188/pi-durable-assistant/actions/workflows/v3-ci.yml/badge.svg)](https://github.com/kingus188/pi-durable-assistant/actions/workflows/v3-ci.yml)
+[![CI](https://github.com/kingus188/Dee/actions/workflows/v3-ci.yml/badge.svg)](https://github.com/kingus188/Dee/actions/workflows/v3-ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > 当前是面向个人、单用户的实验性实现，交互以文字对话和二维动态形象为主。实时语音、口型同步、写实视频形象尚未实现。
@@ -72,8 +72,8 @@ Daylight 提供项目、四列看板、列表、日历、优先级、截止日�
 需要 **Node.js ≥ 22.19**、pnpm 12.9.1 和 Git；聊天与后台任务还需要可用的真实模型服务。
 
 ```bash
-git clone https://github.com/kingus188/pi-durable-assistant.git
-cd pi-durable-assistant
+git clone https://github.com/kingus188/Dee.git
+cd Dee
 corepack enable
 pnpm install --frozen-lockfile
 ```

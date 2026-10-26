@@ -1,4 +1,6 @@
-# 小 D 桌面程序
+# Dee 桌面程序
+
+正式应用名为 **Dee**，中文昵称为小 D。macOS 打包产物为 `Dee.app`；应用标识继续使用 `com.pi-durable.assistant`，客户端配置目录保留为 `~/Library/Application Support/Pi Durable Assistant`，改名后沿用已有连接、证书和本机技能状态。
 
 Electron 直接连接后台服务器：后台同源提供已构建的网页、API 与 WebSocket；桌面不启动后端，不采集 Teams，不管理微信桥接进程，不打开助手数据库。桌面端和浏览器连接同一后台实例，共享后端数据。
 
