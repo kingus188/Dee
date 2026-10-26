@@ -20,11 +20,12 @@ import { openNotificationOutbox } from "../notification-outbox.js";
 import { openBusinessDatabase } from "../postgres.js";
 import { createDailyReports } from "../daily-reports.js";
 import { existsSync } from "node:fs";
+import { applyExecutionResult } from "./daylight-execution.js";
 import type { Pool } from "pg";
 
 export async function createApplication(config: AppConfig): Promise<AppContext> {
   if (config.production && !config.password) throw new Error("生产环境必须设置 DEMO_PASSWORD");
-  const modelSettings = await openModelSettings(config.dataDir, config.model);
+  const modelSettings = await openModelSettings(config.dataDir, config.model, config.modelCatalogFile);
   let wechatSettings: ReturnType<typeof openWechatSettings> | undefined;
   let teamsStore: ReturnType<typeof openTeamsStore> | undefined;
   let mail: ReturnType<typeof createMailService> | undefined;
@@ -59,9 +60,9 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     await mkdir(materialsRoot, { recursive: true });
     notifications = openNotificationOutbox(config.dataDir, config.notifications);
     const notify = createNotifier(config.notifications, notifications.enqueue);
-    const tasks = createTaskCenter(notify);
+    const tasks = createTaskCenter(notify, run => applyExecutionResult(daylight!, run));
     const { models, agentModel, label: modelLabel, configured: modelConfigured } = await createModelCatalog(config.model, config.model.api === "faux" ? (await import("./faux.js")).fauxScript : undefined);
-    if (config.wechat.enabled && !modelConfigured) throw new Error("启用微信通道前请先保存模型配置");
+    if (config.wechat.enabled && !modelConfigured) throw new Error("启用微信通道前请在服务器配置模型，然后重启后端");
     const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
       extensions: [createDaylight(daylight), createMailInbox(mail), createAssistant(notify, daylight), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query),
         refresh: () => teamsSender.refresh?.() ?? Promise.resolve({ ok: false, lastSuccessAt: teamsSender.syncStatus?.().lastSuccessAt ?? null }),

@@ -9,6 +9,7 @@ export function readConfig(env: NodeJS.ProcessEnv) {
     offline: env.PI_OFFLINE === "1",
     mailAccountFile: env.MAIL_ACCOUNT_FILE || "",
     teamsConfigDir: env.TEAMS_CONFIG_DIR || "",
+    modelCatalogFile: env.LLM_MODELS_FILE || "",
     model: { api, baseUrl: env.LLM_BASE_URL || "", model: env.LLM_MODEL || "",
       apiKey: env.LLM_API_KEY || "", contextWindow: Number(env.LLM_CONTEXT_WINDOW || 128000), maxTokens: Number(env.LLM_MAX_TOKENS || 8192) },
     materialsRoot: env.MATERIALS_ROOT || "",

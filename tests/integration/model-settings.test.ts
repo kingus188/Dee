@@ -2,27 +2,33 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readConfig, startServer } from "../../apps/server/dist/index.js";
 import { post, readView } from "./helpers.js";
 
-test("设置接口鉴权和同源保护，重启后原会话使用新地址、Key 和模型", { timeout: 30000 }, async () => {
+test("客户端只能选择服务器模型，鉴权和同源保护生效，重启后原会话与分叉使用所选连接", { timeout: 30000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "pi-model-http-"));
   const calls: { path: string; key: string | undefined; model: string }[] = [];
   const provider = createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
-    calls.push({ path: req.url!, key: req.headers.authorization, model: JSON.parse(body).model });
+    const model = JSON.parse(body).model as string;
+    calls.push({ path: req.url!, key: req.headers.authorization, model });
     res.writeHead(200, { "content-type": "text/event-stream" });
-    const chunk = { id: "local-test", object: "chat.completion.chunk", created: 1, model: "model-b", choices: [{ index: 0, delta: { role: "assistant", content: "已使用新连接" }, finish_reason: null }] };
+    const chunk = { id: "local-test", object: "chat.completion.chunk", created: 1, model, choices: [{ index: 0, delta: { role: "assistant", content: "已使用服务器连接" }, finish_reason: null }] };
     res.end(`data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify({ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   provider.listen(0, "127.0.0.1"); await once(provider, "listening");
   const address = provider.address(); assert.ok(address && typeof address === "object");
   const endpoint = `http://127.0.0.1:${address.port}`;
-  const config = readConfig({ LLM_API: "openai-completions", LLM_BASE_URL: endpoint + "/old/v1", LLM_API_KEY: "old-test-key", LLM_MODEL: "model-a", DATA_DIR: directory, PORT: "0", NOTIFY_MODE: "off", DEMO_PASSWORD: "test-password" });
+  const catalog = join(directory, "server-models.json");
+  await writeFile(catalog, JSON.stringify([
+    { id: "primary", name: "主模型", provider: "openai-completions", baseUrl: endpoint + "/old/v1", model: "model-a", apiKey: "old-test-key" },
+    { id: "backup", name: "备用模型", provider: "openai-completions", baseUrl: endpoint + "/new/v1", model: "model-b", apiKey: "new-test-key" },
+  ]));
+  const config = readConfig({ NODE_ENV: "test", PI_OFFLINE: "1", LLM_MODELS_FILE: catalog, DATA_DIR: directory, PORT: "0", NOTIFY_MODE: "off", DEMO_PASSWORD: "test-password" });
   const headers = { authorization: "Basic " + Buffer.from("demo:test-password").toString("base64"), "content-type": "application/json" };
   let service: Awaited<ReturnType<typeof startServer>> | undefined;
   try {
@@ -33,29 +39,37 @@ test("设置接口鉴权和同源保护，重启后原会话使用新地址、Ke
     const get = () => fetch(service!.origin + path, { headers });
     const before = await get();
     assert.equal(before.headers.get("cache-control"), "no-store");
-    assert.equal((await before.json()).hasKey, true);
+    assert.deepEqual(await before.json(), { models: [{ id: "primary", name: "主模型" }, { id: "backup", name: "备用模型" }], selectedModel: "primary", activeModel: "primary", restartRequired: false });
     const id = (await (await fetch(service.origin + "/api/conversations/direct", { method: "POST", headers })).json()).id;
-    await fetch(service.origin + `/api/conversations/${id}/messages`, { method: "POST", headers, body: JSON.stringify({ text: "旧连接的对话" }) });
+    await fetch(service.origin + `/api/conversations/${id}/messages`, { method: "POST", headers, body: JSON.stringify({ text: "原连接的对话" }) });
     let completed = false;
     for (let attempt = 0; attempt < 100; attempt++) {
       const exported = await fetch(service.origin + `/api/conversations/${id}/export.md`, { headers });
-      if ((await exported.text()).includes("已使用新连接")) { completed = true; break; }
+      if ((await exported.text()).includes("已使用服务器连接")) { completed = true; break; }
       await new Promise(resolve => setTimeout(resolve, 20));
     }
-    assert.equal(completed, true, "旧连接应在切换前完成回复");
-    const body = JSON.stringify({ provider: "openai-completions", baseUrl: endpoint + "/new/v1", model: "model-b", apiKey: "new-test-key" });
+    assert.equal(completed, true, "原连接应在切换前完成回复");
+    const body = JSON.stringify({ modelId: "backup" });
     assert.equal((await fetch(service.origin + path, { method: "POST", headers: { ...headers, origin: "https://another.example" }, body })).status, 403);
-    assert.equal((await fetch(service.origin + path, { method: "POST", headers, body: JSON.stringify({ provider: "faux" }) })).status, 400);
+    for (const input of [
+      { provider: "openai-completions", baseUrl: endpoint + "/client/v1", model: "client-model", apiKey: "client-test-key" },
+      { modelId: "backup", apiKey: "client-test-key" }, { modelId: "missing" },
+    ]) {
+      assert.equal((await fetch(service.origin + path, { method: "POST", headers, body: JSON.stringify(input) })).status, 400);
+    }
+    assert.equal((await (await get()).json()).selectedModel, "primary");
     const result = await fetch(service.origin + path, { method: "POST", headers, body });
     assert.equal(result.status, 200);
     const saved = await result.text();
-    assert.equal(saved.includes("test-key"), false);
+    for (const secret of ["test-key", endpoint, "baseUrl", "apiKey", "provider"]) assert.equal(saved.includes(secret), false);
     assert.equal(JSON.parse(saved).restartRequired, true);
+    assert.equal(JSON.parse(saved).selectedModel, "backup");
     const unchanged = await (await fetch(service.origin + "/api/info", { headers })).json();
     assert.equal(unchanged.model, "model-a");
-    await service.close();
-    service = await startServer({ ...config, password: "", model: { ...config.model, baseUrl: "", model: "", apiKey: "" } }, "127.0.0.1");
-    assert.equal((await (await get()).json()).restartRequired, false);
+    await service.close(); service = undefined;
+    service = await startServer({ ...config, password: "" }, "127.0.0.1");
+    const restarted = await (await get()).json();
+    assert.equal(restarted.restartRequired, false); assert.equal(restarted.activeModel, "backup");
     assert.equal((await post(service.origin, "/api/conversations/direct")).id, id);
     const oldView = await readView(service.origin, id, view => !view.busy);
     const oldEntry = oldView.entries.find(entry => entry.kind === "assistant")?.id;

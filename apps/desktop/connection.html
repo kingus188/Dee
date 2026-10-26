@@ -16,10 +16,10 @@
 </head>
 <body>
   <h1>连接小 D</h1>
-  <p>连接独立运行的 Web 服务。服务离线时，可重试或更改地址。</p>
+  <p>连接后台服务器。服务离线时，可重试或更改地址。</p>
   <form id="form">
-    <label for="url">Web URL</label>
-    <input id="url" required placeholder="http://127.0.0.1:8080" spellcheck="false" aria-describedby="url-hint">
+    <label for="url">后台服务器地址</label>
+    <input id="url" required placeholder="http://127.0.0.1:3000" spellcheck="false" aria-describedby="url-hint">
     <p id="url-hint" class="hint">使用 HTTPS 根地址。本机服务可使用 HTTP，不包含路径、查询或片段。</p>
     <label for="username">BasicAuth 用户名</label>
     <input id="username" placeholder="demo（默认）" autocomplete="username">

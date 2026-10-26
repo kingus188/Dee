@@ -46,6 +46,7 @@ export default function TaskCard({
     <article
       className={`task-card ${task.color}`}
       data-id={task.id}
+      data-status={task.status}
       draggable={!busy}
       onDragStart={(event) => {
         event.dataTransfer.setData('text/plain', task.id)

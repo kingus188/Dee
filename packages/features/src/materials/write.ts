@@ -1,4 +1,5 @@
-import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { normalizeRel } from "../knowledge/index.js";
 import { hasSecret } from "../personal/service.js";
@@ -47,16 +48,31 @@ export async function saveMaterial(root: string, input: { category: unknown; tit
 	return path;
 }
 
-// 待确认转为现行；已有同名现行资料先移入同目录的「归档」。重复调用安全：待确认稿已不在而现行已存在时直接返回。
-export async function approveMaterial(root: string, rawPath: unknown) {
+// 同一正文重新保存也构成新版本，防止确认后替换再换回原文。
+export async function readDraftSnapshot(root: string, rawPath: unknown) {
+	const { pending } = pendingTarget(rawPath);
+	const { path, absolute } = await resolveInside(root, pending);
+	const before = await lstat(absolute, { bigint: true });
+	if (!before.isFile() || before.size > 256n * 1024n) throw new Error("待确认资料必须是 256KB 内的普通 Markdown 文件");
+	const body = await readFile(absolute, "utf8");
+	const after = await lstat(absolute, { bigint: true });
+	const stamp = (stat: typeof before) => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+	if (stamp(before) !== stamp(after)) throw new Error("读取期间草稿已修改，请重新展示并确认");
+	return { root: await realpath(root), path, body, version: createHash("sha256").update(stamp(after)).update("\n").update(body).digest("hex") };
+}
+
+// 待确认转为现行；已有同名现行资料先归档。两参数保留宿主辅助接口的幂等语义；工具必须传入已核对的版本。
+export async function approveMaterial(root: string, rawPath: unknown, expectedVersion?: string) {
 	const { pending, target } = pendingTarget(rawPath);
 	const from = await resolveInside(root, pending);
 	const to = await resolveInside(root, target);
 	if (!(await exists(from.absolute))) {
-		if (await exists(to.absolute)) return { path: target, archived: null };
+		if (expectedVersion === undefined && await exists(to.absolute)) return { path: target, archived: null };
 		throw new Error("找不到这篇待确认资料");
 	}
-	const body = (await readFile(from.absolute, "utf8")).replace(/^更新日期：.*$/m, `更新日期：${today()}`);
+	const snapshot = expectedVersion === undefined ? undefined : await readDraftSnapshot(root, pending);
+	if (snapshot && snapshot.version !== expectedVersion) throw new Error("确认后草稿已修改，没有入库，请重新展示并确认");
+	const body = (snapshot?.body ?? await readFile(from.absolute, "utf8")).replace(/^更新日期：.*$/m, `更新日期：${today()}`);
 	let archived: string | null = null;
 	if (await exists(to.absolute) && (await readFile(to.absolute, "utf8")) !== body) {
 		const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);

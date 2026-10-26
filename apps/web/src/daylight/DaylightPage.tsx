@@ -4,23 +4,25 @@ import { WorkspaceContainer } from './WorkspaceContainer.js'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   AppstoreOutlined,
-  BarsOutlined,
   CloseOutlined,
   EditOutlined,
   FolderOutlined,
   PlusOutlined,
+  SearchOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons'
-import Sidebar from './components/layout/Sidebar.js'
+import TaskNavigation from './components/layout/Sidebar.js'
 import CalendarPage from './features/calendar/CalendarPage.js'
 import TaskBoard from './features/tasks/TaskBoard.js'
 import TaskList from './features/tasks/TaskList.js'
 import TaskEditor from './features/tasks/TaskEditor.js'
+import TaskQuickAdd from './features/tasks/TaskQuickAdd.js'
 import ProjectEditor from './features/projects/ProjectEditor.js'
 import StorageSettings from './features/settings/StorageSettings.js'
 import useTodoData from './hooks/useTodoData.js'
 import {
   localDate,
+  isOverdue,
   newTask,
   priorities,
   selectTasks,
@@ -31,7 +33,9 @@ import {
 } from './domain/todo.js'
 import * as store from './services/todoStore.js'
 
-function DaylightContent({ active, headerActions }: { active: boolean; headerActions: ReactNode }) {
+type DaylightPageProps = { active: boolean; headerActions: ReactNode; taskId?: string }
+
+function DaylightContent({ active, headerActions, taskId }: DaylightPageProps) {
   const {
     data,
     loading,
@@ -42,16 +46,16 @@ function DaylightContent({ active, headerActions }: { active: boolean; headerAct
     notice,
     noticeContext,
   } = useTodoData(active)
-  const [scope, setScope] = useState('all')
-  const [view, setView] = useState<'board' | 'list'>('board')
+  const [scope, setScope] = useState('today')
+  const [view, setView] = useState<'board' | 'list'>('list')
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState('')
   const [sort, setSort] = useState('manual')
   const [draft, setDraft] = useState<Task | null>(null)
   const [projectDraft, setProjectDraft] = useState<Project | null>(null)
   const [settings, setSettings] = useState<string | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
+  const openedTask = useRef<string | undefined>(undefined)
   const isCalendar = scope === 'calendar'
   const currentProject = data.projects.find((project) => project.id === scope)
   const tasks = selectTasks(data.tasks, scope, query, priority, sort)
@@ -63,26 +67,41 @@ function DaylightContent({ active, headerActions }: { active: boolean; headerAct
   const title =
     currentProject?.name ||
     {
-      all: '我的全部待办',
-      today: '今天，慢慢来',
-      completed: '已经完成的美好',
+      all: '全部待办',
+      today: '今天',
+      overdue: '逾期待办',
+      completed: '已完成',
       calendar: '日历',
     }[scope] ||
     '我的待办'
   const subtitle =
     currentProject?.description ||
     {
-      all: '把想做的事记下来，把心里的空间留出来。',
-      today: '专注今天到期的事，一次做好一件。',
-      completed: '回头看看，你已经走了这么远。',
+      all: '从一个想法开始，让每件事都有着落。',
+      today: '把注意力留给今天，一次推进一件事。',
+      overdue: '重新安排这些待办，让进度回到手中。',
+      completed: '每一件完成的小事，都是向前的一步。',
     }[scope]
 
+  const dateLabel = new Intl.DateTimeFormat('zh-CN', {
+    month: 'long', day: 'numeric', weekday: 'long',
+  }).format(new Date())
+
+  useEffect(() => { void refresh() }, [])
+
   useEffect(() => {
-    void refresh().then((result) => {
-      if (result?.projects.length)
-        setScope(result.projects[0].id)
-    })
-  }, [])
+    if (!taskId) { openedTask.current = undefined; return }
+    if (!active || loading || loadError || openedTask.current === taskId) return
+    // A source link waits for any existing editor to close, preserving its draft.
+    if (draft || projectDraft || settings !== null) return
+    const task = data.tasks.find((item) => item.id === taskId)
+    if (!task) return
+    openedTask.current = taskId
+    setScope(task.projectId)
+    setQuery('')
+    setPriority('')
+    setDraft(task)
+  }, [active, taskId, loading, loadError, data.tasks, draft, projectDraft, settings])
   useEffect(() => {
     if (!active) return
     const handle = (event: KeyboardEvent) => {
@@ -94,7 +113,6 @@ function DaylightContent({ active, headerActions }: { active: boolean; headerAct
         settings === null
       ) {
         event.preventDefault()
-        setSidebarOpen(true)
         searchRef.current?.focus()
       }
     }
@@ -103,7 +121,6 @@ function DaylightContent({ active, headerActions }: { active: boolean; headerAct
   }, [active, draft, projectDraft, settings])
   function navigate(next: string) {
     setScope(next)
-    setSidebarOpen(false)
   }
   function createProject() {
     setProjectDraft({
@@ -161,41 +178,37 @@ function DaylightContent({ active, headerActions }: { active: boolean; headerAct
     <div className="desktop-backdrop">
       {noticeContext}
       <div className="app-shell">
-        <Sidebar
-          data={data}
-          scope={scope}
-          sidebarOpen={sidebarOpen}
-          query={query}
-          disabled={disabled}
-          searchRef={searchRef}
-          navigate={navigate}
-          setQuery={setQuery}
-          createProject={createProject}
-          openSettings={openSettings}
-          onClose={() => setSidebarOpen(false)}
-        />
         <main className="main-area" id="daylight-main">
           <header className="topbar">
-            <button
-              className="icon-button mobile-menu"
-              aria-label="打开导航"
-              onClick={() => setSidebarOpen(true)}
-            >
-              <BarsOutlined />
-            </button>
             <div className="breadcrumbs">
-              <span>待办</span>
+              <span>工作空间</span>
               <span>/</span>
-              <strong>{title}</strong>
+              <strong>待办</strong>
             </div>
             <div className="topbar-right">
               {headerActions}
             </div>
           </header>
+          <TaskNavigation
+            data={data}
+            scope={scope}
+            disabled={disabled}
+            navigate={navigate}
+            createProject={createProject}
+            openSettings={openSettings}
+          />
+          {isCalendar && (
+            <label className="task-search calendar-search">
+              <SearchOutlined />
+              <input ref={searchRef} aria-label="搜索待办" placeholder="搜索待办…" value={query} onChange={(event) => setQuery(event.target.value)} />
+              <kbd>⌘ K</kbd>
+            </label>
+          )}
           {!isCalendar && (
             <>
               <div className="project-header">
                 <div className="project-intro">
+                  <p className="task-eyebrow">{dateLabel}</p>
                   <div className="title-row">
                     <h1>{title}</h1>
                     {currentProject && (
@@ -219,6 +232,11 @@ function DaylightContent({ active, headerActions }: { active: boolean; headerAct
                   <PlusOutlined /> 新建待办
                 </button>
               </div>
+              <nav className="task-focus-strip" aria-label="待办概览">
+                <button aria-pressed={scope === 'today'} onClick={() => navigate('today')}><span>今天要做</span><strong>{data.tasks.filter(task => task.dueDate === localDate() && task.status !== 'done').length}</strong><small>跨项目的今日清单</small></button>
+                <button className="task-focus-overdue" aria-pressed={scope === 'overdue'} onClick={() => navigate('overdue')}><span>已经逾期</span><strong>{data.tasks.filter(task => isOverdue(task)).length}</strong><small>留一点时间重新安排</small></button>
+                <button aria-pressed={scope === 'completed'} onClick={() => navigate('completed')}><span>已经完成</span><strong>{data.tasks.filter(task => task.status === 'done').length}</strong><small>每一小步都算数</small></button>
+              </nav>
               <div className="board-toolbar">
                 <div className="view-tabs" role="group" aria-label="显示方式">
                   <button
@@ -236,6 +254,18 @@ function DaylightContent({ active, headerActions }: { active: boolean; headerAct
                     <UnorderedListOutlined /> 列表
                   </button>
                 </div>
+                <div className="task-tools">
+                  <label className="task-search">
+                    <SearchOutlined />
+                    <input
+                      ref={searchRef}
+                      aria-label="搜索待办"
+                      placeholder="搜索标题、标签、备注…"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                    />
+                    <kbd>⌘ K</kbd>
+                  </label>
                 <div className="board-filters">
                   <label>
                     <span className="sr-only">筛选优先级</span>
@@ -266,11 +296,12 @@ function DaylightContent({ active, headerActions }: { active: boolean; headerAct
                     </select>
                   </label>
                 </div>
+                </div>
               </div>
               <div className="board-summary">
                 <span>
-                  <i className="small-purple-dot" /> 共 {scopedTasks.length}{' '}
-                  条待办 <b>·</b> 已完成 {completed} 条
+                  <span className="task-total">{scopedTasks.length}</span> 条待办
+                  <b>·</b> {scopedTasks.length - completed} 条待完成
                   {(query || priority) && (
                     <span className="filter-result">
                       {' '}
@@ -288,14 +319,20 @@ function DaylightContent({ active, headerActions }: { active: boolean; headerAct
                   )}
                 </span>
                 <div className="summary-progress">
-                  <span>项目进度</span>
-                  <div>
+                  <span>已完成 {completed} 条</span>
+                  <div role="progressbar" aria-label="待办完成比例" aria-valuenow={completion} aria-valuemin={0} aria-valuemax={100}>
                     <i style={{ width: `${completion}%` }} />
                   </div>
                   <strong>{completion}%</strong>
                 </div>
               </div>
             </>
+          )}
+          <div hidden={isCalendar || !data.projects.length || !!loadError || loading}>
+            <TaskQuickAdd projects={data.projects} projectId={currentProject?.id} dueDate={scope === 'today' ? localDate() : null} disabled={disabled} onSave={task => mutate(() => store.saveTask(task), '已添加待办')} />
+          </div>
+          {taskId && !loading && !loadError && !data.tasks.some((task) => task.id === taskId) && (
+            <p className="empty-state" role="status">这条待办已删除或暂未载入。可以浏览现有项目，或重新读取待办。</p>
           )}
           {loadError ? (
             <div className="empty-state" role="alert">
@@ -372,7 +409,7 @@ function DaylightContent({ active, headerActions }: { active: boolean; headerAct
             />
           )}
           <footer className="main-footer">
-            <span>{busy ? '正在保存…' : '一点点完成，一点点轻松。'}</span>
+            <span role="status"><i className={busy || loading || loadError ? 'is-saving' : ''} />{loading ? '正在读取待办…' : loadError ? '读取失败，请重试' : busy ? '正在保存…' : '所有更改已保存'}</span>
             <span>
               {isCalendar
                 ? '拖动待办调整日期 · 点击标题编辑'
@@ -424,7 +461,7 @@ function DaylightContent({ active, headerActions }: { active: boolean; headerAct
 
 
 /** Keep mounted when inactive so task and project editor drafts survive navigation. */
-export function DaylightPage({ active, headerActions }: { active: boolean; headerActions: ReactNode }) {
+export function DaylightPage({ active, headerActions, taskId }: DaylightPageProps) {
   const container = useRef<HTMLDivElement>(null)
   const [theme] = useState(() => {
     const style = getComputedStyle(document.body)
@@ -448,7 +485,7 @@ export function DaylightPage({ active, headerActions }: { active: boolean; heade
         theme={theme}
       >
         <WorkspaceContainer.Provider value={() => container.current ?? document.body}>
-        <DaylightContent active={active} headerActions={headerActions} />
+        <DaylightContent active={active} headerActions={headerActions} taskId={taskId} />
         </WorkspaceContainer.Provider>
       </ConfigProvider>
     </div>

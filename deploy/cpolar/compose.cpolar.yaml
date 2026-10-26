@@ -1,0 +1,18 @@
+# Host-specific gateway for the existing pi-durable-verify deployment.
+# This project never manages or recreates the API, Web, database or WeChat services.
+name: pi-durable-public
+services:
+  gateway:
+    image: nginx:alpine
+    container_name: pi-durable-public-gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3301:8080"
+    volumes:
+      - ./nginx.cpolar.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - assistant
+networks:
+  assistant:
+    external: true
+    name: pi-durable-verify_default

@@ -7,98 +7,102 @@ import { App } from "../dist/ui/App.js";
 import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
 
-const saved: Settings = { provider: "openai-completions", baseUrl: "https://provider.example/v1", model: "model-a", hasKey: true, activeModel: "model-a", restartRequired: false };
+const saved: Settings = { models: [{ id: "primary", name: "主模型" }, { id: "backup", name: "备用模型" }], selectedModel: "primary", activeModel: "primary", restartRequired: false };
 const notifications: NotificationOverview = { enabled: false, mode: "off", kind: "generic", items: [] };
+function otherSettings(path: string) {
+  if (path.startsWith("/api/notifications")) return notifications;
+  if (path === "/api/personal") return { memory: [], skills: [], knowledge: { enabled: false, allow: [] } };
+  return { enabled: false, configured: false, schedules: [], reminders: [], background: [] };
+}
+function modelForm(document: Document) { return document.querySelector<HTMLSelectElement>("#server-model")!.closest("form")!; }
 
-test("设置可从导航打开并返回，保留对话草稿和密码输入语义", async t => {
+test("设置可从导航打开并返回，保留草稿，模型只显示服务器目录", async t => {
   t.mock.method(apiClient, "connect", async () => {});
-  t.mock.method(apiClient, "request", async (path: string) => path.startsWith("/api/notifications") ? notifications : path === "/api/settings/model" ? saved : path === "/api/personal" ? { memory: [], skills: [], knowledge: { enabled: false, allow: [] } } : { schedules: [], reminders: [], background: [] });
+  t.mock.method(apiClient, "request", async (path: string) => path === "/api/settings/model" ? saved : otherSettings(path));
   const { dom } = await mount(t, <App />);
   const document = dom.window.document;
-  await act(async () => { document.querySelector<HTMLButtonElement>(".prompt-chip")!.click(); });
+  await act(async () => { document.querySelector<HTMLButtonElement>(".today-shortcut")!.click(); });
   const draft = document.querySelector("textarea")!.value;
-  await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="模型设置"]')!.click(); });
+  await act(async () => { document.querySelector<HTMLAnchorElement>('[aria-label="连接与设置"]')!.click(); });
   assert.equal(document.getElementById("workspace")!.dataset.view, "settings");
   assert.equal(document.activeElement?.id, "settings-title");
-  const key = document.querySelector<HTMLInputElement>("#model-api-key")!;
-  assert.equal(key.type, "password"); assert.equal(key.value, ""); assert.equal(key.required, false);
-  assert.equal(key.autocomplete, "new-password");
-  assert.equal(document.querySelector<HTMLSelectElement>("#model-provider")!.options.length, 3);
+  for (const id of ["model-provider", "model-base-url", "model-id", "model-api-key"]) assert.equal(document.getElementById(id), null);
+  assert.deepEqual([...document.querySelector<HTMLSelectElement>("#server-model")!.options].map(option => [option.value, option.textContent]), [["primary", "主模型"], ["backup", "备用模型"]]);
+  assert.ok(document.querySelector('input[type="url"]'), "后台地址可配置");
   await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="关闭设置"]')!.click(); });
   assert.equal(document.getElementById("workspace")!.dataset.view, "chat");
   assert.equal(document.querySelector("textarea")!.value, draft);
 });
 
-test("保存保留空 Key、重复提交一次，更换协议需新 Key，失败允许重试", async t => {
+test("选择只发送服务器模型标识，重复提交一次，失败可重试", async t => {
   const calls: unknown[] = [];
   let resolve!: (value: Settings) => void;
   let failed = false;
-  t.mock.method(apiClient, "request", async (_path: string, body?: unknown) => {
-    if (_path.startsWith("/api/notifications")) return notifications;
+  t.mock.method(apiClient, "request", async (path: string, body?: unknown) => {
+    if (path !== "/api/settings/model") return otherSettings(path);
     if (body === undefined) return saved;
     calls.push(body);
-    if (failed) throw new Error("更换 Provider 或 Base URL 时，请重新填写 API Key");
+    if (failed) throw new Error("模型目录已更新，请重新选择");
     return new Promise<Settings>(done => { resolve = done; });
   });
   const { dom } = await mount(t, <ModelSettings onBack={() => {}} />);
-  const document = dom.window.document, form = document.querySelector("form")!;
+  const document = dom.window.document, form = modelForm(document), select = document.querySelector<HTMLSelectElement>("#server-model")!;
+  await act(async () => { select.value = "backup"; select.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
   await act(async () => {
     form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
     form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
   });
-  assert.deepEqual(calls, [{ provider: saved.provider, baseUrl: saved.baseUrl, model: saved.model }]);
+  assert.deepEqual(calls, [{ modelId: "backup" }]);
   assert.equal(form.getAttribute("aria-busy"), "true");
-  assert.equal(document.querySelector("fieldset")!.disabled, true);
-  await act(async () => { resolve({ ...saved, restartRequired: true }); });
-  assert.match(document.querySelector(".settings-feedback")!.textContent!, /已保存，重启服务后生效/);
-  const provider = document.querySelector<HTMLSelectElement>("#model-provider")!;
-  await act(async () => { provider.value = "anthropic-messages"; provider.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
-  assert.equal(document.querySelector<HTMLInputElement>("#model-api-key")!.required, true);
-  assert.equal(document.querySelector(".settings-key-state"), null);
+  assert.equal(form.querySelector("fieldset")!.disabled, true);
+  await act(async () => { resolve({ ...saved, selectedModel: "backup", restartRequired: true }); });
+  assert.match(form.querySelector(".settings-feedback")!.textContent!, /重启后台服务后生效/);
   failed = true;
   await act(async () => { form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
-  assert.match(document.querySelector('[role="alert"]')!.textContent!, /重新填写 API Key/);
-  assert.equal(document.querySelector<HTMLSelectElement>("#model-provider")!.value, "anthropic-messages");
-  assert.equal(document.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled, false);
-  assert.equal(document.querySelector(".settings-feedback")!.textContent, "");
-  const key = document.querySelector<HTMLInputElement>("#model-api-key")!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!.call(key, "replacement-ui-test-key");
-    key.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  });
+  assert.match(form.querySelector('[role="alert"]')!.textContent!, /模型目录已更新/);
+  assert.equal(select.value, "backup");
+  assert.equal(form.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled, false);
+  assert.equal(form.querySelector(".settings-feedback")!.textContent, "");
   failed = false;
   await act(async () => { form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
-  assert.equal((calls.at(-1) as { apiKey?: string }).apiKey, "replacement-ui-test-key");
-  await act(async () => { resolve({ ...saved, provider: "anthropic-messages", restartRequired: true }); });
-  assert.equal(key.value, "");
+  await act(async () => { resolve({ ...saved, selectedModel: "backup", activeModel: "backup" }); });
+  assert.match(form.querySelector(".settings-feedback")!.textContent!, /当前模型已生效/);
+  assert.deepEqual(calls, Array(3).fill({ modelId: "backup" }));
 });
 
-test("读取失败显示重试入口，未加载配置时不能提交", async t => {
+test("目录读取失败仍可修改后台地址，重试后恢复模型选择", async t => {
   let failed = true;
-  t.mock.method(apiClient, "request", async (path: string) => { if (failed) throw new Error("disconnected"); return path.startsWith("/api/notifications") ? notifications : saved; });
+  t.mock.method(apiClient, "request", async (path: string) => {
+    if (path !== "/api/settings/model") return otherSettings(path);
+    if (failed) throw new Error("disconnected");
+    return saved;
+  });
   const { dom } = await mount(t, <ModelSettings onBack={() => {}} />);
-  assert.match(dom.window.document.querySelector('[role="alert"]')!.textContent!, /无法读取配置/);
-  assert.equal(dom.window.document.querySelector("form"), null);
+  const document = dom.window.document;
+  assert.match(document.querySelector(".settings-load-error")!.textContent!, /未能读取服务器模型列表/);
+  assert.equal(document.querySelector("#server-model"), null);
+  assert.ok(document.querySelector('input[type="url"]'));
   failed = false;
-  await act(async () => { dom.window.document.querySelector<HTMLButtonElement>(".settings-load-error button")!.click(); });
-  assert.ok(dom.window.document.querySelector("form"));
+  await act(async () => { document.querySelector<HTMLButtonElement>(".settings-load-error button")!.click(); });
+  assert.ok(document.querySelector("#server-model"));
 });
 
-test("未配置模型时直接进入设置页，不创建聊天或启动生成", async t => {
+test("未配置模型时保留今日工作台，不显示模型编辑或选择输入", async t => {
   const paths: string[] = [];
   t.mock.method(apiClient, "connect", async () => {});
   t.mock.method(apiClient, "onConnection", (listener: (state: "connected") => void) => { listener("connected"); return () => {}; });
   t.mock.method(apiClient, "request", async (path: string) => {
     paths.push(path);
     if (path === "/api/info") return { configured: false, model: "未配置模型", api: "openai-completions", boots: 1, pid: 1, startedAt: "2026-10-13" };
-    if (path === "/api/settings/model") return { ...saved, baseUrl: "", model: "", hasKey: false, activeModel: "" };
-    if (path.startsWith("/api/notifications")) return notifications;
-    if (path === "/api/personal") return { memory: [], skills: [], knowledge: { enabled: false, allow: [] } };
-    throw new Error("Unexpected request: " + path);
+    if (path === "/api/settings/model") return { models: [], selectedModel: "", activeModel: "", restartRequired: false };
+    return otherSettings(path);
   });
   const { dom } = await mount(t, <App />);
-  assert.equal(dom.window.document.getElementById("workspace")!.dataset.view, "settings");
-  assert.match(dom.window.document.querySelector(".settings-status")!.textContent!, /请配置模型/);
-  assert.equal(dom.window.document.querySelector<HTMLInputElement>("#model-api-key")!.required, true);
+  assert.equal(dom.window.document.getElementById("workspace")!.dataset.view, "home");
+  assert.ok(dom.window.document.querySelector(".today-page"));
+  await act(async () => { dom.window.document.querySelector<HTMLAnchorElement>('[aria-label="连接与设置"]')!.click(); });
+  assert.match(dom.window.document.querySelector(".settings-status")!.textContent!, /服务器尚未配置模型/);
+  assert.equal(dom.window.document.querySelector("#model-api-key"), null);
+  assert.equal(dom.window.document.querySelector("#server-model"), null);
   assert.equal(paths.includes("/api/conversations/direct"), false);
 });

@@ -1,5 +1,7 @@
 export type Decision = { id: string; status: "pending" | "approved" | "rejected"; source: "user" | "agent"; createdAt: number; decidedAt: number | null };
-export type MemoryItem = Decision & { text: string };
+export type MemoryProvenance = { conversationId: number | null; messageId: string | null; quote: string | null; quoteTruncated: boolean };
+export type MemoryRevision = { revision: number; text: string; status: Decision['status']; source: Decision['source']; provenance: MemoryProvenance; changedAt: number };
+export type MemoryItem = Decision & { text: string; provenance?: MemoryProvenance; revision?: number; history?: MemoryRevision[]; updatedAt?: number };
 export type SkillItem = Decision & { name: string; description: string; body: string };
 export type KnowledgeStatus = { enabled: boolean; reason?: string; root?: string; allow: string[] };
 export type KnowledgeHit = { path: string; status: string; revision: string; line: number; endLine: number; excerpt: string; score: number };

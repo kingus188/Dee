@@ -151,6 +151,6 @@ test("新会话订阅去重、等待初始连接，旧事件不回填；订阅�
   assert.equal(dom.window.document.querySelector("p")!.textContent, "空白");
   subscribeFailure = false;
   await act(async () => { assert.equal(await current.connectDirectChat(), 9); });
-  assert.equal(requests.at(-1), "/api/conversations/direct");
+  assert.equal(requests.at(-1), "/api/conversations/direct/new");
   assert.equal(subscriptions.at(-1), 9);
 });

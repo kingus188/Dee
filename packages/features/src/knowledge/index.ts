@@ -2,6 +2,7 @@ export type KnowledgeConfig = { OBSIDIAN_ROOT?: string; OBSIDIAN_ALLOW?: string 
 // Obsidian 只读检索。权威内容留在仓库里，这里只返回带来源的片段。
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
+import { bestMatchingLine } from "../search/index.js";
 
 export const DEFAULT_ALLOW = [
 	"My-VPS/我的VPS/AI学习",
@@ -182,24 +183,8 @@ async function corpus(env: KnowledgeConfig = {}) {
 }
 
 export function bestLine(text: string, query: string) {
-	const lines = String(text).split(/\r?\n/);
-	const phrase = query.trim().toLowerCase();
-	const tokens = [...new Set(phrase.split(/\s+/).filter(Boolean))];
-	const blob = lines.join("\n").toLowerCase();
-	if (tokens.length === 0 || tokens.some((token) => !blob.includes(token))) return { line: 1, score: 0 };
-	let best = { line: 1, score: 0 };
-	for (let i = 0; i < lines.length; i++) {
-		const lower = lines[i].toLowerCase();
-		let score = 0;
-		if (lower.includes(phrase)) score += 5;
-		for (const token of tokens) if (lower.includes(token)) score += 3;
-		if (score > best.score) best = { line: i + 1, score };
-	}
-	if (best.score === 0) {
-		const index = lines.findIndex((line) => tokens.some((token) => line.toLowerCase().includes(token)));
-		return { line: index + 1 || 1, score: 1 };
-	}
-	return best;
+	const { line, score } = bestMatchingLine(text, query);
+	return { line, score };
 }
 
 export function sliceLines(text: string, startLine: number) {

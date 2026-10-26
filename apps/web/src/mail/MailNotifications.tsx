@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { MailNotice, MailNotices } from "@assistant/contracts";
 import { request } from "../api/request.js";
+import { Icon } from "../ui/Icon.js";
 
 // 每个页面独立游标，不会由一个页面消费掉其他页面的提醒；刷新只监听之后的新邮件。
 export function MailNotifications() {
@@ -27,8 +28,14 @@ export function MailNotifications() {
     return () => clearTimeout(timer);
   }, [notice]);
   if (!notice) return null;
-  return <aside className="mail-notice" role="status" aria-label="新邮件提醒">
-    <span>Outlook 新邮件 · {notice.message.sender || notice.message.address}：{notice.message.subject || "（无主题）"}。可在对话中问「查看最新邮件」。</span>
-    <button type="button" className="text-button" onClick={() => setNotice(null)} aria-label="关闭新邮件提醒">关闭</button>
+  return <aside className="mail-notice mail-notice-toast" role="status" aria-live="polite" aria-atomic="true" aria-label="新邮件提醒">
+    <span className="mail-notice-icon"><Icon name="mail" /></span>
+    <div className="mail-notice-copy">
+      <p className="mail-notice-source">Outlook <span>新邮件</span></p>
+      <h2 className="mail-notice-subject">{notice.message.subject || "（无主题）"}</h2>
+      <p className="mail-notice-sender">{notice.message.sender || notice.message.address || "未知发件人"}</p>
+      <p className="mail-notice-hint">在对话中问「查看最新邮件」</p>
+    </div>
+    <button type="button" className="mail-notice-close" onClick={() => setNotice(null)} aria-label="关闭新邮件提醒"><Icon name="x" /></button>
   </aside>;
 }

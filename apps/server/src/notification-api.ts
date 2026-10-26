@@ -4,6 +4,14 @@ import { HttpError } from "./errors.js";
 
 export function notificationApi(context: Pick<AppContext, "config" | "notifications">, method: string, url: URL, body: Record<string, unknown>) {
   const { config, notifications } = context;
+  if (url.pathname === "/api/notifications/reads") {
+    if (method === "GET") return { status: 200, data: notifications.preferences.reads() };
+    if (method === "POST") return { status: 200, data: notifications.preferences.mark(body) };
+  }
+  if (url.pathname === "/api/notifications/preferences") {
+    if (method === "GET") return { status: 200, data: notifications.preferences.get() };
+    if (method === "POST") return { status: 200, data: notifications.preferences.save(body) };
+  }
   if (method === "GET" && url.pathname === "/api/notifications") {
     const status = url.searchParams.get("status");
     if (status !== null && status !== "pending" && status !== "sent" && status !== "failed") throw new HttpError(400, "通知状态无效");

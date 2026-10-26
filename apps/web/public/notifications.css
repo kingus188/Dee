@@ -1,0 +1,103 @@
+/* Notification delivery records and the page-local mail toast. */
+.notification-settings { min-width: 0; margin-top: 32px; padding-top: 28px; border-top: 1px solid var(--border); }
+.notification-settings .notification-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.notification-settings .notification-heading h2 { font-size: 20px; font-weight: 600; letter-spacing: -.02em; line-height: 1.4; }
+.notification-settings .notification-heading p { margin-top: 6px; color: var(--text-muted); font-size: 12px; line-height: 1.7; }
+.notification-settings .notification-auto-refresh { display: inline-flex; align-items: center; flex-shrink: 0; gap: 5px; padding-top: 5px; font-size: 10px; color: var(--text-muted); }
+.notification-settings .notification-auto-refresh .icon { width: 12px; height: 12px; }
+.notification-settings .notification-channel { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px; margin-top: 20px; border-radius: var(--radius-md); background: var(--bg-subtle); }
+.notification-settings .notification-channel-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--primary); }
+.notification-settings .notification-channel-icon .icon { width: 18px; height: 18px; }
+.notification-settings .notification-channel-copy { min-width: 0; }
+.notification-settings .notification-channel-copy strong { font-size: 13px; font-weight: 600; }
+.notification-settings .notification-channel-copy p { margin-top: 4px; font-size: 11px; color: var(--text-muted); line-height: 1.7; overflow-wrap: anywhere; }
+.notification-settings .notification-channel-state { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; white-space: nowrap; color: var(--text-muted); }
+.notification-settings .notification-channel-state::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.notification-settings .notification-channel[data-enabled="true"] .notification-channel-state { color: var(--primary); }
+.notification-settings .notification-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-top: 20px; }
+.notification-settings .notification-filters { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
+.notification-settings .notification-filters button, .notification-settings .notification-refresh, .notification-settings .notification-retry { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 11px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; line-height: 1.4; cursor: pointer; touch-action: manipulation; transition: transform .16s ease-out; }
+.notification-settings .notification-filters button[aria-pressed="true"] { background: var(--primary-light); color: var(--primary); font-weight: 600; }
+.notification-settings .notification-refresh { flex-shrink: 0; padding-inline: 8px; }
+.notification-settings .notification-refresh .icon, .notification-settings .notification-retry .icon { width: 14px; height: 14px; }
+.notification-settings .notification-list-caption { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; padding: 14px 0 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); line-height: 1.7; }
+.notification-settings .notification-list-caption p { font-size: 11px; font-variant-numeric: tabular-nums; }
+.notification-settings .notification-list-caption > span { font-size: 10px; }
+.notification-settings .notification-error { display: flex; align-items: flex-start; gap: 8px; padding: 12px; margin-top: 14px; border-radius: var(--radius-sm); background: var(--danger-bg); font-size: 12px; overflow-wrap: anywhere; }
+.notification-settings .notification-error .icon { width: 16px; height: 16px; margin-top: 3px; }
+.notification-settings .settings-feedback { margin-top: 12px; }
+.notification-settings .notification-loading, .notification-settings .notification-empty { display: flex; flex-direction: column; align-items: center; padding: 32px 16px; margin: 0; text-align: center; }
+.notification-settings .notification-loading { color: var(--text-muted); font-size: 12px; gap: 8px; }
+.notification-settings .notification-empty-icon { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 12px; border-radius: var(--radius-md); background: var(--bg-subtle); color: var(--text-muted); }
+.notification-settings .notification-empty-icon .icon { width: 18px; height: 18px; }
+.notification-settings .notification-empty strong { color: var(--text-main); font-size: 13px; font-weight: 550; }
+.notification-settings .notification-empty p { max-width: 38ch; margin-top: 6px; color: var(--text-muted); font-size: 11px; line-height: 1.8; text-wrap: pretty; }
+.notification-settings .notification-records { list-style: none; margin: 0; padding: 0; }
+.notification-settings .notification-record { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: start; gap: 12px; min-width: 0; padding: 18px 0 14px; border-top: 0; border-bottom: 1px solid var(--border); }
+.notification-settings .notification-state-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-sm); background: var(--bg-subtle); color: var(--text-muted); }
+.notification-settings .notification-state-icon .icon { width: 15px; height: 15px; }
+.notification-settings .notification-record[data-status="failed"] .notification-state-icon { color: var(--danger); background: var(--danger-bg); }
+.notification-settings .notification-record[data-status="sent"] .notification-state-icon { color: var(--success); background: var(--success-bg); }
+.notification-settings .notification-record[data-status="pending"] .notification-state-icon { color: var(--primary); background: var(--primary-light); }
+.notification-settings .notification-record-copy { min-width: 0; }
+.notification-settings .notification-record-heading { display: flex; align-items: baseline; justify-content: flex-start; flex-wrap: wrap; gap: 4px 12px; padding-top: 3px; }
+.notification-settings .notification-record-heading strong { color: var(--text-main); font-size: 13px; font-weight: 550; line-height: 1.5; }
+.notification-settings .notification-record-heading > span { color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.notification-settings .notification-record-time { margin-top: 5px; color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; line-height: 1.7; }
+.notification-settings .notification-record-error { color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
+.notification-settings .notification-error-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 8px; font-size: 11px; line-height: 1.7; }
+.notification-settings .notification-record-details > summary, .notification-settings .notification-policy > summary { display: inline-flex; align-items: center; gap: 5px; min-height: 40px; color: var(--text-muted); font-size: 11px; cursor: pointer; list-style: none; border-radius: 4px; touch-action: manipulation; }
+.notification-settings .notification-record-details > summary::-webkit-details-marker, .notification-settings .notification-policy > summary::-webkit-details-marker { display: none; }
+.notification-settings .notification-record-details > summary .icon, .notification-settings .notification-policy > summary .icon { width: 13px; height: 13px; }
+.notification-settings .notification-record-details[open] > summary .icon, .notification-settings .notification-policy[open] > summary .icon:last-child { transform: rotate(90deg); }
+.notification-settings .notification-record-details dl { margin: 0 0 8px; padding: 12px; border-radius: var(--radius-sm); background: var(--bg-subtle); font-size: 11px; line-height: 1.8; }
+.notification-settings .notification-record-details dl > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; margin-top: 6px; }
+.notification-settings .notification-record-details dl > div:first-child { margin-top: 0; }
+.notification-settings .notification-record-details dt { color: var(--text-muted); }
+.notification-settings .notification-record-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.notification-settings .notification-record-details code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; white-space: normal; overflow-wrap: anywhere; }
+.notification-settings .notification-retry { color: var(--primary); border-color: var(--border); background: var(--bg-surface); white-space: nowrap; font-size: 11px; }
+.notification-settings .notification-policy { margin-top: 12px; }
+.notification-settings .notification-policy > summary { gap: 7px; }
+.notification-settings .notification-policy p { margin: 0; padding: 0 0 4px 20px; color: var(--text-muted); font-size: 11px; line-height: 1.9; text-wrap: pretty; }
+.notification-settings button:disabled { opacity: .55; cursor: not-allowed; }
+.notification-settings button:focus-visible, .notification-settings summary:focus-visible, .mail-notice.mail-notice-toast button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
+.notification-settings button:active:not(:disabled), .mail-notice.mail-notice-toast button:active { transform: scale(.96); }
+.mail-notice.mail-notice-toast { position: fixed; z-index: 100; top: max(20px, env(safe-area-inset-top)); right: max(20px, env(safe-area-inset-right)); left: auto; transform: none; display: grid; grid-template-columns: 36px minmax(0, 1fr) 32px; align-items: start; gap: 12px; width: min(380px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-surface); color: var(--text-main); box-shadow: var(--shadow-lg); }
+.mail-notice.mail-notice-toast .mail-notice-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-md); background: var(--primary-light); color: var(--primary); }
+.mail-notice.mail-notice-toast .mail-notice-icon .icon { width: 19px; height: 19px; }
+.mail-notice.mail-notice-toast .mail-notice-copy { min-width: 0; }
+.mail-notice.mail-notice-toast .mail-notice-source { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin: 0; color: var(--primary); font-size: 11px; font-weight: 600; line-height: 1.5; }
+.mail-notice.mail-notice-toast .mail-notice-source > span { color: var(--text-muted); font-size: 10px; font-weight: 400; }
+.mail-notice.mail-notice-toast .mail-notice-subject { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 5px 0 0; color: var(--text-main); font-size: 14px; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
+.mail-notice.mail-notice-toast .mail-notice-sender { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px; color: var(--text-muted); font-size: 11px; line-height: 1.7; }
+.mail-notice.mail-notice-toast .mail-notice-hint { margin-top: 10px; color: var(--text-muted); font-size: 10px; line-height: 1.7; }
+.mail-notice.mail-notice-toast .mail-notice-close { display: grid; place-items: center; width: 40px; min-width: 40px; height: 40px; margin: -7px -8px 0 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; touch-action: manipulation; transition: transform .16s ease-out; }
+.mail-notice.mail-notice-toast .mail-notice-close .icon { width: 16px; height: 16px; }
+@media (hover: hover) {
+  .notification-settings .notification-filters button:hover:not(:disabled), .notification-settings .notification-refresh:hover:not(:disabled), .notification-settings .notification-retry:hover:not(:disabled), .mail-notice.mail-notice-toast .mail-notice-close:hover { background: var(--primary-light); color: var(--primary); }
+  .notification-settings summary:hover { color: var(--primary); }
+}
+@media (max-width: 480px) {
+  .notification-settings .notification-heading { gap: 8px; flex-direction: column; }
+  .notification-settings .notification-auto-refresh { padding-top: 0; }
+  .notification-settings .notification-channel { grid-template-columns: 30px minmax(0, 1fr); gap: 10px; padding: 12px; }
+  .notification-settings .notification-channel-icon { width: 30px; height: 30px; }
+  .notification-settings .notification-channel-state { grid-column: 2; margin-top: -4px; }
+  .notification-settings .notification-toolbar { align-items: stretch; gap: 6px; flex-wrap: wrap; }
+  .notification-settings .notification-filters { flex: 1; }
+  .notification-settings .notification-filters button { flex: 1; padding-inline: 9px; white-space: nowrap; }
+  .notification-settings .notification-refresh { width: 40px; margin-left: auto; }
+  .notification-settings .notification-refresh span { display: none; }
+  .notification-settings .notification-record { grid-template-columns: 26px minmax(0, 1fr); gap: 10px; }
+  .notification-settings .notification-state-icon { width: 26px; height: 26px; }
+  .notification-settings .notification-record-heading { padding-top: 2px; }
+  .notification-settings .notification-retry { grid-column: 2; justify-self: start; margin-top: -6px; }
+  .notification-settings .notification-record-details dl { padding: 10px; }
+  .notification-settings .notification-record-details dl > div { grid-template-columns: 1fr; gap: 2px; }
+  .mail-notice.mail-notice-toast { top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); width: calc(100vw - 24px); gap: 10px; padding: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notification-settings button, .mail-notice.mail-notice-toast button { transition: none; }
+  .notification-settings button:active:not(:disabled), .mail-notice.mail-notice-toast button:active { transform: none; }
+}

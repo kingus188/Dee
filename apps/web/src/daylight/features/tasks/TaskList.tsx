@@ -70,13 +70,13 @@ export default function TaskList({
                     </button>
                   </div>
                 </td>
-                <td>
+                <td data-label="项目">
                   {
                     projects.find((project) => project.id === task.projectId)
                       ?.name
                   }
                 </td>
-                <td>
+                <td data-label="状态">
                   <select
                     aria-label={`${task.title} 状态`}
                     disabled={disabled}
@@ -92,15 +92,15 @@ export default function TaskList({
                     ))}
                   </select>
                 </td>
-                <td>
+                <td data-label="优先级">
                   <span className={`priority-label priority-${task.priority}`}>
                     {priorities[task.priority]}
                   </span>
                 </td>
-                <td className={isOverdue(task) ? 'overdue' : ''}>
+                <td data-label="截止日期" className={isOverdue(task) ? 'overdue' : ''}>
                   {task.dueDate || '—'}
                 </td>
-                <td>{progress(task)}%</td>
+                <td data-label="进度">{progress(task)}%</td>
               </tr>
             ))}
           </tbody>

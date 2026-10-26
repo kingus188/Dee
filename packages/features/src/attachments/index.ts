@@ -1,4 +1,8 @@
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
+import { AttachmentError } from "./error.js";
+import { DOCX_MIME, DOCUMENT_LIMITS, documentType, extractDocument, type DocumentParserOptions } from "./document.js";
+export { AttachmentError } from "./error.js";
+export { DOCUMENT_LIMITS, type DocumentParserOptions } from "./document.js";
 export type Attachment = { name: string; mimeType: string; size: number } & (
   { kind: "image"; data: string } | { kind: "text"; text: string }
 );
@@ -31,8 +35,6 @@ const MARK = /^<附件 name="([^"]*)" type="([^"]*)" size="(\d+)"(\/?)>/;
 // 产出方在 @assistant/channel-wechat 的 validateInbound，两边格式必须一致。
 const QUOTE = /^<引用>\n([\s\S]*)\n<\/引用>$/;
 
-export class AttachmentError extends Error {}
-
 function cleanName(raw: unknown) {
 	const name = String(raw ?? "").split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f"<>]/g, "").trim().slice(0, 100);
 	if (!name) throw new AttachmentError("附件缺少文件名");
@@ -40,14 +42,15 @@ function cleanName(raw: unknown) {
 }
 
 function decodeBase64(data: unknown, name: string) {
+	if (typeof data === "string" && data.length > Math.ceil(ATTACHMENT_LIMITS.totalBytes / 3) * 4) throw new AttachmentError("附件总大小超过 10MB");
 	if (typeof data !== "string" || !data || data.length % 4 !== 0 || !BASE64.test(data)) {
 		throw new AttachmentError(`附件「${name}」不是合法的 base64 数据`);
 	}
 	return Buffer.from(data, "base64");
 }
 
-// 校验浏览器传来的 attachments 数组，返回 [{ kind, name, mimeType, size, data | text }]
-export function parseAttachments(raw: unknown): Attachment[] {
+type Upload = { name: string; mimeType: string; bytes: Buffer; data: string };
+function uploads(raw: unknown): Upload[] {
 	if (raw == null) return [];
 	if (!Array.isArray(raw)) throw new AttachmentError("attachments 必须是数组");
 	if (raw.length > ATTACHMENT_LIMITS.files) throw new AttachmentError(`一次最多上传 ${ATTACHMENT_LIMITS.files} 个附件`);
@@ -58,26 +61,46 @@ export function parseAttachments(raw: unknown): Attachment[] {
 		const bytes = decodeBase64(item?.data, name);
 		total += bytes.length;
 		if (total > ATTACHMENT_LIMITS.totalBytes) throw new AttachmentError("附件总大小超过 10MB");
-		if (IMAGE_SIGNATURES[mimeType]) {
-			if (!IMAGE_SIGNATURES[mimeType](bytes)) throw new AttachmentError(`「${name}」的内容和 ${mimeType} 不符`);
-			if (bytes.length > ATTACHMENT_LIMITS.imageBytes) throw new AttachmentError(`图片「${name}」超过 5MB`);
-			return { kind: "image", name, mimeType, size: bytes.length, data: item.data };
-		}
-		const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
-		if (mimeType.startsWith("text/") || TEXT_EXTENSIONS.has(ext)) {
-			if (bytes.length > ATTACHMENT_LIMITS.textBytes) throw new AttachmentError(`文本文件「${name}」超过 200KB`);
-			let text;
-			try {
-				text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-			} catch {
-				throw new AttachmentError(`「${name}」不是 UTF-8 文本`);
-			}
-			if (text.includes("\u0000")) throw new AttachmentError(`「${name}」不是文本文件`);
-			// 浏览器常把 .ts 报成 video/mp2t 之类，非 text/* 一律按 text/plain 告诉模型
-			return { kind: "text", name, mimeType: mimeType.startsWith("text/") ? mimeType : "text/plain", size: bytes.length, text };
-		}
-		throw new AttachmentError(`暂不支持「${name}」这种文件，目前只支持图片（PNG/JPEG/WebP/GIF）和文本类文件`);
+		return { name, mimeType, bytes, data: item.data };
 	});
+}
+
+function ordinaryAttachment({ name, mimeType, bytes, data }: Upload): Attachment {
+	if (IMAGE_SIGNATURES[mimeType]) {
+		if (!IMAGE_SIGNATURES[mimeType](bytes)) throw new AttachmentError(`「${name}」的内容和 ${mimeType} 不符`);
+		if (bytes.length > ATTACHMENT_LIMITS.imageBytes) throw new AttachmentError(`图片「${name}」超过 5MB`);
+		return { kind: "image", name, mimeType, size: bytes.length, data };
+	}
+	const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
+	if (mimeType.startsWith("text/") || TEXT_EXTENSIONS.has(ext)) {
+		if (bytes.length > ATTACHMENT_LIMITS.textBytes) throw new AttachmentError(`文本文件「${name}」超过 200KB`);
+		let text;
+		try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+		catch { throw new AttachmentError(`「${name}」不是 UTF-8 文本`); }
+		if (text.includes("\u0000")) throw new AttachmentError(`「${name}」不是文本文件`);
+		return { kind: "text", name, mimeType: mimeType.startsWith("text/") ? mimeType : "text/plain", size: bytes.length, text };
+	}
+	throw new AttachmentError(`暂不支持「${name}」这种文件，目前支持图片（PNG/JPEG/WebP/GIF）、文本及 PDF/DOCX（需异步解析）`);
+}
+
+// 旧同步图文调用保持同步；文档由服务端 await parseAttachmentsAsync 处理。
+export function parseAttachments(raw: unknown): Attachment[] {
+	return uploads(raw).map(ordinaryAttachment);
+}
+
+export async function parseAttachmentsAsync(raw: unknown, options: DocumentParserOptions = {}): Promise<Attachment[]> {
+	const input = uploads(raw); // 全部大小先校验，超限请求不会启动解析器。
+	const files: Attachment[] = [];
+	let extracted = 0;
+	for (const item of input) {
+		const type = documentType(item.name, item.mimeType);
+		if (!type) { files.push(ordinaryAttachment(item)); continue; }
+		const text = await extractDocument(item.bytes, item.name, type, options);
+		extracted += text.length;
+		if (extracted > DOCUMENT_LIMITS.chars) throw new AttachmentError(`附件提取总长度超过 ${DOCUMENT_LIMITS.chars} 字符`);
+		files.push({ kind: "text", name: item.name, mimeType: type === "pdf" ? "application/pdf" : DOCX_MIME, size: item.bytes.length, text });
+	}
+	return files;
 }
 
 // 组装成 pi-ai 的用户消息内容；没有附件时保持纯字符串，和原来一样

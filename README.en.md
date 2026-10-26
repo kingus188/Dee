@@ -59,13 +59,13 @@ corepack enable
 pnpm install --frozen-lockfile
 ```
 
-**API backend:** Run `pnpm run start:api` in one terminal (default `http://127.0.0.1:3000`, APIs only).
+**Backend:** Run `pnpm run build` once, then `pnpm run start:api` and open **http://127.0.0.1:3000**. The backend serves the built interface, APIs and WebSocket on the same origin.
 
-**Web:** Run `pnpm run start:web` in a second terminal and open **http://127.0.0.1:8080**. Set `API_ORIGIN` to change the backend URL.
+**Optional Web gateway:** Run `pnpm run start:web` in another terminal and open **http://127.0.0.1:8080**. Set `API_ORIGIN` to change its backend URL.
 
-**Desktop:** Keep both services running, then run `pnpm run desktop`. `ASSISTANT_WEB_URL` selects a different deployed Web service; connection settings are also available in the desktop menu.
+**Desktop:** Keep the backend running, then run `pnpm run desktop`. Set `ASSISTANT_SERVER_URL` or use the desktop connection menu to choose the backend address. `ASSISTANT_WEB_URL` remains a legacy fallback.
 
-On first launch, open Settings and enter the API protocol, Base URL, model ID and API key. Save and restart the backend, not the desktop app. Settings remain available without a model. Connections and keys are stored in backend SQLite; protect the data directory and backups as credentials. Environment-based configuration is also supported; see [Configuration](docs/CONFIGURATION.md).
+Administrators configure models on the server through an `LLM_MODELS_FILE` catalog or the existing single-model `LLM_*` environment variables. Desktop and browser clients only enter the backend address and select a model published by that server. Model protocols, upstream URLs, model IDs and API keys stay server-side. Restart the backend after saving a selection. Without a model, the workspace remains available for managing data. Legacy SQLite model settings remain a fallback; see [Configuration](docs/CONFIGURATION.md).
 
 The product does not offer simulated replies or a model-free fallback. Previous simulated conversations and legacy conversations without an explicit model remain stored, while real-model chat starts in a separate conversation.
 

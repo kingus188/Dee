@@ -12,7 +12,7 @@ const storage: CredentialStorage = {
 test("connection URLs only accept secure remote or exact loopback roots", () => {
   assert.equal(validateWebUrl("https://assistant.example/"), "https://assistant.example");
   for (const host of ["127.0.0.1", "localhost", "[::1]"]) assert.equal(validateWebUrl(`http://${host}:8080`), `http://${host}:8080`);
-  for (const value of ["http://example.com", "http://127.0.0.1.evil.test", "https://u:p@example.com", "https://example.com/#x", "https://example.com/?x", "https://example.com/path", "https://example.com/foo/..", "https://example.com/%2e", "https://example.com\\path", "file:///tmp/index.html"]) assert.throws(() => validateWebUrl(value), value);
+  for (const value of ["http://example.com", "http://127.0.0.1.evil.test", "https://u:p@example.com", "https://:p@example.com", "https://@example.com", "https://exam\nple.com", "https://example.com/#x", "https://example.com/?x", "https://example.com/path", "https://example.com/foo/..", "https://example.com/%2e", "https://example.com\\path", "file:///tmp/index.html"]) assert.throws(() => validateWebUrl(value), value);
 });
 
 test("stored connection excludes plaintext credentials and decrypts only encrypted fields", () => {

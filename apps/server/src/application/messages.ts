@@ -1,7 +1,7 @@
 import type { Conversation, EntryId } from "@earendil-works/pi-durable";
 import { AgentDoc, configure } from "@earendil-works/pi-durable";
 import { Index } from "@assistant/runtime";
-import { AttachmentError, buildUserContent, imageAt, parseAttachments } from "@assistant/features";
+import { AttachmentError, buildUserContent, imageAt, parseAttachmentsAsync } from "@assistant/features";
 import { HttpError } from "../errors.js";
 import type { AppContext } from "./context.js";
 import type { createConversations } from "./conversations.js";
@@ -10,7 +10,7 @@ export function createMessages({ harness, ctx, agentModel }: AppContext, { regis
 			const text = String(body.text ?? "").trim();
 			let files;
 			try {
-				files = parseAttachments(body.attachments);
+				files = await parseAttachmentsAsync(body.attachments);
 			} catch (error) {
 				if (error instanceof AttachmentError) throw new HttpError(400, error.message);
 				throw error;

@@ -58,7 +58,7 @@ for (const workspace of workspacePaths()) {
           if (workspace === "apps/web" || workspace === "packages/contracts") fail("浏览器协议边界禁止 Node 模块");
         } else if (!dependencies.has(name) && !(workspace === "apps/desktop" && name === "electron" && pkg.devDependencies?.electron)) fail("未声明依赖 " + specifier);
         if (name.startsWith("@assistant/") && specifier !== name) fail("只能使用包公开入口 " + specifier);
-        if (workspace === "apps/web" && !["react", "react-dom", "antd", "@ant-design/icons", "dayjs", "@tiptap/core", "@tiptap/extension-image", "@tiptap/react", "@tiptap/pm", "@tiptap/starter-kit", "@tiptap/markdown"].includes(name) && (name !== "@assistant/contracts" || !typeOnly)) fail("网页仅允许 React、Daylight 界面、Tiptap 编辑器和协议类型依赖");
+        if (workspace === "apps/web" && !name.startsWith("@tiptap/") && !["react", "react-dom", "antd", "@ant-design/icons", "dayjs", "katex", "lowlight"].includes(name) && (name !== "@assistant/contracts" || !typeOnly)) fail("网页仅允许 React、Daylight 界面、Tiptap 编辑器和协议类型依赖");
       }
     }
     function visit(node: ts.Node) {

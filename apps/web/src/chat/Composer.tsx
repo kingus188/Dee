@@ -93,7 +93,7 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
   }
   return <div className="input-box-wrapper" data-dragging={dragging} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) dismissMenu(true); }} onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); void addFiles(event.dataTransfer.files); }}>
     {menuVisible && <CommandMenu commands={suggestions} selected={selectedIndex} busy={busy} help={help && !draft.trim()} onSelect={command => { void submit(`/${command.name}`); textarea.current?.focus(); }} onClose={() => { dismissMenu(true); textarea.current?.focus(); }} />}
-    {dragging && <p role="status">松开以添加图片或文本文件</p>}
+    {dragging && <p role="status">松开以添加图片、PDF、DOCX 或文本文件</p>}
     {!!attachments.length && <div className="attachments-preview">{attachments.map((file, i) => <div className="pending-chip" key={i}>
       {file.previewUrl && <img className="pending-thumb" src={file.previewUrl} alt={file.name} />}
       <div className="pending-meta"><span className="pending-name">{file.name}</span><span className="pending-size">{formatFileSize(file.size)}</span></div>
@@ -117,7 +117,7 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
         <button type="button" className="btn-send" id="btn-send" aria-label={sending ? "正在发送" : "发送消息"} aria-busy={sending} disabled={sending || processing || (!draft.trim() && !attachments.length)} onClick={() => void submit()}><Icon name="send" /></button>
       </div>
     </div>
-    <input ref={fileInput} type="file" multiple className="file-input-hidden" accept="image/png,image/jpeg,image/webp,image/gif,text/*,.md,.json,.ts,.tsx,.py,.yaml,.yml,.csv,.log" onChange={event => { if (event.target.files) void addFiles(event.target.files); }} />
+    <input ref={fileInput} type="file" multiple className="file-input-hidden" accept="image/png,image/jpeg,image/webp,image/gif,text/*,.md,.json,.ts,.tsx,.py,.yaml,.yml,.csv,.log,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.docx" onChange={event => { if (event.target.files) void addFiles(event.target.files); }} />
     {!!view?.inbox && <span className="inbox-badge" role="status">收到，马上接着说</span>}
   </div>;
 }

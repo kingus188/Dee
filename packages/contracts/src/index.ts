@@ -9,3 +9,5 @@ export type * from "./daily-reports.js";
 export type * from "./mail.js";
 export type * from "./daylight.js";
 export type * from "./notifications.js";
+export type * from "./workspace.js";
+export type * from "./local-skills.js";

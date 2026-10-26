@@ -7,6 +7,8 @@ const TEXT_EXTENSIONS = new Set([
     'cs', 'rb', 'php', 'sh', 'zsh', 'bash', 'sql', 'toml', 'ini', 'conf', 'log', 'srt', 'vtt'
 ]);
 
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
 const SUPPORTED_IMAGE_MIMES = new Set([
     'image/png', 'image/jpeg', 'image/webp', 'image/gif'
 ]);
@@ -38,12 +40,28 @@ export async function processAttachmentFile(file: File): Promise<PendingAttachme
     const mime = String(file.type || '').toLowerCase().split(';')[0].trim();
     // 明确拒绝 SVG
     if (mime === 'image/svg+xml' || ext === 'svg') {
-        return { error: '暂不支持这种文件，目前支持图片和文本类文件' };
+        return { error: '暂不支持这种文件，目前支持图片、PDF、DOCX 和文本类文件' };
+    }
+    const documentMime = ext === 'pdf' || mime === 'application/pdf'
+        ? 'application/pdf'
+        : ext === 'docx' || mime === DOCX_MIME ? DOCX_MIME : undefined;
+    if (documentMime) {
+        if (file.size > 5 * 1024 * 1024) {
+            return { error: `文档「${rawName}」超过 5MB` };
+        }
+        const buffer = await file.arrayBuffer();
+        return {
+            kind: 'text',
+            name: rawName,
+            mimeType: documentMime,
+            size: file.size,
+            data: arrayBufferToBase64(buffer),
+        };
     }
     const isImage = SUPPORTED_IMAGE_MIMES.has(mime) || ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext);
     const isText = (mime.startsWith('text/') || TEXT_EXTENSIONS.has(ext));
     if (!isImage && !isText) {
-        return { error: '暂不支持这种文件，目前支持图片和文本类文件' };
+        return { error: '暂不支持这种文件，目前支持图片、PDF、DOCX 和文本类文件' };
     }
     if (isImage) {
         const isGif = mime === 'image/gif' || ext === 'gif';

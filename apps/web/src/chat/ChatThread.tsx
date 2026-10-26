@@ -3,6 +3,7 @@ import type { ConversationView, ViewEntry } from "@assistant/contracts";
 import { renderMarkdown } from "./markdown.js";
 import { extractLiveInfo } from "./live.js";
 import { chatTurns } from "./turns.js";
+import { describeModelError } from "./model-errors.js";
 import type { ChatTurn } from "./turns.js";
 import { activityLabel, toolActivities } from "./activities.js";
 import { formatFileSize } from "../ui/format.js";
@@ -32,33 +33,51 @@ function UserMessageBubble({ entry }: { entry: ViewEntry }) {
   </div>;
 }
 
-function TurnCard({ turn, live, busy }: { turn: ChatTurn; live?: ConversationView["live"]; busy: boolean }) {
+type ErrorActions = { onRetry?: (text: string) => void; onSettings?: () => void };
+
+function TurnCard({ turn, live, busy, onRetry, onSettings }: { turn: ChatTurn; live?: ConversationView["live"]; busy: boolean } & ErrorActions) {
   const info = extractLiveInfo(live);
   const activities = toolActivities(turn.entries, info?.runningTools ?? [], busy);
   const responses = turn.entries.filter(entry => entry.kind === "assistant" && entry.text && !entry.error);
   const intermediate = responses.slice(0, -1);
-  const hasError = turn.entries.some(entry => entry.error || entry.isError);
+  const errorIndex = turn.entries.findLastIndex(entry => !!entry.error);
+  const failed = errorIndex < 0 ? undefined : turn.entries[errorIndex];
+  const recovered = turn.entries.slice(errorIndex + 1).some(entry => entry.kind === "assistant" && entry.text && !entry.error);
+  const failure = !busy && !info?.text && !recovered ? failed : undefined;
+  const previousErrors = turn.entries.filter(entry => entry.error && entry !== failure);
+  const notice = failure?.error ? describeModelError(failure.error) : undefined;
+  const hasError = !!failure || turn.entries.some(entry => entry.isError);
   return <section className="chat-turn" data-turn-id={turn.id}>
     <UserMessageBubble entry={turn.user} />
-    {(activities.length > 0 || !!intermediate.length || !!info?.thinking) && <details className="turn-activities">
-      <summary><Icon name="chevron-right" /><span className="activity-count">{activities.length}</span><span>{busy ? "正在处理" : hasError ? "有步骤未完成" : "处理过程"}</span></summary>
+    {(activities.length > 0 || !!intermediate.length || !!previousErrors.length || !!info?.thinking) && <details className="turn-activities">
+      <summary><Icon name="chevron-right" /><span className="activity-count">{activities.length + previousErrors.length}</span><span>{busy ? "正在处理" : hasError ? "有步骤未完成" : "处理过程"}</span></summary>
       <div className="turn-activity-list">{activities.map(activity => <div className="turn-activity" key={activity.id}>
         <span className={`activity-status activity-${activity.status}`} aria-label={{ pending: "等待执行", completed: "已完成", error: "未完成", interrupted: "已停止", ended: "已结束，结果未确认", running: "正在执行" }[activity.status]}>{activity.status === "completed" ? <Icon name="check" /> : activity.status === "error" ? <Icon name="circle-alert" /> : activity.status === "interrupted" ? <Icon name="square" /> : activity.status === "ended" ? <Icon name="circle-help" /> : activity.status === "pending" ? <Icon name="clock-3" /> : <span className="activity-spinner" />}</span>
         <details><summary>{activityLabel(activity.name)}</summary><pre>{activity.text || (activity.status === "interrupted" ? "步骤已停止，尚无完成结果。" : activity.status === "ended" ? "步骤已结束，暂未收到结果。" : "等待执行结果。")}</pre></details>
       </div>)}</div>
       {intermediate.map(entry => <div className="turn-intermediate md" key={entry.id} dangerouslySetInnerHTML={{ __html: renderMarkdown(entry.text) }} />)}
+      {previousErrors.map(entry => <details className="model-error-details" key={entry.id}><summary>{describeModelError(entry.error!).title}</summary><pre>{entry.error}</pre></details>)}
       {info?.thinking && <pre className="turn-thinking">{info.thinking}</pre>}
     </details>}
-    {turn.entries.filter(entry => entry.error).map(entry => <div key={entry.id} className="error-system-card" role="alert"><p>模型调用失败：{entry.error}</p><small>可以稍后重发，或检查模型服务。</small></div>)}
+    {notice && failure && <div className="error-system-card model-error-notice" role="alert">
+      <Icon name="circle-alert" />
+      <div className="model-error-content"><p className="model-error-title">{notice.title}</p><p className="model-error-description">{notice.description}</p>
+        <div className="model-error-actions">
+          {!notice.settings && onRetry && turn.user.text && <button type="button" className="text-button" onClick={() => onRetry(turn.user.text)}><Icon name="rotate-ccw" />编辑后重试</button>}
+          {notice.settings && onSettings && <button type="button" className="text-button" onClick={onSettings}><Icon name="settings" />查看服务器模型</button>}
+        </div>
+        <details className="model-error-details"><summary>查看错误详情</summary><pre>{failure.error}</pre></details>
+      </div>
+    </div>}
     {!!responses.length && <div className="message-row assistant-row"><ResponseCard text={responses.at(-1)!.text} /></div>}
     {info?.text && <div className="message-row assistant-row"><ResponseCard text={info.text} streaming /></div>}
     {busy && !info?.text && <p className="turn-thinking turn-loading" role="status"><span className="activity-spinner" aria-hidden="true" />{info?.runningTools.length ? "正在执行…" : "思考中…"}</p>}
   </section>;
 }
 
-export const ChatThread = memo(function ChatThread({ view }: { view: ConversationView | null }) {
+export const ChatThread = memo(function ChatThread({ view, onRetry, onSettings }: { view: ConversationView | null } & ErrorActions) {
   const turns = chatTurns(view?.entries ?? []);
   const busy = !!view?.busy || !!Object.keys(view?.live ?? {}).length;
   if (!turns.length) return <div className="message-row assistant-row"><ResponseCard text={busy ? "思考中…" : "我在。今天想聊点什么？"} streaming={busy} /></div>;
-  return <>{turns.map((turn, index) => <TurnCard key={turn.id} turn={turn} live={index === turns.length - 1 ? view?.live : undefined} busy={index === turns.length - 1 && busy} />)}</>;
+  return <>{turns.map((turn, index) => <TurnCard key={turn.id} turn={turn} live={index === turns.length - 1 ? view?.live : undefined} busy={index === turns.length - 1 && busy} onRetry={index === turns.length - 1 ? onRetry : undefined} onSettings={onSettings} />)}</>;
 });

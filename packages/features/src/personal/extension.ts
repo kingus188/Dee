@@ -3,7 +3,7 @@ import { defineExtension, defineTool, section } from "@earendil-works/pi-durable
 import type { KnowledgeConfig } from "../knowledge/index.js";
 import { readKnowledge, searchKnowledge } from "../knowledge/index.js";
 import { detach, resultText } from "../results.js";
-import { MemoryDoc, SkillsDoc, proposeMemoryInTx, proposeSkillInTx, selectMemoryForPrompt } from "./service.js";
+import { MemoryDoc, SkillsDoc, proposeMemoryInTx, memoryProvenanceInTx, proposeSkillInTx, selectMemoryForPrompt } from "./service.js";
 function formatHit(hit: Awaited<ReturnType<typeof searchKnowledge>>["hits"][number]) {
 	const range = hit.line === hit.endLine ? String(hit.line) : `${hit.line}-${hit.endLine}`;
 	return [`- ${hit.path}:${range} [${hit.status}] ${hit.revision}`, hit.excerpt].join("\n");
@@ -19,7 +19,8 @@ return defineExtension({
 			description: "提交一条跨会话长期记忆候选。不会立即生效，必须等用户在对话卡片中批准。只提交稳定事实或偏好，不要提交整段聊天。",
 			parameters: Type.Object({ text: Type.String() }),
 			execute: async (args, api, context) => {
-				const item = await api.commit((tx) => proposeMemoryInTx(tx, {
+				const item = await api.commit(async (tx) => proposeMemoryInTx(tx, {
+                    provenance: await memoryProvenanceInTx(tx, api.conversationId),
 					text: args.text,
 					requestId: "tool:" + api.callId,
 					conversationId: api.conversationId,

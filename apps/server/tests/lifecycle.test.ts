@@ -5,11 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readConfig, startServer } from "../dist/index.js";
 
-test("API backend does not expose web assets", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pi-api-only-test-"));
+test("API backend serves the built UI while keeping private files inaccessible", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-backend-ui-test-"));
   const service = await startServer(readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: directory, PORT: "0", NOTIFY_MODE: "off", PI_OFFLINE: "1" }));
   try {
-    for (const path of ["/", "/index.html", "/app.js", "/style.css", "/assets/icon.png"]) {
+    for (const path of ["/", "/index.html", "/app.js", "/style.css"]) {
+      assert.equal((await fetch(service.origin + path)).status, 200, path);
+    }
+    for (const path of ["/api-client.js", "/settings/ModelSettings.js", "/app.js.map", "/.env"]) {
       assert.equal((await fetch(service.origin + path)).status, 404, path);
     }
     assert.equal((await fetch(service.origin + "/api/info")).status, 200);
@@ -26,8 +29,10 @@ test("API server authenticates, closes and reopens persisted data", async () => 
     assert.match(running.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
     assert.equal((await fetch(running.origin + "/api/info")).status, 401);
     const info = await (await fetch(running.origin + "/api/info", { headers })).json() as { boots: number };
+    assert.equal((await fetch(running.origin)).status, 401);
     const page = await fetch(running.origin, { headers });
-    assert.equal(page.status, 404);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get("content-type") ?? "", /text\/html/);
     assert.equal((await fetch(running.origin + "/api/crash", { method: "POST", headers })).status, 404);
     const origin = running.origin;
     await Promise.all([running.close(), running.close()]);

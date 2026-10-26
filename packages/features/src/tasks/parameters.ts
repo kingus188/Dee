@@ -1,9 +1,15 @@
+import { nextCalendarOccurrence, normalizeCalendar } from "./calendar.js";
 // 独立的任务参数校验和时间计算，不依赖模型与数据库。
-export function normalizeSchedule(input: { text?: unknown; minutesFromNow?: unknown; everyMinutes?: unknown } | null,  now = Date.now()) {
+export function normalizeSchedule(input: { text?: unknown; minutesFromNow?: unknown; everyMinutes?: unknown; calendar?: unknown } | null, now = Date.now()) {
   const text = String(input?.text ?? "").trim();
+  if (!text || text.length > 1000) throw new Error("任务内容必须是 1～1000 字");
+  if (input?.calendar !== undefined && input.calendar !== null) {
+    if (input.minutesFromNow !== undefined || (input.everyMinutes !== undefined && input.everyMinutes !== 0)) throw new Error("日历规则和分钟间隔不能同时指定");
+    const calendar = normalizeCalendar(input.calendar);
+    return { text, at: nextCalendarOccurrence(calendar, now), everyMinutes: 0, calendar };
+  }
   const delay = Number(input?.minutesFromNow);
   const repeat = Number(input?.everyMinutes ?? 0);
-  if (!text || text.length > 1000) throw new Error("任务内容必须是 1～1000 字");
   if (!Number.isFinite(delay) || delay < 0.25 || delay > 525600) throw new Error("首次执行时间必须在 0.25～525600 分钟内");
   if (!Number.isFinite(repeat) || repeat < 0 || (repeat > 0 && (repeat < 1 || repeat > 525600))) {
     throw new Error("重复间隔须为 0 或 1～525600 分钟");

@@ -11,16 +11,33 @@ import { createViews } from "./views.js";
 import { mailApi } from "../mail-api.js";
 import { daylightApi } from "../daylight-api.js";
 import { notificationApi } from "../notification-api.js";
+import { createWorkspace } from "./workspace.js";
+import { createDaylightExecution } from "./daylight-execution.js";
 
 // HTTP 与 WebSocket 共用用例和错误语义。
 export function createApi(context: AppContext) {
   const { harness, ctx, agentModel, config, modelLabel, startedAt, wechat } = context;
   const conversations = createConversations(context), views = createViews(context);
   const messages = createMessages(context, conversations), tasks = createManagement(context, views), personal = createPersonalService(context);
+  const workspace = createWorkspace(context, conversations, tasks);
+   const daylightExecution = createDaylightExecution(context, conversations, tasks);
   const { dailyReports } = context;
   async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}) {
     const path = url.pathname;
-    const daylightResult = await daylightApi(context.daylight, method, url, body);
+    if (method === "GET" && path === "/api/workspace/activities") return { status: 200, data: await workspace.activities() };
+    if (method === "GET" && path === "/api/workspace/mail") return { status: 200, data: workspace.mail() };
+    const executionPath = path.match(/^\/api\/daylight\/tasks\/([0-9a-f-]+)\/(execute|executions)$/i);
+     if (executionPath) {
+       try {
+         if (method === "GET" && executionPath[2] === "executions") return { status: 200, data: await daylightExecution.runs(executionPath[1]) };
+         if (method === "POST" && executionPath[2] === "execute") return { status: 202, data: await daylightExecution.start(executionPath[1], body) };
+       } catch (error) {
+         if (error instanceof HttpError) throw error;
+         if (error instanceof Error && /无效|任务已|requestId/.test(error.message)) throw new HttpError(/任务已/.test(error.message) ? 409 : 400, error.message);
+         throw error;
+       }
+     }
+     const daylightResult = await daylightApi(context.daylight, method, url, body);
     if (daylightResult) return daylightResult;
     const mailResult = mailApi(context.mail, method, url, body);
     if (mailResult) return await mailResult;
@@ -42,7 +59,7 @@ export function createApi(context: AppContext) {
     }
     const notesPath = path.match(/^\/api\/conversations\/(\d+)\/notes$/);
     // 纯数据会话入口与笔记不触发生成；其它模型任务仍须配置模型。
-    if (method === "POST" && path.startsWith("/api/conversations") && !notesPath && path !== "/api/conversations/direct" && !context.modelConfigured) throw new HttpError(409, "请先在设置中保存模型配置，再重启应用");
+    if (method === "POST" && path.startsWith("/api/conversations") && !notesPath && path !== "/api/conversations/direct" && !context.modelConfigured) throw new HttpError(409, "请在服务器配置模型，然后重启后端");
     if (method === "GET" && path === "/api/info") {
       const meta = await harness.snapshot(Meta, ctx);
       return { status: 200, data: { model: modelLabel, api: config.model.api, configured: context.modelConfigured, pid: process.pid, startedAt, boots: meta?.boots ?? 0 } };
@@ -97,6 +114,13 @@ export function createApi(context: AppContext) {
       await conversation.abort(ctx);
       return { status: 200, data: { ok: true } };
     }
+    const executionRuns = path.match(/^\/api\/conversations\/(\d+)\/(schedules|background)\/([0-9a-f-]+)\/runs$/);
+    if (method === "GET" && executionRuns) {
+      const conversation = await conversations.getConversation(Number(executionRuns[1])), snapshot = await tasks.get(conversation);
+      const items = executionRuns[2] === "schedules" ? snapshot.schedules : snapshot.background;
+      if (!items.some(item => item.id === executionRuns[3])) throw new HttpError(404, "任务不存在");
+      return { status: 200, data: { items: (snapshot.executions ?? []).filter(run => run.taskId === executionRuns[3] && run.kind === (executionRuns[2] === "schedules" ? "schedule" : "background")) } };
+    }
     const manage = path.match(/^\/api\/conversations\/(\d+)\/(management|schedules|background|reminders)(?:\/([0-9a-f-]+))?(?:\/(pause|resume|cancel|stop|edit))?$/);
     if (manage) {
       const conversation = await conversations.getConversation(Number(manage[1]));
@@ -114,7 +138,7 @@ export function createApi(context: AppContext) {
           if (resource === "background" && id && action === "stop") return { status: 200, data: { item: await tasks.stopBackground(conversation, id) } };
         } catch (error) {
           if (error instanceof HttpError) throw error;
-          if (error instanceof Error && /任务内容|首次执行|重复间隔|requestId|计划任务不存在|当前状态|后台任务说明|提醒内容|提醒时间/.test(error.message)) throw new HttpError(400, error.message);
+          if (error instanceof Error && /任务内容|首次执行|重复间隔|requestId|计划任务不存在|当前状态|后台任务说明|提醒内容|提醒时间|日历|星期|时区|执行时间|关联待办/.test(error.message)) throw new HttpError(400, error.message);
           throw error;
         }
       }

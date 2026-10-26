@@ -80,3 +80,15 @@
   .chat-column[data-view="chat"] { --chat-background: oklch(0.145 0.015 270); --chat-foreground: oklch(0.95 0.01 270); }
 }
 @media (prefers-reduced-motion: reduce) { .turn-activities > summary .icon, .note-summary > summary > .icon:last-child { transition: none; } }
+
+.model-error-notice { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--chat-soft); font-size: 13px; line-height: 1.65; }
+.model-error-notice > .icon { width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0; color: var(--text-muted); }
+.model-error-content { min-width: 0; flex: 1; }
+.model-error-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-main); }
+.model-error-description { margin: 4px 0 0; color: var(--text-muted); overflow-wrap: anywhere; }
+.model-error-actions { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; }
+.model-error-actions:empty { display: none; }
+.model-error-actions .text-button { min-height: 40px; font-size: 13px; }
+.model-error-details { color: var(--text-muted); font-size: 12px; min-width: 0; }
+.model-error-details summary { cursor: pointer; padding: 8px 0; min-height: 36px; }
+.model-error-details pre { margin: 0; padding: 12px; border-radius: 8px; background: var(--chat-background); white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: 180px; font-size: 12px; }

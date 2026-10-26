@@ -13,6 +13,7 @@ import ColorPicker from '../../components/ColorPicker.js'
 import MarkdownEditor from '../../components/MarkdownEditor.js'
 import { descriptionTooLarge } from '../../domain/markdown.js'
 import { useDaylightContainer } from '../../WorkspaceContainer.js'
+import { TaskExecutionPanel } from './TaskExecutionPanel.js'
 
 export default function TaskEditor({
   task,
@@ -102,7 +103,7 @@ export default function TaskEditor({
               <span>备注</span>
               <MarkdownEditor
                 value={draft.description}
-                disabled={locked}
+                disabled={busy}
                 onChange={(value) => update('description', value)}
                 onPendingChange={setImagePending}
               />
@@ -258,6 +259,7 @@ export default function TaskEditor({
               ))}
             </div>
           </fieldset>
+          {existing && <TaskExecutionPanel taskId={task.id} disabled={locked} />}
         </div>
         {error && (
           <p className="form-error" role="alert">

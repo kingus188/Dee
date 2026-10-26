@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
@@ -47,7 +47,7 @@ function channel(socket: WebSocket) {
 
 test("真实 WebSocket 完成发送、附件、去重、重连、任务、记忆与停止，关闭服务释放连接", { timeout: 40000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-ws-"));
-  const server = await startServer(readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: dir, PORT: "0", NOTIFY_MODE: "off" }));
+  const server = await startServer(readConfig({ NODE_ENV: "test", PI_OFFLINE: "1", LLM_API: "faux", DATA_DIR: dir, PORT: "0", NOTIFY_MODE: "off" }));
   const sockets: WebSocket[] = [];
   try {
     let socket = await open(server.origin); sockets.push(socket);
@@ -77,8 +77,12 @@ test("真实 WebSocket 完成发送、附件、去重、重连、任务、记忆
     assert.equal(settings.status, 200);
     assert.equal(Object.hasOwn(settings.data as object, "apiKey"), false);
     const savedSettings = await rpc.request("/api/settings/model", { provider: "openai-completions", baseUrl: "http://127.0.0.1:1/v1", model: "test-model", apiKey: "socket-test-only-key" });
-    assert.equal(savedSettings.status, 200);
+    assert.equal(savedSettings.status, 400);
     assert.equal(JSON.stringify(savedSettings).includes("socket-test-only-key"), false);
+    assert.deepEqual((await rpc.request("/api/settings/model")).data, settings.data);
+    const unchanged = await rpc.request("/api/settings/model", { modelId: "faux" });
+    assert.equal(unchanged.status, 200);
+    assert.deepEqual(unchanged.data, settings.data);
     socket.close(); await once(socket, "close");
     socket = await open(server.origin); sockets.push(socket); rpc = channel(socket);
     assert.equal((await rpc.request(`/api/conversations/${id}/events`)).status, 200);
@@ -91,9 +95,46 @@ test("真实 WebSocket 完成发送、附件、去重、重连、任务、记忆
   } finally { for (const socket of sockets) socket.terminate(); await server.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
+test("WebSocket 模型设置仅接受目录 id，目录连接和 Key 均不出站，保存需重启后端", { timeout: 20000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-ws-model-catalog-"));
+  const file = join(directory, "models.json");
+  await writeFile(file, JSON.stringify([
+    { id: "fast", name: "快速", provider: "openai-completions", baseUrl: "https://private-provider.example/v1", model: "private-upstream-fast", apiKey: "ws-fast-test-key" },
+    { id: "quality", name: "精准", provider: "anthropic-messages", baseUrl: "https://other-private.example/v1", model: "private-upstream-quality", apiKey: "ws-quality-test-key" },
+  ]));
+  const service = await startServer(readConfig({ NODE_ENV: "test", PI_OFFLINE: "1", DATA_DIR: directory, PORT: "0", NOTIFY_MODE: "off", LLM_MODELS_FILE: file }));
+  let socket: WebSocket | undefined;
+  try {
+    socket = await open(service.origin);
+    const rpc = channel(socket);
+    const response = await rpc.request("/api/settings/model");
+    assert.equal(response.status, 200);
+    const before = { models: [{ id: "fast", name: "快速" }, { id: "quality", name: "精准" }], selectedModel: "fast", activeModel: "fast", restartRequired: false };
+    assert.deepEqual(response.data, before);
+    for (const input of [
+      { provider: "openai-completions", baseUrl: "https://injected.example/v1", model: "injected", apiKey: "ws-injected-test-key" },
+      { modelId: "quality", provider: "anthropic-messages" }, { modelId: "quality", baseUrl: "https://injected.example/v1" },
+      { modelId: "quality", model: "injected" }, { modelId: "quality", apiKey: "ws-injected-test-key" },
+      { modelId: "missing" }, { modelId: null }, { modelId: "quality", extra: true }, {},
+    ]) {
+      const invalid = await rpc.request("/api/settings/model", input);
+      assert.equal(invalid.status, 400);
+      assert.equal(JSON.stringify(invalid).includes("ws-injected-test-key"), false);
+    }
+    assert.deepEqual((await rpc.request("/api/settings/model")).data, before);
+    const selected = await rpc.request("/api/settings/model", { modelId: "quality" });
+    assert.equal(selected.status, 200);
+    assert.deepEqual(selected.data, { ...before, selectedModel: "quality", restartRequired: true });
+    assert.equal(service.modelLabel, "private-upstream-fast");
+    for (const text of [JSON.stringify(response), JSON.stringify(selected)]) {
+      for (const privateValue of ["openai-completions", "anthropic-messages", "private-provider.example", "other-private.example", "private-upstream", "ws-fast-test-key", "ws-quality-test-key"]) assert.equal(text.includes(privateValue), false);
+    }
+  } finally { socket?.terminate(); await service.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test("WebSocket 握手验证 Basic Auth 与 Origin，非法 JSON 和超大帧被拒绝", { timeout: 20000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-ws-auth-"));
-  const server = await startServer(readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: dir, PORT: "0", DEMO_PASSWORD: "test-password", NOTIFY_MODE: "off" }), "127.0.0.1");
+  const server = await startServer(readConfig({ NODE_ENV: "test", PI_OFFLINE: "1", LLM_API: "faux", DATA_DIR: dir, PORT: "0", DEMO_PASSWORD: "test-password", NOTIFY_MODE: "off" }), "127.0.0.1");
   const headers = { Authorization: "Basic " + Buffer.from("demo:test-password").toString("base64"), Origin: server.origin };
   const sockets: WebSocket[] = [];
   async function rejected(extra: Record<string, string>) {

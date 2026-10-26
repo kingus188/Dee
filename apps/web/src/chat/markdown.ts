@@ -17,7 +17,16 @@ function renderInlineMarkdown(text: string) {
     return out.replace(/\u0000(\d+)\u0000/g, (_, i) => '<code>' + codes[Number(i)] + '</code>');
 }
 
-function renderMarkdown(src: string) {
+export interface MarkdownHeading { id: string; level: number; text: string; line: number }
+
+function renderMarkdown(src: string) { return render(src, 2); }
+
+export function renderDocumentMarkdown(src: string) {
+    const headings: MarkdownHeading[] = [];
+    return { html: render(src, 0, headings), headings };
+}
+
+function render(src: string, headingOffset: number, headings?: MarkdownHeading[]) {
     const lines = String(src || '').replace(/\r\n?/g, '\n').split('\n');
     const html = [];
     let para: string[] = [];
@@ -44,8 +53,10 @@ function renderMarkdown(src: string) {
         const heading = line.match(/^(#{1,6})\s+(.*)$/);
         if (heading) {
             flushPara();
-            const level = Math.min(6, heading[1].length + 2);
-            html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+            const level = Math.min(6, heading[1].length + headingOffset);
+            const id = headings ? `note-heading-${headings.length}` : "";
+            headings?.push({ id, level, text: heading[2].replace(/\*\*|__|`|~~/g, ''), line: i });
+            html.push(`<h${level}${id ? ` id="${id}" tabindex="-1"` : ""}>${renderInlineMarkdown(heading[2])}</h${level}>`);
             continue;
         }
         if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {

@@ -1,15 +1,18 @@
 import { createServer } from "node:http";
 import type { AppContext } from "../application/context.js";
 import { HttpError } from "../errors.js";
-import { authorized, secureMatch } from "./auth.js";
+import { secureMatch } from "./auth.js";
 import { readBody, sendJson } from "./io.js";
 import { createRouter } from "./router.js";
 import { createApi } from "../application/api.js";
 import { attachWebSocket } from "./socket.js";
+import { createBrowserSessions } from "./browser-sessions.js";
+import { serveWebStatic } from "./static.js";
 export function createHttpServer(context: AppContext) {
  const { wechat, config, redact, exitIfFatal } = context;
  const api = createApi(context);
  const route = createRouter(context, api);
+ const browserSessions = createBrowserSessions(config.password);
  const server = createServer(async (req, res) => {
   // 微信 webhook 独立令牌；绝不绕过普通网页/API 的 Basic Auth。
   if (req.method === "POST" && req.url?.split("?")[0] === "/channels/wechat/incoming") {
@@ -27,11 +30,17 @@ export function createHttpServer(context: AppContext) {
       return sendJson(res, isInputError ? 400 : 503, { error: isInputError ? error.message : "微信消息暂未接收，请重试" });
     }
   }
-	if (!authorized(req, config.password)) {
+	const authentication = browserSessions.authenticate(req);
+	if (!authentication) {
 		res.writeHead(401, { "www-authenticate": 'Basic realm="pi-durable-assistant", charset="UTF-8"' });
 		return res.end("需要口令");
 	}
+ if (authentication === "basic" && req.method === "GET" && req.url?.split("?")[0] === "/api/info") {
+   res.setHeader("set-cookie", browserSessions.issueCookie());
+   res.setHeader("cache-control", "no-store");
+ }
 	try {
+		if (await serveWebStatic(req, res)) return;
 		await route(req, res);
 	} catch (error) {
 		const status = error instanceof HttpError ? error.status : 500;
@@ -41,5 +50,5 @@ export function createHttpServer(context: AppContext) {
 		exitIfFatal(error);
 	}
 });
- return Object.assign(server, { closeSockets: attachWebSocket(server, context, api) });
+ return Object.assign(server, { closeSockets: attachWebSocket(server, context, api, req => !!browserSessions.authenticate(req)) });
 }

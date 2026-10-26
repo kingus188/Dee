@@ -157,3 +157,66 @@ PostgreSQL 迁移验收（2026-10-21）：上述服务器实例已切换到独�
 2026-10-22 微信漏推修复验收：确认前一天迁移遗漏 Teams 配置目录，服务端没有启动 Teams 采集与转发。补齐配置与微信状态只读挂载、迁移 2020 条 Teams 历史记录及同步水位、对齐容器账号后，真实采集恢复，补采当天 37 条消息；其中 2 条重要提醒分别在北京时间 15:27:55、15:29:34 标记 `sent`，每条发送尝试 1 次，最终 `pending=0`、`blocked=0`。3 个无读取权限的 Teams 会议聊天仍返回 Graph 403，按原有逻辑跳过。修复前数据库与 Compose 配置均已备份；这次验收证明采集及发送接口成功，不代表微信用户已读，也不替代长期稳定性验收。
 
 配置、模型、SSE、微信、权限和附件问题见 [故障排查](TROUBLESHOOTING.md)。此项目不包含多用户账户、细粒度权限、自动升级回滚或统一成本上限。公网使用前需自行评估隐私和供应商 API 账单风险。
+
+## 7. 直接使用 cpolar 公网访问（2026-10-26）
+
+当前公网入口：**<https://565784c1.r21.vip.cpolar.cn>**。直接使用 cpolar 的 HTTPS 域名，不需要自有域名或 DNS 配置。该地址为随机分配，重启或重新分配后可能变化，不应当作固定域名。
+
+首次打开主页时，浏览器会要求登录：用户名为 `demo`，密码沿用现有服务器访问口令。本次没有更改口令，也没有关闭鉴权。需要新设备登录时使用原口令，不要把口令或会话 Cookie 发到聊天、URL 或仓库中。
+
+### 接入方式与认证
+
+新增的独立网关 `pi-durable-public-gateway` 只发布 `127.0.0.1:3301`，通过已有 `pi-durable-verify_default` 网络转发到原 Web；cpolar 在外部终止 HTTPS。原内网 `3300/3443` 入口继续保留，API、PostgreSQL 和微信桥未增加公网端口。
+
+本次现场确认：cpolar `3.3.12` 能透传普通 HTTP 的 Authorization，但公网 WebSocket Upgrade 会丢失该头；Cookie 可以正常保留。因此网关在返回首页前通过 Nginx `auth_request` 请求 `/api/info`，验证已有 Basic 凭据。验证成功后，后端签发签名会话 Cookie，网关将它加入首页响应，浏览器随后自动用于同源 WSS。没有向所有请求注入固定凭据，也没有修改 Origin/Fetch Metadata 来绕过保护。
+
+会话 Cookie 使用 `__Host-pi-durable-session`，设置 `Secure`、`HttpOnly`、`SameSite=Strict`、`Path=/`，不含口令，有效期一小时。签名密钥由后端每个 HTTP server 实例随机生成，重启后旧 Cookie 失效；刷新主页可使用浏览器缓存的 Basic 凭据重新建立会话，必要时重新输入口令。过期检查发生于 HTTP 请求及新 WS 握手，已有 WS 不会仅因 Cookie 到期被强制切断。非浏览器 API 与桌面客户端仍可使用现有 Basic Auth；显式错误 Authorization 不会被有效 Cookie 掩盖。微信入站仍使用原有独立 Bearer 令牌。
+
+### 配置与运行版本
+
+服务器部署根目录为 `/home/zhf/pi-durable-verify-EvtOlEt6`。仓库中的对应配置位于 [deploy/cpolar](../deploy/cpolar/)：
+
+| 文件或服务 | 用途 |
+| --- | --- |
+| `compose.cpolar.yaml` | 独立 `pi-durable-public` 项目，只管理公网网关，不管理业务容器 |
+| `nginx.cpolar.conf` | 首页认证、签名 Cookie 引导、Host/Origin 透传及 WebSocket/流式代理 |
+| `cpolar-pi-durable.service` | 独立 cpolar 进程，不重启 ai-tutor 的 `cpolar.service` |
+| `compose.auth.yaml` | 只覆盖原项目 `api` 镜像的认证补丁，不能独立运行 |
+| `/usr/local/etc/cpolar/pi-durable.yml` | 服务器私有认证/隧道配置，root 所有、`0600`，不得提交 |
+| `updates/cpolar-session-20261026-01/deployment.json` | 部署前的精确镜像、容器、挂载和 13 个 Compose 覆盖文件清单，不含环境值 |
+
+cpolar 单元使用动态用户与 `LoadCredential`，通过 `%d/cpolar.yml` 读取管理器提供的只读凭据副本；仅在本机开放 `4041` 检查入口，隧道设置 `inspect: false`。管理页 `9200` 属于原 cpolar 进程，不代表此独立进程的在线隧道；新地址查看本服务日志或 cpolar 官网后台。原 ai-tutor 的进程和公网地址均未更换。
+
+本次 API 由 `pi-durable-verify-api:notes-typora-20261023-01` 选择性更新为 `pi-durable-verify-api:cpolar-session-20261026-01`，只加入会话模块及 HTTP/WS 认证调用，不发布工作区其他未提交变化。构建输入保存在服务器上述更新目录。Web 保持 `pi-durable-verify-web:todo-notifications-20261026-01`，未重建；PostgreSQL 也未重建。API 原有环境值、模型配置和持久挂载均保持一致。由于微信桥使用 `network_mode: service:api`，API 和微信桥一起重建，并验证微信桥已指向新的 API 网络命名空间；未更换其镜像或状态卷。
+
+### 运维与回滚
+
+以下检查不打印口令或 Cookie：
+
+```bash
+ssh zhf@192.168.31.5
+cd /home/zhf/pi-durable-verify-EvtOlEt6
+docker compose -f compose.cpolar.yaml ps
+docker compose -f compose.cpolar.yaml exec -T gateway nginx -t
+systemctl is-active cpolar-pi-durable
+systemctl is-enabled cpolar-pi-durable
+sudo journalctl -u cpolar-pi-durable -g 'Tunnel established at' --no-pager -n 10
+```
+
+最后一项含历史地址，仍需实际访问确认。只重载公网网关时：
+
+```bash
+docker compose -f compose.cpolar.yaml up -d --no-deps --force-recreate --wait gateway
+```
+
+认证补丁必须叠加在 `deployment.json` 记录的原部署覆盖文件之后，再加更新目录中的 `compose.auth.yaml`。不要只用早期 `compose.verify.yaml` 重建整个项目，它与实际运行镜像和环境不一致。API 更新时须一并处理共享网络的微信桥，不能只替换 API 后留下旧命名空间。
+
+需要回滚认证补丁时，先停止并禁用本次公网 cpolar 单元，再按清单恢复原 API 镜像及微信桥，保留所有数据卷；旧版本没有 Cookie WS 鉴权，不能在回滚后继续将此公网入口当作可用服务。禁止 `down -v`，也不要用旧 SQLite 文件覆盖当前 PostgreSQL 数据。本次保留了原镜像和回滚清单，未执行生产回滚或灾难恢复演练。
+
+### 验证范围
+
+本地使用新建、独立 PostgreSQL 与临时 SQLite 数据通过 26 项认证/会话/WebSocket/笔记边界检查；实际认证补丁镜像也用独立数据验证了 HTTP、Cookie 和 WS。测试没有使用生产数据库。
+
+公网已验证：首页匿名 401 并带 Basic 挑战，正确原口令返回 200 并建立受保护会话；Cookie API 返回 200，篡改 Cookie 返回 401，跨源和缺少 Origin 的写请求均返回 403。真实 Chromium 在 HTTPS 安全上下文完成原口令登录、主页/接口读取与 WSS 只读 `/api/info` 请求，均返回 200，网页 JavaScript 无法读取 HttpOnly Cookie。验收没有发送模型问题、创建提醒或发送微信/Teams 消息，未通过首页执行应用 JS 自动创建对话。长时间连接和实际业务使用仍需正常运营观察。
+
+额外的 WSS 检查在同一连接上间隔 33 秒发送两次只读 `/api/info` 请求，均返回 200，实际连接持续 34.675 秒；这验证了跨两个后端心跳周期后仍可交互，不依赖代理是否向浏览器暴露 ping 帧。公网 HTTP 地址返回 404 且无口令挑战，仅使用 HTTPS 登录。

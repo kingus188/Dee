@@ -1,11 +1,10 @@
-import { type RefObject } from 'react'
 import {
   AppstoreOutlined,
   SunOutlined,
   CalendarOutlined,
   CheckCircleOutlined,
+  FolderOutlined,
   SettingOutlined,
-  SearchOutlined,
   PlusOutlined,
 } from '@ant-design/icons'
 import { localDate, type Snapshot } from '../../domain/todo.js'
@@ -13,139 +12,42 @@ import { localDate, type Snapshot } from '../../domain/todo.js'
 interface Props {
   data: Snapshot
   scope: string
-  sidebarOpen: boolean
-  query: string
   disabled: boolean
-  searchRef: RefObject<HTMLInputElement | null>
   navigate: (scope: string) => void
-  setQuery: (query: string) => void
   createProject: () => void
   openSettings: () => Promise<void>
-  onClose: () => void
 }
 
-export default function Sidebar({
-  data,
-  scope,
-  sidebarOpen,
-  query,
-  disabled,
-  searchRef,
-  navigate,
-  setQuery,
-  createProject,
-  openSettings,
-  onClose,
-}: Props) {
+/** Local views stay in one row, leaving the main workspace for task content. */
+export default function TaskNavigation({ data, scope, disabled, navigate, createProject, openSettings }: Props) {
+  const views = [
+    { id: 'today', label: '今天', icon: <SunOutlined />, count: data.tasks.filter((task) => task.dueDate === localDate() && task.status !== 'done').length },
+    { id: 'all', label: '全部', icon: <AppstoreOutlined />, count: data.tasks.length },
+    { id: 'completed', label: '已完成', icon: <CheckCircleOutlined />, count: data.tasks.filter((task) => task.status === 'done').length },
+    { id: 'calendar', label: '日历', icon: <CalendarOutlined />, count: undefined },
+  ]
+  const project = data.projects.find((item) => item.id === scope)
   return (
-    <>
-      {sidebarOpen && (
-        <button
-          className="sidebar-scrim"
-          aria-label="关闭导航"
-          onClick={() => onClose()}
-        />
-      )}
-      <aside className={`sidebar ${sidebarOpen ? 'is-open' : ''}`} aria-label="待办导航">
-        <h2 className="sidebar-heading">待办</h2>
-        <label className="search-box">
-          <SearchOutlined />
-          <input
-            ref={searchRef}
-            aria-label="搜索待办"
-            placeholder="搜索待办…"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <kbd>⌘ K</kbd>
+    <div className="task-navigation-row">
+      <nav className="task-scope-tabs" aria-label="待办视图">
+        {views.map((item) => (
+          <button key={item.id} aria-current={scope === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}>
+            {item.icon}<span>{item.label}</span>
+            {item.count !== undefined && <small>{item.count}</small>}
+          </button>
+        ))}
+      </nav>
+      <div className="task-project-tools">
+        <label className={`task-project-select ${project ? 'is-selected' : ''}`}>
+          <FolderOutlined />
+          <select aria-label="选择项目" value={project?.id ?? ''} disabled={disabled || !data.projects.length} onChange={(event) => navigate(event.target.value)}>
+            <option value="" disabled>按项目查看</option>
+            {data.projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
         </label>
-        <div className="sidebar-section-title">视图</div>
-        <button
-          className={`nav-item ${scope === 'all' ? 'selected' : ''}`}
-          onClick={() => navigate('all')}
-        >
-          <AppstoreOutlined />
-          <span>全部待办</span>
-          <small>{data.tasks.length}</small>
-        </button>
-        <button
-          className={`nav-item ${scope === 'today' ? 'selected' : ''}`}
-          onClick={() => navigate('today')}
-        >
-          <SunOutlined />
-          <span>今天</span>
-          <small>
-            {
-              data.tasks.filter(
-                (task) =>
-                  task.dueDate === localDate() && task.status !== 'done',
-              ).length
-            }
-          </small>
-        </button>
-        <button
-          className={`nav-item calendar-nav ${scope === 'calendar' ? 'selected' : ''}`}
-          onClick={() => navigate('calendar')}
-        >
-          <CalendarOutlined />
-          <span>日历</span>
-        </button>
-        <button
-          className={`nav-item ${scope === 'completed' ? 'selected' : ''}`}
-          onClick={() => navigate('completed')}
-        >
-          <CheckCircleOutlined />
-          <span>已完成</span>
-          <small>
-            {data.tasks.filter((task) => task.status === 'done').length}
-          </small>
-        </button>
-        <div className="sidebar-section-title project-heading">
-          <span>
-            我的项目 <small>{data.projects.length}</small>
-          </span>
-        </div>
-        <div className="project-navigation">
-          {data.projects.map((project) => (
-            <button
-              className={`nav-item project-item ${scope === project.id ? 'selected' : ''}`}
-              key={project.id}
-              onClick={() => navigate(project.id)}
-            >
-              <i className={`project-dot ${project.color}`} />
-              <span>{project.name}</span>
-              <small>
-                {
-                  data.tasks.filter(
-                    (task) =>
-                      task.projectId === project.id && task.status !== 'done',
-                  ).length
-                }
-              </small>
-            </button>
-          ))}
-          <button
-            className="nav-item add-project"
-            onClick={createProject}
-            disabled={disabled}
-          >
-            <PlusOutlined />
-            <span>新建项目</span>
-          </button>
-        </div>
-        <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => void openSettings()}>
-            <SettingOutlined />
-            <span>设置与存储</span>
-          </button>
-          <div className="storage-status">
-            <i />
-            <span>
-              服务端持久存储
-            </span>
-          </div>
-        </div>
-      </aside>
-    </>
+        <button className="icon-button" aria-label="新建项目" title="新建项目" onClick={createProject} disabled={disabled}><PlusOutlined /></button>
+        <button className="icon-button" aria-label="设置与存储" title="设置与存储" onClick={() => void openSettings()}><SettingOutlined /></button>
+      </div>
+    </div>
   )
 }

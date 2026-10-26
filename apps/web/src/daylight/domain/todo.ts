@@ -52,7 +52,9 @@ export function selectTasks(
         scope === 'all' ||
         (scope === 'today'
           ? task.dueDate === today && task.status !== 'done'
-          : scope === 'completed'
+          : scope === 'overdue'
+            ? isOverdue(task, today)
+            : scope === 'completed'
             ? task.status === 'done'
             : task.projectId === scope)
       return (

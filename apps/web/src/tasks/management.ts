@@ -16,7 +16,7 @@ export function managementCards(data: Management, conversationId: string): Conve
       key: "schedule:" + item.id, group: "tasks", title: "计划任务", text: item.text, status,
       tone: item.status === "failed" ? "error" : item.status === "completed" ? "done" : undefined,
       meta: [item.status === "active" && item.nextAt ? "下次执行：" + fmt(item.nextAt) : item.status === "paused" ? "暂停期间不会执行" : status,
-        item.everyMinutes ? `每隔 ${item.everyMinutes} 分钟重复` : "仅执行一次", `已执行 ${item.runs} 次`].join(" · "), actions,
+        item.calendar ? `${item.calendar.kind === "daily" ? "每天" : item.calendar.kind === "weekly" ? "每周 " + item.calendar.weekdays.map(day => ["", "一", "二", "三", "四", "五", "六", "日"][day]).join("、") : "每月 " + item.calendar.monthDay + " 日"} ${item.calendar.time} · ${item.calendar.timeZone}` : item.everyMinutes ? `每隔 ${item.everyMinutes} 分钟重复` : "仅执行一次", `已触发 ${item.runs} 次`].join(" · "), actions,
     });
   }
   for (const item of data.reminders) {

@@ -125,12 +125,13 @@ test("菜单直接展示个人数据，切换分类不显示对话且不发送�
   });
   const { dom } = await mount(t, <App />);
   const document = dom.window.document;
-  for (const [label, text, excluded] of [["长期记忆", "每周五整理项目", "项目复盘"], ["我的技能", "项目复盘", "每周五整理项目"]]) {
+  for (const [label, text, excluded] of [["长期记忆", "每周五整理项目", "项目复盘"], ["本机技能", "这台电脑的技能", "每周五整理项目"]]) {
     await act(async () => { document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click(); });
     assert.equal(document.getElementById("workspace")!.dataset.view, "data");
     assert.equal(document.querySelector(".data-panel h1")!.textContent, label);
-    const visiblePage = [...document.querySelectorAll<HTMLElement>(".workspace-editor-layout")].find(element => !element.parentElement!.hidden)!;
+    const visiblePage = [...document.querySelectorAll<HTMLElement>(".workspace-content-page")].find(element => !element.parentElement!.hidden)!;
     assert.match(visiblePage.textContent!, new RegExp(text));
+    assert.equal(visiblePage.querySelector(".markdown-editor"), null);
     assert.doesNotMatch(visiblePage.textContent!, new RegExp(excluded));
     assert.equal(document.getElementById("message-history"), null);
     assert.equal(document.querySelector(`[aria-label="${label}"]`)!.getAttribute("aria-current"), "page");
@@ -140,9 +141,9 @@ test("菜单直接展示个人数据，切换分类不显示对话且不发送�
   assert.ok(document.getElementById("message-history"));
   assert.equal(document.querySelector(".data-panel"), null);
   await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="首页"]')!.click(); });
-  await act(async () => { document.querySelector<HTMLButtonElement>(".prompt-chip")!.click(); });
-  assert.match(document.querySelector<HTMLTextAreaElement>("#chat-textarea")!.value, /待办清单/);
-  assert.equal(document.getElementById("workspace")!.dataset.view, "home");
+    await act(async () => { document.querySelector<HTMLButtonElement>(".today-shortcut")!.click(); });
+  assert.match(document.querySelector<HTMLTextAreaElement>("#chat-textarea")!.value, /Daylight 待办/);
+  assert.equal(document.getElementById("workspace")!.dataset.view, "chat");
 });
 
 test("状态浮层在外部点击、焦点移出、Escape 和切换页面时关闭，内部操作不误关", async t => {
@@ -163,7 +164,7 @@ test("状态浮层在外部点击、焦点移出、Escape 和切换页面时关�
   await act(async () => { document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   assert.equal(service.open, false); assert.equal(document.activeElement, summary);
   await open();
-  await act(async () => { document.querySelector("textarea")!.focus(); });
+  await act(async () => { document.querySelector<HTMLAnchorElement>('[aria-label="首页"]')!.focus(); });
   assert.equal(service.open, false);
   await open();
   await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="继续对话"]')!.click(); });

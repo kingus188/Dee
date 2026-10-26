@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { NotificationConfig } from "@assistant/features";
 import type { NotificationRecord, NotificationStatus } from "@assistant/contracts";
+import { createNotificationPreferences } from "./notification-preferences.js";
+import { nextNotificationAt } from "./notification-quiet-hours.js";
 
 const delays = [15000, 60000, 300000, 900000];
 
@@ -16,6 +18,7 @@ function retryAfterAt(value: string | null, now: number): number {
 
 export function openNotificationOutbox(dir: string, config: NotificationConfig, send: typeof fetch = fetch, now = Date.now) {
   const db = new DatabaseSync(join(dir, "agent.sqlite"));
+  let preferences: ReturnType<typeof createNotificationPreferences>;
   try {
     db.exec(`PRAGMA busy_timeout = 5000;
       CREATE TABLE IF NOT EXISTS notification_outbox (
@@ -24,6 +27,7 @@ export function openNotificationOutbox(dir: string, config: NotificationConfig, 
         next_at INTEGER NOT NULL, created_at INTEGER NOT NULL, finished_at INTEGER,
         last_error TEXT, PRIMARY KEY(target, id));
       CREATE INDEX IF NOT EXISTS notification_outbox_due ON notification_outbox(target, status, next_at);`);
+    preferences = createNotificationPreferences(db);
   } catch (error) { db.close(); throw error; }
   // Bind queued messages to the configured destination without persisting its credentials.
   const target = createHash("sha256").update(JSON.stringify([config.url, config.kind || "generic"])).digest("hex");
@@ -39,6 +43,8 @@ export function openNotificationOutbox(dir: string, config: NotificationConfig, 
   async function drain() {
     if (stopped || !config.url || config.mode === "off") return;
     for (let count = 0; count < 20 && !stopped; count++) {
+      const at = now();
+      if (nextNotificationAt(preferences.get().quietHours, at) > at) return;
       const row = db.prepare("SELECT id, body, attempts FROM notification_outbox WHERE target = ? AND status = 'pending' AND next_at <= ? ORDER BY next_at, id LIMIT 1").get(target, now());
       if (!row) return;
       const id = String(row.id), attempts = Number(row.attempts);
@@ -85,8 +91,12 @@ export function openNotificationOutbox(dir: string, config: NotificationConfig, 
   function list(status?: NotificationStatus): NotificationRecord[] {
     const fields = "SELECT id, status, attempts, next_at AS nextAt, created_at AS createdAt, finished_at AS finishedAt, last_error AS lastError FROM notification_outbox WHERE target = ?";
     const order = " ORDER BY created_at DESC, id LIMIT 100";
-    return (status ? db.prepare(fields + " AND status = ?" + order).all(target, status)
+    const rows = (status ? db.prepare(fields + " AND status = ?" + order).all(target, status)
       : db.prepare(fields + order).all(target)) as unknown as NotificationRecord[];
+    const quiet = preferences.get().quietHours;
+    // Keep the retry deadline intact so disabling quiet hours releases eligible rows immediately.
+    return rows.map(row => row.status === "pending" && quiet.enabled
+      ? { ...row, nextAt: nextNotificationAt(quiet, Math.max(now(), row.nextAt)) } : row);
   }
   function retry(id: string): "queued" | "missing" | "conflict" | "disabled" {
     if (stopped || !config.url || config.mode === "off") return "disabled";
@@ -99,5 +109,5 @@ export function openNotificationOutbox(dir: string, config: NotificationConfig, 
   function close() {
     return closing ??= (async () => { stopped = true; clearInterval(timer); try { await active; } finally { db.close(); } })();
   }
-  return { enqueue, flush, start, list, retry, close };
+  return { enqueue, flush, start, list, retry, preferences, close };
 }

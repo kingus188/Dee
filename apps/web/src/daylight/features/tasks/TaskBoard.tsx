@@ -86,6 +86,7 @@ export default function TaskBoard({
           <section
             className={`board-column ${dragOver?.status === status.id ? 'drag-over' : ''}`}
             key={status.id}
+            data-status={status.id}
             aria-label={status.label}
             onDragOver={(event) => {
               if (dragging && !disabled) {
@@ -123,7 +124,7 @@ export default function TaskBoard({
             <header className="column-header">
               <div>
                 <h2>
-                  <i style={{ background: status.color }} />
+                  <i />
                   {status.label}
                   <span>{items.length}</span>
                 </h2>

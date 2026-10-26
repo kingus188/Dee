@@ -4,17 +4,17 @@
 
 ## 环境变量
 
-服务启动后，可从网页左侧「设置」打开「模型连接」，配置 Provider（接口协议）、Base URL、模型 ID 和 API Key。支持下表对应的三类模型协议。
+模型连接统一由服务器管理员配置。桌面和浏览器的「连接与设置」仅填写后台服务器地址，并从服务器公布的模型目录中选择；界面和公开接口均不接受 Provider、供应商 Base URL、任意模型 ID 或 API Key。实例登录与模型凭据分开管理。
 
-网页配置保存后需重启服务生效。模型连接保存在 `DATA_DIR/agent.sqlite` 的私有配置表中，已保存的连接优先于 `LLM_API`、`LLM_BASE_URL`、`LLM_MODEL` 和 `LLM_API_KEY`；上下文窗口和最大输出仍使用环境变量。首次使用有效的模型环境变量启动时，会自动将连接保存到 SQLite。日报与 Daylight 待办不使用模型，但需要 `DATABASE_URL` 指向可写 PostgreSQL。
+单模型可使用 `LLM_API`、`LLM_BASE_URL`、`LLM_MODEL` 和 `LLM_API_KEY`。多模型使用 `LLM_MODELS_FILE` 指向服务器上的 JSON 文件；该文件应限制访问权限，并置于 Web 静态目录之外。配置结构见下方「服务器模型目录」。显式目录（包括空目录）优先，其次是完整有效的 `LLM_*` 单模型配置，再兼容已存在的 SQLite / 旧 JSON 配置。环境配置不再自动复制凭据到数据库。
 
-没有已保存的模型配置时，应用仍可打开设置页。填写连接并保存后重启即可聊天；配置完成前不启动模型生成或恢复后台任务，不提供模拟回复。启用了微信通道的服务需先完成模型配置。
+模型选择只保存目录标识，重启后台服务后生效。请先等待正在生成的回复结束再重启；会话与分叉后续使用所选模型，SDK 已保存的未完成生成请求仍可能引用旧模型。
 
-切换模型 ID 时，请等正在生成的回复结束后再重启。会话和分叉后续使用新模型，但 SDK 已保存的未完成生成请求可能仍引用旧模型 ID。
+尚未配置模型时仍可打开工作台和设置页，整理待办、笔记及其他数据；模型生成和后台生成任务不会启动。管理员完成服务器配置并重启后，再重新读取模型列表。启用微信通道前需先完成服务器模型配置。
 
-API Key 输入为空时保留原值；更换 Provider 或 Base URL 时必须重新填写，避免把旧 Key 发给另一个服务。数据库文件及 WAL/SHM 文件权限限制为 `0600`；Key 在 SQLite 中为明文，数据目录和备份应按凭据管理，勿提交到 Git。读取接口只返回 Key 是否已配置，不返回 Key 内容。
+公开模型接口只返回目录标识、显示名称、当前选择、当前生效项和是否等待重启，不返回供应商地址、协议或密钥。`POST /api/settings/model` 只接受 `{ "modelId": "目录标识" }`，HTTP 与 WebSocket 使用相同校验。
 
-旧版 `DATA_DIR/model-settings.json` 会在启动时迁移到 SQLite，只有成功入库后才删除旧文件。SQLite 中已有的配置优先，损坏的存储配置不会静默回退到环境变量。
+为兼容历史部署，未提供服务器配置时继续读取 `DATA_DIR/agent.sqlite` 中原有模型连接，旧 `DATA_DIR/model-settings.json` 在成功写入 SQLite 后迁移删除。客户端只记录模型选择，不再修改这些连接或凭据。显式服务器配置优先于历史存储；历史记录仍应随数据目录和备份按凭据管理。
 
 | 变量 | 默认 / 示例 | 说明 |
 | --- | --- | --- |
@@ -23,9 +23,10 @@ API Key 输入为空时保留原值；更换 Provider 或 Base URL 时必须重�
 | `DATABASE_URL` | `postgresql://...` | 日报与 Daylight 待办的业务数据库连接；生产环境使用独立业务账号，不要复用超级用户密码。Compose 内部默认地址为 `postgres`。 |
 | `LLM_API_KEY` | 空 | 实际 API Key，不提交到 Git |
 | `LLM_MODEL` | 空 | 模型 ID，须与 API 类型及服务商匹配 |
+| `LLM_MODELS_FILE` | 空 | 服务器模型目录 JSON 的路径；显式设置后以该文件为唯一可选目录，建议使用绝对路径和 `0600` 权限 |
 | `LLM_CONTEXT_WINDOW` | `128000` | 提供给模型目录的上下文窗口配置，并非真实配额保证 |
 | `LLM_MAX_TOKENS` | `8192` | 模型目录的最大输出 token 配置 |
-| `DEMO_PASSWORD` | 空 | HTTP Basic Auth 密码；生产模式必须配置，用户名固定 `demo` |
+| `DEMO_PASSWORD` | 空 | HTTP Basic Auth 密码；生产模式必须配置，用户名固定 `demo`；验证后可建立浏览器会话，口令仍是登录凭据 |
 | `HOST_PORT` | `3300` | Docker 映射到宿主机 `127.0.0.1` 的端口 |
 | `NOTIFY_WEBHOOK_URL` | 空 | 通用 Webhook 或飞书机器人地址；留空时不向外发送通知 |
 | `NOTIFY_WEBHOOK_KIND` | `generic` | `generic` JSON / `feishu` 文本机器人 |
@@ -42,7 +43,8 @@ API Key 输入为空时保留原值；更换 Provider 或 Base URL 时必须重�
 | `TEAMS_CONFIG_DIR` | 空 | 后端 Teams 配置目录，含 `teams-forward-config.json`；未指定时不启用 Teams 同步、发送与转发 |
 | `API_ORIGIN` | `http://127.0.0.1:3000` | 独立 Web 固定代理上游，不含路径或凭据 |
 | `WEB_HOST` / `WEB_PORT` | `127.0.0.1` / `8080` | 独立 Web 监听地址与端口；容器中监听 `0.0.0.0` |
-| `ASSISTANT_WEB_URL` | `http://127.0.0.1:8080` | 桌面客户端连接的 Web 根地址；远程必须 HTTPS，不向该地址内嵌凭据 |
+| `ASSISTANT_SERVER_URL` | `http://127.0.0.1:3000` | 桌面客户端连接的后台服务器根地址；远程必须 HTTPS，不向地址内嵌凭据 |
+| `ASSISTANT_WEB_URL` | 空 | 兼容旧版桌面入口，仅在未设置 `ASSISTANT_SERVER_URL` 时使用；仍兼容独立 Web 网关 |
 | `INVESTIGATE_AGENT` | `codex` | 开发任务默认使用的编码 Agent，对话里也可以按任务指定（如“用 claude 做”）。可选：`codex`（通过 ACP 驱动）或 `claude`（Claude Code 的 `claude -p`）。Codex 会话固定为 `workspace-write`：工作区内可写，网络和工作区外写入被拒绝；仅 git 的 add/commit/diff/status/log、printf/echo 和该仓库配置的测试命令会被自动批准。两种 Agent 都由服务进程持有，**服务重启会中断正在运行的任务**（分支上已提交的内容保留）。新增 Agent 只需在 `packages/features/src/investigate/agents.ts` 实现一个 runner |
 | `INVESTIGATE_CODEX_BIN` | `codex-acp` | ACP 适配器 `@agentclientprotocol/codex-acp`（建议固定版本 `npm i -g @agentclientprotocol/codex-acp@2.2.2`），需已登录 Codex；服务进程的 PATH 里要能找到，否则填绝对路径 |
 | `INVESTIGATE_CLAUDE_BIN` | `claude` | `INVESTIGATE_AGENT=claude` 时使用的 Claude Code 可执行文件；需已登录 |
@@ -57,6 +59,29 @@ API Key 输入为空时保留原值；更换 Provider 或 Base URL 时必须重�
 启动时自动将 `DATA_DIR/agent.sqlite` 的日报和 `DATA_DIR/daylight.sqlite` 的 Daylight 数据导入 PostgreSQL。保留项目、任务、排序、删除标记、历史导入标记、幂等动作结果，以及日报正文、版本和时间。每个源独立事务导入，冲突整体回滚；成功记录源路径标记，之后不重复导入，旧文件保留且不再写入业务数据。
 
 测试使用 `NODE_ENV=test` 和 `DATABASE_URL` 指定的数据库；每个临时数据目录使用独立 schema。测试账号需有该数据库的 `CREATE` 权限；不要指向生产业务库。
+
+### 服务器模型目录
+
+在服务器设置 `LLM_MODELS_FILE=/etc/pi-assistant/models.json`，文件为以下数组结构：
+
+```json
+[
+  {
+    "id": "primary",
+    "name": "主模型",
+    "provider": "openai-completions",
+    "baseUrl": "https://your-provider.example/v1",
+    "model": "your-model-id",
+    "apiKey": "YOUR_OWN_KEY",
+    "contextWindow": 128000,
+    "maxTokens": 8192
+  }
+]
+```
+
+`id` 是唯一的客户端选择标识；`name` 可省略，默认显示 `id`。每项的协议、地址、模型与密钥均须完整，`contextWindow` 和 `maxTokens` 可省略，默认分别为 `128000` 和 `8192`，且输出上限不得超过上下文窗口。目录为空数组时没有可选模型；缺失、重复标识或格式错误会使启动报错，不回退使用旧连接。单模型环境配置及旧记录的目录标识统一为 `default`。
+
+目录文件由管理员在服务器维护，修改后重启后台。容器部署时需将文件以只读方式挂载，并把 `LLM_MODELS_FILE` 设为容器内路径；不要将其放进前端静态目录或提交真实密钥。客户端提交 `{ "modelId": "primary" }` 只记录选择，原有连接配置保持由服务器管理。
 
 ### 最小可运行配置
 
@@ -82,6 +107,13 @@ LLM_MODEL=your-model-id
 ```
 
 使用 `docker compose up -d --build`。生产未配置 `DEMO_PASSWORD` 会拒绝启动，不能通过移除鉴权来解决。默认容器映射只绑定到 `127.0.0.1`，需要远程访问时应另外部署 TLS 反向代理。
+
+### 浏览器会话与 cpolar
+
+验证成功的 Basic `GET /api/info` 会签发一小时有效的签名 Cookie（`__Host-pi-durable-session`，Secure/HttpOnly/SameSite=Strict，Path=/），不在 Cookie 内保存口令。HTTP 和 WebSocket 使用同一个后端鉴权器；显式错误 Authorization 优先拒绝，不回退到 Cookie。签名密钥只在当前服务器实例内存中，服务重启后需重新建立会话。
+
+现有 cpolar HTTP 隧道会丢弃 WS 的 Authorization，但保留 Cookie；[公网网关配置](../deploy/cpolar/nginx.cpolar.conf) 在返回首页前验证 Basic 并引导浏览器保存 Cookie，无需新增密钥环境变量或自有域名。重连时会话已过期可刷新主页，必要时重新输入原口令。必须通过 HTTPS 使用；不要删除口令、在 URL/query 中传口令，或把所有上游请求固定注入认证头。部署状态与操作步骤见 [cpolar 公网部署](DEPLOYMENT.md#7-直接使用-cpolar-公网访问2026-10-26)。
+
 
 ## 运行模式与可选通道
 

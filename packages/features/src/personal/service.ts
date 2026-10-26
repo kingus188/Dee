@@ -1,3 +1,4 @@
+import type { MemoryProvenance, MemoryRevision } from '@assistant/contracts';
 import type { ConversationId, Tx } from "@earendil-works/pi-durable";
 // 跨会话记忆和技能。模型只能提交候选，用户批准后才进入提示。
 import { randomUUID } from "node:crypto";
@@ -24,10 +25,31 @@ const SECRET_PATTERN = /sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-
 export const hasSecret = (text: string) => SECRET_PATTERN.test(text);
 
 type Decision = { id: string; status: "pending" | "approved" | "rejected"; source: "user" | "agent"; conversationId: ConversationId | null; createdAt: number; decidedAt: number | null };
-export type MemoryItem = Decision & { text: string };
+export type MemoryItem = Decision & { text: string; provenance?: MemoryProvenance; revision?: number; history?: MemoryRevision[]; updatedAt?: number };
 export type SkillItem = Decision & { name: string; description: string; body: string };
 type DecisionDoc<T> = { items: T[]; applied: Record<string, string> };
-type Proposal = { requestId?: unknown; source?: string; approved?: boolean; conversationId?: ConversationId | null };
+type Proposal = { requestId?: unknown; source?: string; approved?: boolean; conversationId?: ConversationId | null; provenance?: MemoryProvenance };
+const emptyProvenance = (): MemoryProvenance => ({ conversationId: null, messageId: null, quote: null, quoteTruncated: false });
+
+export async function memoryProvenanceInTx(tx: Tx, conversationId: ConversationId): Promise<MemoryProvenance> {
+  const { items: entries } = await tx.scanEntries({ conversationId, order: 'descending' }, 100);
+  for (const entry of entries) {
+    if (['app.schedule-input', 'app.background-input', 'app.background-report'].includes(entry.kind)) return emptyProvenance();
+    if (entry.kind !== 'pi.user') continue;
+    const text = (entry.model ?? []).filter(message => message.role === 'user').map(message => {
+      const content = message.content;
+      return typeof content === 'string' ? content : (content ?? []).filter(part => part.type === 'text').map(part => part.text).join('\n');
+    }).join('\n');
+    return { conversationId, messageId: String(entry.id), quote: text && !hasSecret(text) ? text.slice(0, 1000) : null, quoteTruncated: !hasSecret(text) && text.length > 1000 };
+  }
+  return emptyProvenance();
+}
+function reviseMemory(item: MemoryItem) {
+  const revision = item.revision ?? 1;
+  item.history = [...(item.history ?? []), { revision, text: item.text, status: item.status, source: item.source, provenance: item.provenance ?? emptyProvenance(), changedAt: item.updatedAt ?? item.createdAt }].slice(-20);
+  item.revision = revision + 1;
+  item.updatedAt = Date.now();
+}
 
 export const MemoryDoc = defineDoc<DecisionDoc<MemoryItem>>({
 	kind: "app.memory",
@@ -113,6 +135,7 @@ export async function proposeMemoryInTx(tx: Tx, input: Proposal & { text?: unkno
 	const now = Date.now();
 	const item: MemoryItem = {
 		id: randomUUID(),
+        revision: 1, history: [], updatedAt: now, provenance: input.provenance ?? emptyProvenance(),
 		text,
 		status,
 		source: input.source === "user" ? "user" : "agent",
@@ -135,6 +158,7 @@ export async function decideMemoryInTx(tx: Tx, id: string, action: string) {
 		throw new Error("已确认记忆已满，请先撤回一些");
 	}
 	if (next === "approved" && item.status !== "approved") checkApprovedBudget(doc, item.text.length);
+    reviseMemory(item);
 	item.status = next;
 	item.decidedAt = Date.now();
 	return detach(item);
@@ -144,7 +168,7 @@ export async function editMemoryInTx(tx: Tx, id: string, input: unknown, base?: 
 	const doc = await tx.doc(MemoryDoc);
 	const item = doc.items.find((entry) => entry.id === id);
 	if (!item) throw new Error("记忆不存在");
-	if (base !== undefined && (!base || typeof base !== "object" || !("text" in base) || !("status" in base) || base.text !== item.text || base.status !== item.status)) {
+	if (base !== undefined && (!base || typeof base !== "object" || !("text" in base) || !("status" in base) || base.text !== item.text || base.status !== item.status || ('revision' in base && base.revision !== (item.revision ?? 1)))) {
 		throw new EditConflictError("记忆已更新，请重新载入后再保存");
 	}
 	if (item.status === "rejected") throw new Error("记忆不存在");
@@ -152,6 +176,7 @@ export async function editMemoryInTx(tx: Tx, id: string, input: unknown, base?: 
 	if (text === item.text) return detach(item);
 	if (doc.items.some((entry) => entry.id !== id && entry.text === text && entry.status !== "rejected")) throw new Error("已有相同记忆");
 	if (item.status === "approved") checkApprovedBudget(doc, text.length - item.text.length);
+    reviseMemory(item);
 	item.text = text;
 	return detach(item);
 }
@@ -215,7 +240,7 @@ export async function editSkillInTx(tx: Tx, id: string, input: Parameters<typeof
 }
 
 export function publicMemory(doc: { items: readonly MemoryItem[] } | undefined) {
-	return (doc?.items ?? []).map(({ id, text, status, source, createdAt, decidedAt }) => ({ id, text, status, source, createdAt, decidedAt }));
+	return (doc?.items ?? []).map(({ id, text, status, source, createdAt, decidedAt, provenance, revision, history, updatedAt }) => detach({ id, text, status, source, createdAt, decidedAt, provenance: provenance ?? emptyProvenance(), revision: revision ?? 1, history: history ?? [], updatedAt: updatedAt ?? createdAt }));
 }
 
 export function publicSkills(doc: { items: readonly SkillItem[] } | undefined) {

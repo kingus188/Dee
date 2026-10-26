@@ -43,6 +43,7 @@ COPY --from=build /app/packages/runtime/dist ./packages/runtime/dist
 COPY --from=build /app/packages/features/dist ./packages/features/dist
 COPY --from=build /app/packages/channel-wechat/dist ./packages/channel-wechat/dist
 COPY --from=build /app/apps/server/dist ./apps/server/dist
+COPY --from=build /app/apps/web/dist ./apps/web/dist
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000 NODE_NO_WARNINGS=1
 RUN mkdir -p /data && chown node:node /data
 USER node

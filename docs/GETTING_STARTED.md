@@ -36,11 +36,11 @@ set +a
 pnpm run start:api
 ```
 
-另开终端运行 `pnpm run start:web`，访问 **http://127.0.0.1:8080**。后端端口冲突时使用 `PORT=3001 pnpm run start:api`，并用 `API_ORIGIN=http://127.0.0.1:3001 pnpm run start:web` 连接；前端端口由 `WEB_PORT` 控制。
+另开终端先运行一次 `pnpm --filter @assistant/web run build` 构建界面，然后访问后台 **http://127.0.0.1:3000**。后台同时提供页面、HTTP API 和 WebSocket；端口冲突可用 `PORT=3001 pnpm run start:api` 后打开相应端口。需要独立 Web 网关时仍可运行 `pnpm run start:web`，默认入口为 **http://127.0.0.1:8080**，上游由 `API_ORIGIN` 指定。
 
 Shell 导入方式适用于简单的 `KEY=value` 配置；值包含特殊字符时需正确加引号，也可以直接由系统注入环境变量。不要把密钥发到 Issue。
 
-桌面版不读取模型凭据、不启动后端。保持 API 与 Web 服务运行，再执行 `pnpm run desktop`；`ASSISTANT_WEB_URL` 可指向其他已部署 Web 服务，详见 [桌面程序](../apps/desktop/README.md)。
+桌面版不读取模型凭据、不启动后端。保持后台服务运行，再执行 `pnpm run desktop`；默认连接后台 **http://127.0.0.1:3000**，可在「连接设置」填写后台服务器地址，或用 `ASSISTANT_SERVER_URL` 指向已部署后台。`ASSISTANT_WEB_URL` 仅保留旧版兼容，详见 [桌面程序](../apps/desktop/README.md)。浏览器可在「连接与设置」填写另一后台地址并切换过去；模型只可从服务器已配置目录选择，选择保存后重启后台生效。
 
 ## 确认实际功能
 

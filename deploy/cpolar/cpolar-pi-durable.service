@@ -1,0 +1,17 @@
+[Unit]
+Description=cpolar HTTPS tunnel for Pi Durable Assistant
+Documentation=https://www.cpolar.com/docs
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+User=cpolar-pi
+DynamicUser=true
+LoadCredential=cpolar.yml:/usr/local/etc/cpolar/pi-durable.yml
+NoNewPrivileges=true
+ExecStart=/usr/local/bin/cpolar start pi-durable-assistant -config=%d/cpolar.yml -daemon=off -dashboard=off -inspect-addr=127.0.0.1:4041 -log=stdout -log-level=INFO
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

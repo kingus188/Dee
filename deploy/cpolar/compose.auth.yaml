@@ -1,0 +1,5 @@
+# Apply only after the exact, currently running deployment overlays.
+# Keep web/wx-bot/postgres images, environment and persistent mounts unchanged.
+services:
+  api:
+    image: pi-durable-verify-api:cpolar-session-20261026-01

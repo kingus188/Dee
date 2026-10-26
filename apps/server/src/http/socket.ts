@@ -1,16 +1,16 @@
-import type { Server } from "node:http";
+import type { IncomingMessage, Server } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { ApiRequest, ServerMessage } from "@assistant/contracts";
 import type { AppContext } from "../application/context.js";
 import type { createApi } from "../application/api.js";
 import { watchView } from "../application/view-stream.js";
 import { HttpError } from "../errors.js";
-import { authorized, sameOrigin } from "./auth.js";
+import { sameOrigin } from "./auth.js";
 
-export function attachWebSocket(server: Server, context: AppContext, api: ReturnType<typeof createApi>) {
+export function attachWebSocket(server: Server, context: AppContext, api: ReturnType<typeof createApi>, isAuthorized: (req: IncomingMessage) => boolean) {
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 14 * 1024 * 1024, perMessageDeflate: false });
   server.on("upgrade", (req, socket, head) => {
-    const status = req.url !== "/api/socket" ? 404 : !authorized(req, context.config.password) ? 401 : !sameOrigin(req) ? 403 : 0;
+    const status = req.url !== "/api/socket" ? 404 : !isAuthorized(req) ? 401 : !sameOrigin(req) ? 403 : 0;
     if (status) {
       socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
       return;
@@ -48,7 +48,9 @@ export function attachWebSocket(server: Server, context: AppContext, api: Return
         if (pending.has(input.id)) throw new HttpError(409, "请求正在处理");
         if (pending.size >= 16) throw new HttpError(429, "请求过多，请稍后重试");
         const url = new URL(input.path, "http://localhost");
-        if (!/^\/api\/conversations\/\d+\/messages$/.test(url.pathname) && url.pathname !== "/api/daylight/tasks/save" && Buffer.byteLength(text) > 100_000) throw new HttpError(413, "请求太大");
+        // notes carries both the new content and base, matching the bounded HTTP allowance.
+        const limit = input.method === "POST" && /^\/api\/conversations\/\d+\/notes$/.test(url.pathname) ? 2_000_000 : 100_000;
+        if (!/^\/api\/conversations\/\d+\/messages$/.test(url.pathname) && url.pathname !== "/api/daylight/tasks/save" && Buffer.byteLength(text) > limit) throw new HttpError(413, "请求太大");
         pending.add(input.id);
         registered = true;
         const subscription = input.method === "GET" && url.pathname.match(/^\/api\/conversations\/(\d+)\/events$/);

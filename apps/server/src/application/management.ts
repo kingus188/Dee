@@ -1,6 +1,7 @@
 import type { Conversation } from "@earendil-works/pi-durable";
 import type { Management } from "@assistant/contracts";
-import { Schedules, BackgroundJobs, Reminders, normalizeSchedule, normalizeReminder } from "@assistant/features";
+import { Schedules, BackgroundJobs, Executions, Reminders, normalizeSchedule, normalizeReminder, cancelExecution } from "@assistant/features";
+import { applyExecutionResult } from "./execution-outcome.js";
 import { HttpError } from "../errors.js";
 import type { AppContext } from "./context.js";
 import type { createViews } from "./views.js";
@@ -8,10 +9,11 @@ import type { createViews } from "./views.js";
 export function createManagement(context: AppContext, { simplifyView }: ReturnType<typeof createViews>) {
  const { harness, ctx, tasks } = context;
  async function get(conversation: Conversation): Promise<Management> {
-			const [schedules, background, reminders] = await Promise.all([
+			const [schedules, background, reminders, executions] = await Promise.all([
 				harness.snapshot(Schedules, conversation.id, ctx),
 				harness.snapshot(BackgroundJobs, conversation.id, ctx),
 				harness.snapshot(Reminders, conversation.id, ctx),
+				harness.snapshot(Executions, conversation.id, ctx),
 			]);
 			// Durable Task 异常终结时，不应继续向用户展示为“运行中”。
 			const backgroundItems = await Promise.all((background?.items ?? []).map(async (item) => {
@@ -34,10 +36,20 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
 				}
 				return { ...item, status: "failed" as const };
 			}));
-			return {
+			const executionItems = (executions?.items ?? []).map(run => ({ ...run }));
+            for (const run of executionItems) {
+              if (!run.deliveryError || run.status !== "done" || !run.daylightTaskId) continue;
+              try {
+                await applyExecutionResult(context.daylight, run);
+                await conversation.commit(async tx => { const stored = (await tx.doc(Executions, conversation.id)).items.find(item => item.id === run.id); if (stored) delete stored.deliveryError; }, ctx);
+                delete run.deliveryError;
+              } catch (error) { run.deliveryError = error instanceof Error ? error.message.slice(0, 500) : "关联待办状态同步失败"; }
+            }
+            return {
 				schedules: scheduleItems,
 				background: backgroundItems,
 				reminders: reminders?.items ?? [],
+				executions: executionItems,
 			};
  }
  async function exportMarkdown(conversation: Conversation) {
@@ -58,7 +70,7 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
  }
  async function editSchedule(conversation: Conversation, id: string, body: Record<string, unknown>) {
    if (typeof body.revision !== "number" || !Number.isInteger(body.revision) || body.revision < 1) throw new HttpError(400, "计划版本 revision 必须是正整数");
-   if (typeof body.text !== "string" || typeof body.minutesFromNow !== "number" || (body.everyMinutes !== undefined && typeof body.everyMinutes !== "number")) throw new HttpError(400, "计划内容和执行时间格式不正确");
+   if (typeof body.text !== "string" || (body.minutesFromNow !== undefined && typeof body.minutesFromNow !== "number") || (body.everyMinutes !== undefined && typeof body.everyMinutes !== "number")) throw new HttpError(400, "计划内容和执行时间格式不正确");
    const normalized = normalizeSchedule(body);
    const reserved = await conversation.commit(async tx => {
      const item = (await tx.doc(Schedules, conversation.id)).items.find(entry => entry.id === id);
@@ -67,7 +79,7 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
      const previousStatus = item.status;
      item.status = "paused";
      item.revision += 1;
-     return { ...item, previousStatus };
+     return { jobId: item.jobId, revision: item.revision, previousStatus };
    }, ctx);
    // 先让旧任务失效，再 signal/join；替换失败时保留暂停，绝不显示虚假的运行状态。
    if (reserved.jobId != null) await harness.abortTask(reserved.jobId, ctx);
@@ -77,11 +89,13 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
      item.text = normalized.text;
      item.nextAt = normalized.at;
      item.everyMinutes = normalized.everyMinutes;
+     if (normalized.calendar) item.calendar = normalized.calendar;
+     else delete item.calendar;
      item.status = reserved.previousStatus;
      if (item.status === "active") item.jobId = await tx.createTask(tasks.ScheduleTask, {
        scheduleId: item.id, text: item.text, at: normalized.at, revision: item.revision,
      }, { ownership: { kind: "conversation" }, background: true });
-     return { ...item };
+     return JSON.parse(JSON.stringify(item)) as typeof item;
    }, ctx);
  }
  async function reminder(conversation: Conversation, body: Record<string, unknown>) {
@@ -95,7 +109,7 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
      if (!item) throw new HttpError(404, "提醒不存在");
      if (item.at !== body.at || item.status !== "scheduled") throw new HttpError(409, "提醒已更新或结束，请重新载入");
      item.status = "cancelled";
-     return { ...item };
+     return JSON.parse(JSON.stringify(item)) as typeof item;
    }, ctx);
    // 提醒任务的输入不可变：停止并 join 原任务，再真实创建一个新 id 的提醒。
    await harness.abortTask(previous.id, ctx);
@@ -119,6 +133,7 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
      const job = (await tx.doc(BackgroundJobs, conversation.id)).items.find(it => it.id === id);
      if (!job || job.status !== "running") throw new HttpError(400, "任务已结束或不存在");
      job.status = "cancelled";
+     await cancelExecution(tx, conversation.id, "background:" + id);
      return { ...job };
    }, ctx);
    await harness.abortTask(item.taskId!, ctx);
