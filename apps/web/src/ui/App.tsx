@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CardGroup } from "../chat/cards.js";
 import { useConversation } from "../chat/useConversation.js";
 import { Composer } from "../chat/Composer.js";
@@ -7,7 +7,7 @@ import { CardPanel } from "../tasks/CardPanel.js";
 import { Icon } from "./Icon.js";
 import { ModelSettings } from "../settings/ModelSettings.js";
 import { MailNotifications } from "../mail/MailNotifications.js";
-import { DailyReports } from "../daily-reports/DailyReports.js";
+import { PageLoad } from "./PageLoad.js";
 import { mascotStatus } from "./mascot.js";
 import { WorkspaceData } from "../workspace/WorkspaceData.js";
 import { WorkspaceNavigation } from "./WorkspaceNavigation.js";
@@ -18,6 +18,7 @@ import { TodayPage } from "../today/TodayPage.js";
 import { ActivityPage } from "../today/ActivityPage.js";
 import { showToast } from "./toast.js";
 const DaylightPage = lazy(() => import("../daylight/DaylightPage.js"));
+const DailyReports = lazy(() => import("../daily-reports/DailyReports.js").then(module => ({ default: module.DailyReports })));
 
 const groupLabels: Record<CardGroup, string> = { tasks: "任务与提醒", memory: "长期记忆", notes: "笔记", skills: "本机技能" };
 const groupDescriptions: Record<CardGroup, string> = {
@@ -99,8 +100,8 @@ export function App() {
         <TodayPage active={page === "home"} onPrompt={prompt} onGroup={openGroup} onDaylight={taskId => navigate({ page: "daylight", group: null, taskId })} onActivities={() => navigate({ page: "activity", group: null })} onSettings={settings} onConversation={openChat} />
         <ActivityPage active={page === "activity"} onConversation={openChat} onManage={id => navigate({ page: "data", group: "tasks", conversationId: id })} onSettings={() => { settings(); requestAnimationFrame(() => document.getElementById("notifications-title")?.scrollIntoView({ block: "start" })); }} />
         {page === "settings" && <ModelSettings onBack={() => navigate(settingsOrigin.current)} />}
-        {reportsOpened && <DailyReports active={page === "reports"} />}
-        {daylightOpened && <Suspense fallback={<p role="status">正在读取待办界面…</p>}><DaylightPage active={page === "daylight"} taskId={route.taskId} headerActions={page === "daylight" ? headerActions : null} /></Suspense>}
+        {reportsOpened && <div className="page-load-host" hidden={page !== "reports"}><PageLoad><DailyReports active={page === "reports"} /></PageLoad></div>}
+        {daylightOpened && <div className="page-load-host" hidden={page !== "daylight"}><PageLoad><DaylightPage active={page === "daylight"} taskId={route.taskId} headerActions={page === "daylight" ? headerActions : null} /></PageLoad></div>}
         {page === "chat" && <div className="conversation-toolbar"><button className="header-button" type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen(value => !value)}><Icon name="notebook-pen" /><span>历史对话</span></button><span>{view ? `对话 #${view.conversationId}` : "继续一段对话"}</span><button className="header-button" type="button" disabled={!!view?.busy} onClick={() => { void startChat().catch(error => showToast(error.message, "error")); }}><Icon name="plus" />新对话</button></div>}
         {page === "chat" && <ConversationHistory active={historyOpen} currentId={view?.conversationId ?? null} onOpen={openChat} onClose={() => setHistoryOpen(false)} />}
         <section ref={scroll} hidden={page !== "chat" && page !== "data"} className={page === "data" ? group === "notes" ? "data-panel data-panel-notes" : "data-panel" : "messages-container"} id="messages-container" aria-label={page === "data" && group ? groupLabels[group] : "与小 D 的对话"} onScroll={() => { if (page !== "chat") return; const el = scroll.current!; autoScroll.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>

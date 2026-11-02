@@ -39,6 +39,8 @@ async function removeStaleModules(output: string, source: string): Promise<void>
   for (const entry of await readdir(output, { withFileTypes: true })) {
     const file = resolve(output, entry.name);
     if (entry.isDirectory()) await removeStaleModules(file, resolve(source, entry.name));
+    // Open pages can request an older lazy chunk after a new release.
+    else if (output === resolve(target, "assets") && /^(?:app|chunk)-[A-Z0-9]{8}\.js$/.test(entry.name)) continue;
     else if (/\.(?:js|d\.ts)(?:\.map)?$/.test(entry.name)) {
       const original = entry.name.replace(/\.(?:js|d\.ts)(?:\.map)?$/, ".ts");
       if (!existsSync(resolve(source, original)) && !existsSync(resolve(source, original.replace(/\.ts$/, ".tsx")))) await rm(file);
@@ -49,8 +51,12 @@ await removeStaleModules(target, resolve(root, "apps/web/src"));
 const testOutput = resolve(root, "apps/web/dist-tests");
 if (existsSync(testOutput)) await removeStaleModules(testOutput, resolve(root, "apps/web/tests"));
 
-await build({
-  entryPoints: [resolve(root, "apps/web/src/main.tsx")], outfile: resolve(target, "app.js"),
+const result = await build({
+  entryPoints: { app: resolve(root, "apps/web/src/main.tsx") }, outdir: resolve(target, "assets"),
+  entryNames: "[name]-[hash]", chunkNames: "chunk-[hash]", splitting: true, metafile: true,
   bundle: true, format: "esm", platform: "browser", target: "es2023", jsx: "automatic",
   define: { "process.env.NODE_ENV": '"production"' }, minify: true,
 });
+const entry = Object.entries(result.metafile.outputs).find(([, output]) => output.entryPoint?.endsWith("/main.tsx"))?.[0];
+if (!entry) throw new Error("Browser entry was not emitted");
+await writeFile(resolve(target, "index.html"), html.replace('src="/app.js"', `src="/assets/${entry.split(/[\\/]/).at(-1)}"`));

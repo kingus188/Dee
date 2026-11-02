@@ -1,6 +1,6 @@
 import type { DaylightSnapshot, PersonalData, WorkspaceActivities, WorkspaceMail } from "@assistant/contracts";
 import type { CardGroup } from "../chat/cards.js";
-import { localDate } from "../daylight/domain/todo.js";
+import { localDate } from "../daylight/domain/dates.js";
 import { Icon } from "../ui/Icon.js";
 import { ActivityRecord } from "./ActivityRecord.js";
 import { ResourceFeedback } from "./ResourceFeedback.js";

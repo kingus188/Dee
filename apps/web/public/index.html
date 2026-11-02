@@ -5,23 +5,61 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
   <meta name="theme-color" content="#f3f6ff">
   <title>小 D · 你的个人智能助手</title>
-  <link rel="stylesheet" href="/style.css">
-  <link rel="stylesheet" href="/tasks.css">
-  <link rel="stylesheet" href="/workspace.css">
-  <link rel="stylesheet" href="/chat.css">
-  <link rel="stylesheet" href="/daily-reports.css">
-  <link rel="stylesheet" href="/daylight.css">
-  <link rel="stylesheet" href="/task-workspace.css">
-  <link rel="stylesheet" href="/today.css">
-  <link rel="stylesheet" href="/inbox.css">
-  <link rel="stylesheet" href="/notifications.css">
-  <link rel="stylesheet" href="/notes.css">
-  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
-  <link rel="stylesheet" href="/editor.css">
+  <style>
+    #startup { position: fixed; inset: 0; display: grid; place-content: center; gap: 16px; padding: 32px; background: #f3f6ff; color: #25345b; font: 16px/1.7 system-ui, sans-serif; }
+    #startup h1 { margin: 0; font-size: 32px; } #startup p { margin: 0; max-width: 32em; }
+    #startup button { justify-self: start; padding: 10px 20px; border: 1px solid #5374c9; border-radius: 10px; color: #25345b; background: white; font: inherit; cursor: pointer; }
+    #startup button:focus-visible { outline: 3px solid #5374c9; outline-offset: 3px; }
+  </style>
+  <script>
+    // Keep external styles from delaying the first visible loading frame.
+    document.addEventListener("load", event => {
+      if (event.target instanceof HTMLLinkElement && event.target.rel === "preload" && event.target.getAttribute("as") === "style") event.target.rel = "stylesheet";
+    }, true);
+    document.addEventListener("error", event => {
+      if (event.target instanceof HTMLLinkElement && event.target.getAttribute("as") === "style") event.target.dataset.failed = "true";
+    }, true);
+  </script>
+  <link rel="preload" as="style" href="/style.css">
+  <link rel="preload" as="style" href="/tasks.css">
+  <link rel="preload" as="style" href="/workspace.css">
+  <link rel="preload" as="style" href="/chat.css">
+  <link rel="preload" as="style" href="/daily-reports.css">
+  <link rel="preload" as="style" href="/daylight.css">
+  <link rel="preload" as="style" href="/task-workspace.css">
+  <link rel="preload" as="style" href="/today.css">
+  <link rel="preload" as="style" href="/inbox.css">
+  <link rel="preload" as="style" href="/notifications.css">
+  <link rel="preload" as="style" href="/notes.css">
+  <link rel="preload" as="style" href="/vendor/katex/katex.min.css">
+  <link rel="preload" as="style" href="/editor.css">
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root"><section id="startup" role="status" aria-live="polite"><h1>Dee · 小 D</h1><p id="startup-message">正在打开你的工作空间…</p><button id="startup-retry" type="button" hidden>重新加载</button><noscript><p>请启用 JavaScript 后重新打开。</p></noscript></section></div>
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
+  <script>
+    (() => {
+      const root = document.getElementById("root"), shell = document.getElementById("startup");
+      const retry = document.getElementById("startup-retry");
+      const fail = () => {
+        if (!shell.isConnected) return;
+        document.getElementById("startup-message").textContent = "界面加载较慢或未能完成，请检查网络后重新加载。";
+        retry.hidden = false;
+      };
+      retry.addEventListener("click", () => location.reload());
+      const onError = event => { if (event.target instanceof HTMLScriptElement || event instanceof ErrorEvent) fail(); };
+      window.addEventListener("error", onError, true);
+      window.addEventListener("unhandledrejection", fail);
+      const timer = setTimeout(fail, 15000);
+      const observer = new MutationObserver(() => {
+        if (shell.isConnected) return;
+        clearTimeout(timer); observer.disconnect();
+        window.removeEventListener("error", onError, true);
+        window.removeEventListener("unhandledrejection", fail);
+      });
+      observer.observe(root, { childList: true });
+    })();
+  </script>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

@@ -24,6 +24,9 @@ async function fixture(t: TestContext, backend?: Server, host = "127.0.0.1") {
   t.after(() => rm(dir, { recursive: true, force: true }));
   const dist = join(dir, "dist");
   await mkdir(dist);
+  await mkdir(join(dist, "assets"));
+  await writeFile(join(dist, "assets/app-ABCDEFGH.js"), "import './chunk-12345678.js'");
+  await writeFile(join(dist, "assets/chunk-12345678.js"), "export const ready = true");
   await writeFile(join(dist, "index.html"), "<!doctype html><title>Independent web</title>");
   await writeFile(join(dist, "icon.svg"), "<svg></svg>");
   await writeFile(join(dist, "pixel.png"), Buffer.from([137, 80, 78, 71]));
@@ -64,6 +67,16 @@ async function http(origin: string, path: string, options: { method?: string; he
     req.end();
   });
 }
+
+test("independent web caches versioned entry and chunks but revalidates HTML", async t => {
+  const { origin } = await fixture(t);
+  for (const path of ["/assets/app-ABCDEFGH.js", "/assets/chunk-12345678.js"]) {
+    const response = await http(origin, path);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers["cache-control"], "private, max-age=31536000, immutable");
+  }
+  assert.equal((await http(origin, "/")).headers["cache-control"], "private, no-cache");
+});
 
 test("independent web serves SPA and correct image MIME without escaping its root", { timeout: 10000 }, async t => {
   const { origin } = await fixture(t);

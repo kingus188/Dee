@@ -1,9 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, useEffect, useState, type ReactNode } from "react";
 import type { CardGroup } from "../chat/cards.js";
-import { PersonalPage } from "./PersonalPage.js";
-import { LocalSkillsPage } from "./LocalSkillsPage.js";
-import { NotesPage } from "./NotesPage.js";
-import { TasksPage } from "./TasksPage.js";
+import { PageLoad } from "../ui/PageLoad.js";
+const PersonalPage = lazy(() => import("./PersonalPage.js").then(module => ({ default: module.PersonalPage })));
+const LocalSkillsPage = lazy(() => import("./LocalSkillsPage.js").then(module => ({ default: module.LocalSkillsPage })));
+const NotesPage = lazy(() => import("./NotesPage.js").then(module => ({ default: module.NotesPage })));
+const TasksPage = lazy(() => import("./TasksPage.js").then(module => ({ default: module.TasksPage })));
 
 export function WorkspaceData({ group, owner, connect, headerActions }: { group: CardGroup | null; owner: number | null; connect: () => Promise<number>; headerActions?: ReactNode }) {
   const [opened, setOpened] = useState<Partial<Record<CardGroup, true>>>({});
@@ -17,10 +18,10 @@ export function WorkspaceData({ group, owner, connect, headerActions }: { group:
     return () => { current = false; };
   }, [group, context]);
   return <>
-    {opened.memory && <div hidden={group !== "memory"}><PersonalPage kind="memory" active={group === "memory"} /></div>}
-    {opened.skills && <div hidden={group !== "skills"}><LocalSkillsPage active={group === "skills"} /></div>}
+    {opened.memory && <div hidden={group !== "memory"}><PageLoad><PersonalPage kind="memory" active={group === "memory"} /></PageLoad></div>}
+    {opened.skills && <div hidden={group !== "skills"}><PageLoad><LocalSkillsPage active={group === "skills"} /></PageLoad></div>}
     {(["notes", "tasks"] as const).map(kind => opened[kind] && <div className={kind === "notes" ? "notes-page-host" : undefined} hidden={group !== kind} key={kind}>
-      {context === null ? error ? <p role="alert" className="workspace-error">{error}</p> : <p role="status">正在读取数据空间…</p> : kind === "notes" ? <NotesPage key={context} owner={context} active={group === kind} headerActions={headerActions} /> : <TasksPage key={context} owner={context} active={group === kind} />}
+      <PageLoad>{context === null ? error ? <p role="alert" className="workspace-error">{error}</p> : <p role="status">正在读取数据空间…</p> : kind === "notes" ? <NotesPage key={context} owner={context} active={group === kind} headerActions={headerActions} /> : <TasksPage key={context} owner={context} active={group === kind} />}</PageLoad>
     </div>)}
   </>;
 }

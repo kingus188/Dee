@@ -14,7 +14,7 @@ async function fixture(t: TestContext, password = "") {
   for (const folder of ["assets", "vendor/katex/fonts", "ui", "tests"]) await mkdir(join(dist, folder), { recursive: true });
   for (const [name, contents] of Object.entries({
     "index.html": "<!doctype html><title>小 D</title>", "app.js": "console.log('bundle')", "style.css": "body{}",
-    "assets/icons.svg": "<svg></svg>", "assets/orb-reference.png": "image", "vendor/katex/katex.min.css": "@font-face{}",
+    "assets/icons.svg": "<svg></svg>", "assets/app-ABCDEFGH.js": "import './chunk-12345678.js'", "assets/chunk-12345678.js": "export const ready = true", "assets/orb-reference.png": "image", "vendor/katex/katex.min.css": "@font-face{}",
     "vendor/katex/fonts/KaTeX_Main-Regular.woff2": "font", "ui/App.js": "private module", "tests/example.test.js": "private test",
     "assets/example.test.js": "private test", "assets/private.json": "private configuration", ".hidden": "hidden",
     "assets/.hidden.svg": "hidden", "app.js.map": "source map", "assets/icons.svg.map": "source map",
@@ -47,6 +47,19 @@ async function fixture(t: TestContext, password = "") {
   });
   return { origin, dist, get };
 }
+
+test("versioned browser entry and lazy chunks can be cached, while HTML stays revalidated", async t => {
+  const { origin } = await fixture(t);
+  for (const path of ["/assets/app-ABCDEFGH.js", "/assets/chunk-12345678.js"]) {
+    const response = await fetch(origin + path);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "private, max-age=31536000, immutable");
+    await response.text();
+  }
+  const page = await fetch(origin);
+  assert.equal(page.headers.get("cache-control"), "private, no-cache");
+  await page.text();
+});
 
 test("API origin serves only the built public frontend, including HEAD", async t => {
   const { origin } = await fixture(t);

@@ -9,7 +9,10 @@ test("API backend serves the built UI while keeping private files inaccessible",
   const directory = await mkdtemp(join(tmpdir(), "pi-backend-ui-test-"));
   const service = await startServer(readConfig({ NODE_ENV: "test", LLM_API: "faux", DATA_DIR: directory, PORT: "0", NOTIFY_MODE: "off", PI_OFFLINE: "1" }));
   try {
-    for (const path of ["/", "/index.html", "/app.js", "/style.css"]) {
+    const html = await (await fetch(service.origin)).text();
+    const entry = html.match(/src="(\/assets\/app-[A-Z0-9]{8}\.js)"/)?.[1];
+    assert.ok(entry);
+    for (const path of ["/", "/index.html", entry, "/style.css"]) {
       assert.equal((await fetch(service.origin + path)).status, 200, path);
     }
     for (const path of ["/api-client.js", "/settings/ModelSettings.js", "/app.js.map", "/.env"]) {

@@ -28,7 +28,7 @@ async function desktop(options: { offline?: boolean; invalidEnvironment?: boolea
       getURL: () => this.webContents.url,
       setWindowOpenHandler: () => {},
     });
-    constructor(readonly options: { title: string; show?: boolean }) {
+    constructor(readonly options: { title: string; show?: boolean; webPreferences?: { partition?: string } }) {
       super(); this.visible = options.show !== false; windows.push(this);
     }
     async loadURL(url: string) {
@@ -119,6 +119,7 @@ test("saved connection starts in the main window without a connection dialog", a
   assert.ok(d.main().urls.includes("https://assistant.example"));
   assert.equal(d.settings().length, 0);
   assert.equal(d.state.notifications, 1);
+  assert.equal(d.main().options.webPreferences?.partition, "persist:desktop-web");
 });
 
 for (const event of ["activate", "second-instance"]) {

@@ -80,8 +80,9 @@ test("缺少模型配置时聊天提示服务器配置和重启后端，不回�
     const page = await fetch(service.origin);
     assert.equal(page.status, 200);
     assert.match(page.headers.get("content-type") || "", /text\/html/);
-    assert.match(await page.text(), /app\.js/);
-    assert.equal((await fetch(service.origin + "/app.js")).status, 200);
+    const entry = (await page.text()).match(/src="(\/assets\/app-[A-Z0-9]{8}\.js)"/)?.[1];
+    assert.ok(entry);
+    assert.equal((await fetch(service.origin + entry)).status, 200);
     assert.equal((await fetch(service.origin + "/api/settings/model")).status, 200);
     const direct = await fetch(service.origin + "/api/conversations/direct", { method: "POST" });
     assert.equal(direct.status, 200);

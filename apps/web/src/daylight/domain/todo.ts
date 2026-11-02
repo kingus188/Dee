@@ -1,4 +1,6 @@
 import { markdownText } from './markdown.js'
+import { isOverdue, localDate } from './dates.js'
+export { isOverdue, localDate } from './dates.js'
 import type {
   DaylightStatus as Status,
   DaylightColor as Color,
@@ -22,9 +24,6 @@ export const priorities: Record<Priority, string> = {
   medium: '普通',
   high: '高优先级',
 }
-export function localDate(date = new Date()): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
 export function progress(task: Task): number {
   if (task.status === 'done') return 100
   if (!task.checklist.length) return 0
@@ -33,9 +32,6 @@ export function progress(task: Task): number {
       task.checklist.length) *
       100,
   )
-}
-export function isOverdue(task: Task, today = localDate()): boolean {
-  return task.status !== 'done' && !!task.dueDate && task.dueDate < today
 }
 export function selectTasks(
   tasks: Task[],

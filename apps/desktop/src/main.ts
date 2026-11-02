@@ -21,6 +21,7 @@ let config: ConnectionConfig = { url: "http://127.0.0.1:3000" };
 let password: string | undefined;
 let stopNotifications = () => {};
 let initialized = false;
+const desktopPartition = "persist:desktop-web";
 
 function showConnection() {
   if (settings) { settings.show(); settings.focus(); return; }
@@ -43,7 +44,7 @@ async function connect(initialError?: string) {
   settings?.close();
   if (window) { window.destroy(); window = undefined; }
   const current = new BrowserWindow({ title: "小 D · 你的个人智能助手", width: 1200, height: 820, minWidth: 720, minHeight: 560, icon,
-    webPreferences: { preload: fileURLToPath(new URL("./skills-preload.cjs", import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false, partition: "desktop-web" } });
+    webPreferences: { preload: fileURLToPath(new URL("./skills-preload.cjs", import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false, partition: desktopPartition } });
   window = current;
   const origin = config.url;
   let failed = false;
@@ -70,7 +71,7 @@ async function connect(initialError?: string) {
     stopNotifications();
     stopNotifications = startMailNotifications(origin, basicAuth(config.username, password), (title, body) => {
       if (Notification.isSupported()) showMailNotification(new Notification({ title, body, timeoutType: "default" }));
-    }, (input, init) => session.fromPartition("desktop-web").fetch(String(input), init));
+    }, (input, init) => session.fromPartition(desktopPartition).fetch(String(input), init));
   });
   try {
     await current.loadURL(connectionStatusPage(origin, initialError));
@@ -107,7 +108,7 @@ else {
         if (url !== config.url) { config = { url }; password = undefined; } else config.url = url;
       } catch { startupError = "连接地址设置无效。请从应用菜单手动打开「连接设置…」，检查后台服务器地址。"; }
     }
-    const web = session.fromPartition("desktop-web");
+    const web = session.fromPartition(desktopPartition);
     const certificatePath = join(app.getPath("userData"), "desktop-certificate.json");
     let pin: unknown;
     try { pin = existsSync(certificatePath) ? JSON.parse(readFileSync(certificatePath, "utf8")) : undefined; }

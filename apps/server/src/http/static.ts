@@ -58,7 +58,7 @@ export async function serveWebStatic(req: IncomingMessage, res: ServerResponse, 
   }
   res.writeHead(200, {
     "content-type": contentTypes[extname(target)] || "text/plain; charset=utf-8", "content-length": size,
-    "cache-control": "private, no-cache", "x-content-type-options": "nosniff",
+    "cache-control": /^assets\/(?:app|chunk)-[A-Z0-9]{8}\.js$/.test(requested) ? "private, max-age=31536000, immutable" : "private, no-cache", "x-content-type-options": "nosniff",
     "referrer-policy": "same-origin", "x-frame-options": "SAMEORIGIN",
   });
   if (req.method === "HEAD") res.end();

@@ -145,6 +145,7 @@ export async function startWebServer(options: WebServerOptions = {}) {
       res.writeHead(200, {
         "content-type": mimeTypes[extname(target).toLowerCase()] ?? "application/octet-stream",
         "content-length": info.size, "x-content-type-options": "nosniff",
+        "cache-control": /^assets\/(?:app|chunk)-[A-Z0-9]{8}\.js$/.test(relative(root, target)) ? "private, max-age=31536000, immutable" : "private, no-cache",
         "referrer-policy": "same-origin", "x-frame-options": "SAMEORIGIN",
       });
       if (req.method === "HEAD") { stream.destroy(); res.end(); }

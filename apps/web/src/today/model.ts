@@ -1,5 +1,5 @@
 import type { DaylightSnapshot, WorkspaceActivity } from "@assistant/contracts";
-import { isOverdue, localDate } from "../daylight/domain/todo.js";
+import { isOverdue, localDate } from "../daylight/domain/dates.js";
 
 export type ActivityFilter = "pending" | "running" | "failed" | "ended" | "all";
 export const activityFilters: { id: ActivityFilter; label: string }[] = [
