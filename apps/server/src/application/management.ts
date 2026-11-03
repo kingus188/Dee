@@ -1,6 +1,6 @@
 import type { Conversation } from "@earendil-works/pi-durable";
 import type { Management } from "@assistant/contracts";
-import { Schedules, BackgroundJobs, Executions, Reminders, normalizeSchedule, normalizeReminder, cancelExecution } from "@assistant/features";
+import { Goals, Schedules, BackgroundJobs, Executions, Reminders, normalizeSchedule, normalizeReminder, cancelExecution } from "@assistant/features";
 import { applyExecutionResult } from "./execution-outcome.js";
 import { HttpError } from "../errors.js";
 import type { AppContext } from "./context.js";
@@ -50,6 +50,7 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
 				background: backgroundItems,
 				reminders: reminders?.items ?? [],
 				executions: executionItems,
+                    goals: ((await harness.snapshot(Goals, ctx))?.items ?? []).filter(goal => goal.conversationId === conversation.id),
 			};
  }
  async function exportMarkdown(conversation: Conversation) {

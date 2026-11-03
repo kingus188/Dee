@@ -1,5 +1,5 @@
 import { Index, Meta } from "@assistant/runtime";
-import { personalError, EditConflictError, Notes, editNotesInTx } from "@assistant/features";
+import { personalError, EditConflictError, Notes, editNotesInTx, Goals, createGoalInTx, controlGoalInTx } from "@assistant/features";
 import type { AppContext } from "./context.js";
 import { HttpError } from "../errors.js";
 import { createConversations } from "./conversations.js";
@@ -24,6 +24,23 @@ export function createApi(context: AppContext) {
   const { dailyReports } = context;
   async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}) {
     const path = url.pathname;
+    if (method === "GET" && path === "/api/goals") return { status: 200, data: { items: (await harness.snapshot(Goals, ctx))?.items ?? [] } };
+    const newGoal = path.match(/^\/api\/conversations\/(\d+)\/goals$/);
+    const goalControl = path.match(/^\/api\/goals\/([0-9a-f-]+)\/(resume|cancel|accept)$/i);
+    if (method === "POST" && (newGoal || goalControl)) {
+      if ((newGoal || goalControl?.[2] === "resume") && !context.modelConfigured) throw new HttpError(409, "请在服务器配置模型，然后重启后端");
+      try {
+        if (newGoal) {
+          const conversation = await conversations.getConversation(Number(newGoal[1]));
+          return { status: 201, data: { item: await conversation.commit(tx => createGoalInTx(tx, conversation.id, body, body.requestId ?? null), ctx) } };
+        }
+        return { status: 200, data: { item: await context.root.commit(tx => controlGoalInTx(tx, goalControl![1], goalControl![2], body, body.requestId ?? null), ctx) } };
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        if (error instanceof Error && /委托|requestId/.test(error.message)) throw new HttpError(/版本|已经结束|尚未交付/.test(error.message) ? 409 : 400, error.message);
+        throw error;
+      }
+    }
     if (method === "GET" && path === "/api/workspace/activities") return { status: 200, data: await workspace.activities() };
     if (method === "GET" && path === "/api/workspace/mail") return { status: 200, data: workspace.mail() };
     const executionPath = path.match(/^\/api\/daylight\/tasks\/([0-9a-f-]+)\/(execute|executions)$/i);

@@ -12,6 +12,10 @@ const contentText = (content: Message["content"] | undefined) =>
 async function simplifyView(conversationId: ConversationId, value: ConversationView): Promise<ClientView> {
 	const entries: ViewEntry[] = [];
 	for (const entry of value.entries ?? []) {
+        if (entry.kind === "app.goal-report" && entry.data && typeof entry.data === "object" && "text" in entry.data && typeof entry.data.text === "string") {
+          entries.push({ id: entry.id, kind: "assistant", text: entry.data.text });
+          continue;
+        }
 		const message = entry.model?.[0];
 		if (!message) continue;
 		if (entry.kind === "pi.user" && message.role === "user") {

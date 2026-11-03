@@ -1,7 +1,7 @@
 import type { ConversationId, Tx } from "@earendil-works/pi-durable";
 import { Index } from "@assistant/runtime";
 import type { ConversationItem } from "@assistant/runtime";
-import { Schedules, Reminders, BackgroundJobs } from "@assistant/features";
+import { Goals, Schedules, Reminders, BackgroundJobs } from "@assistant/features";
 import { WechatState } from "@assistant/channel-wechat";
 import { HttpError } from "../errors.js";
 import type { AppContext } from "./context.js";
@@ -48,6 +48,11 @@ async function quietConversation(id: number) {
 			item.status = "cancelled";
 			ids.push(item.taskId);
 		}
+        for (const goal of (await tx.doc(Goals)).items) {
+          if (goal.conversationId !== conversation.id || goal.status === "completed" || goal.status === "cancelled") continue;
+          goal.status = "cancelled"; goal.revision += 1; goal.wakeAt = null; goal.updatedAt = Date.now();
+          if (goal.taskId != null) ids.push(goal.taskId as import("@earendil-works/pi-durable").TaskId);
+        }
 		return ids;
 	}, ctx);
 	for (const taskId of taskIds) {

@@ -1,6 +1,7 @@
 export type * from "./conversations.js";
 export type * from "./attachments.js";
 export type * from "./tasks.js";
+export type * from "./goals.js";
 export type * from "./personal.js";
 export type * from "./socket.js";
 export type * from "./model-settings.js";
