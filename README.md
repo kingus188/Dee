@@ -1,87 +1,77 @@
-# Dee · 小 D
+# Dee · Xiao D
 
-**有自己的形象，记得你的约定，把交代的事情继续做完。**
+**A familiar face, a memory of your preferences, and an assistant that keeps working.**
 
-小 D 是一个可以自托管的个人 AI 助手，提供 Electron 桌面端和 Web 界面，可接入微信 iLink 与 Teams 消息。你通过对话交代事情，它用动态形象呈现工作状态，记住偏好、回顾历史、安排提醒，并在后台处理需要时间的任务。
+Xiao D is a self-hosted personal AI assistant with an Electron desktop app and a web workspace. It can connect to WeChat iLink and Teams, and can read Microsoft 365 mail when configured. Give it work through conversation, see its current state through an animated avatar, keep long-term context under your control, and let durable tasks continue in the background.
 
-项目名称为 **Dee**，基于 [Pi Durable](https://github.com/earendil-works/pi) 构建。数字形象负责表达，持久化 Agent 负责执行：关闭网页后，服务端仍可继续工作；服务重启后，可恢复的任务从持久化状态继续运行。
+The project, **Dee**, is built on [Pi Durable](https://github.com/earendil-works/pi). The avatar communicates activity; the durable Agent runtime handles execution. Work can continue after you close the browser, and recoverable tasks resume from persisted state after a server restart.
 
-[English](README.en.md) · [快速开始](docs/GETTING_STARTED.md) · [桌面程序](apps/desktop/README.md) · [配置说明](docs/CONFIGURATION.md) · [架构与开发](docs/ARCHITECTURE.md)
+[简体中文](README.zh-CN.md) · [Getting started](docs/GETTING_STARTED.md) · [Desktop app](apps/desktop/README.md) · [Configuration](docs/CONFIGURATION.md) · [Architecture](docs/ARCHITECTURE.md)
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B-43853d?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![CI](https://github.com/kingus188/Dee/actions/workflows/v3-ci.yml/badge.svg)](https://github.com/kingus188/Dee/actions/workflows/v3-ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> 当前是面向个人、单用户的实验性实现，交互以文字对话和二维动态形象为主。实时语音、口型同步、写实视频形象尚未实现。
+> An experimental, single-user application. Today, interaction uses text and a two-dimensional animated avatar. Real-time voice, lip synchronization and photorealistic video avatars are not implemented.
 
-## 核心能力
+## Core capabilities
 
-一个长期为你工作的数字伙伴，需要让你认得它、知道它在做什么，也能接着上次的事情继续。
+A personal digital companion should be recognizable, make its activity understandable, and help you pick up where you left off.
 
-- **看得见的状态。** 小 D 会用表情和状态文字反馈思考、工具执行、等待、断线和恢复。形象变化对应程序运行状态。
-- **偏好与历史记忆。** 助手提出的长期记忆和技能先等待批准，再用于后续对话。记忆保留可核实的原始消息出处及最近 20 条版本历史；手动或旧版记忆不补造出处。另有自动整理的网页、微信和 Teams 历史摘要，用于回顾背景和待跟进事项；摘要可能遗漏细节，不作为已确认事实。
-- **能够持续的行动。** 提醒、周期计划和后台任务有持久化记录。计划支持固定间隔与 IANA 时区的每日、每周和每月规则，逐次保留执行状态、回答、失败原因及时间。Daylight 可启动关联执行，成功交付后转入待确认。
-- **有出处的资料。** 只读检索配置好的 Obsidian 笔记；工作资料区分现行、待确认和归档状态，回答附路径和行号。
-- **跨入口协作。** 桌面端与浏览器连接独立 Web 服务，经 API 使用同一后端数据；可选接入微信聊天，以及服务端 Teams 消息检索和重点消息转发。桌面端不再内置后端。
-- **可管理的个人空间。** 对话、记忆和任务状态保存在你部署的实例中；你可以停止任务、管理记忆、归档会话和导出对话。
+- **Visible activity.** Expressions and short status messages reflect thinking, tool use, waiting, disconnection and recovery. Animation follows application state.
+- **Preferences and history.** Assistant-proposed long-term memories and skills wait for approval before they take effect. Approved memories retain verifiable source messages and recent history. Automatic summaries of web, WeChat and Teams history help recall context and open items; they may omit details and are not confirmed facts.
+- **Work that continues.** Reminders, daily, weekly and monthly calendar schedules, and background tasks have persistent records. Each run keeps its status, response, failure reason and timestamps. Daylight executions become pending review after a successful result.
+- **Sources you can check.** Search configured Obsidian notes in read-only mode. Work materials distinguish current documents, drafts and archives, with file and line citations.
+- **Multiple ways to connect.** Desktop and browser clients use the same backend through its API and WebSocket. Optional integrations add WeChat conversations, Teams history and selected Teams forwarding, plus read-only Outlook mail access.
+- **A personal space you manage.** Conversations, memory, skills, notes, daily reports and task state stay in your instance. You can stop tasks, manage memories, archive conversations and export chat text.
 
-## 工作空间
+## Workspace
 
-小 D 的新设计把“今天要处理什么”和“长期积累什么”放在同一个工作空间里：
+The new workspace design keeps today’s work and long-term personal context in one place:
 
-- **今日：** 汇总当天的待办、任务动态、提醒和需要继续处理的事项。
-- **对话：** 继续多轮会话，查看流式回复、工具活动、附件和相关结果卡片；需要时可分叉会话。
-- **待办：** 使用 Daylight 管理项目、任务、日历、优先级、标签、子任务和富文本备注；任务可以交给小 D 执行，成功结果由你确认后再完成。
-- **通知：** 集中查看后台任务、提醒、计划和外部投递动态，保留失败记录和未读状态。
-- **个人空间：** 管理长期记忆、本机技能、笔记、每日日报、任务与提醒，以及连接和模型设置。
+- **Today:** See current todos, task activity, reminders and items that need follow-up.
+- **Chat:** Continue multi-turn conversations with streamed replies, tool activity, attachments and result cards. Fork a conversation when you need a separate path.
+- **Tasks:** Use Daylight for projects, tasks, calendar views, priorities, tags, subtasks and rich-text notes. A task can be handed to Xiao D; successful results wait for your confirmation before the task is completed.
+- **Notifications:** Review background jobs, reminders, schedules and external delivery activity, including failure records and unread state.
+- **Personal space:** Manage long-term memory, local skills, notes, daily reports, tasks and reminders, plus connection and model settings.
 
-页面保持单一主导航：聊天首页保留数字形象和对话，管理页面使用紧凑的白底工作区；窄屏通过「打开导航」访问完整菜单。编辑器统一支持 Markdown、预览和结构化编辑，未保存的草稿在切换页面时保留。
+The interface uses one primary navigation. Chat keeps the avatar and conversation in focus; management pages use compact white workspace layouts. On narrow screens, open the navigation to reach the full menu. The editor uses one Markdown, preview and structured-editing workflow, and keeps unsaved drafts while you move between pages.
 
-## 可以交给小 D 的事
+## Things to try
 
-以下示例需要接入真实模型；实际执行效果取决于模型能力和相关配置。
+These examples require a real model. Results depend on the selected model and the relevant configuration.
 
-| 你可以这样说 | 当前具备的能力 |
+| You might say | Current capability |
 | --- | --- |
-| “请记住，我喜欢简洁、带要点的回答。” | 提交长期记忆候选，经你批准后用于后续会话 |
-| “十分钟后提醒我站起来活动一下。” | 创建持久提醒，到点后在会话中提醒 |
-| “先记下这几个想法，再帮我列一个待办清单。” | 备忘保存在当前会话；待办进入跨会话共享的 Daylight |
-| “阅读这个公开网页，后台整理重点，完成后告诉我。” | 抓取公开网页文字，将适合的工作交给后台子 Agent |
-| “帮我找一下笔记里关于这个项目的决定，附上出处。” | 在配置好的 Obsidian 白名单目录中只读检索，返回路径和行号 |
-| “把这套步骤整理成技能，以后遇到类似事情再用。” | 提交技能候选，批准后按需读取流程；不会重新训练模型 |
-| “上次在微信里说的那件事，后来进展怎么样？” | 按关键词回顾已整理的跨渠道历史摘要，返回日期、来源和待跟进事项 |
-| “帮我查一下 Teams 里还有哪些消息没回复。” | 检索服务端已采集的 Teams 消息；需要配置账号及相应权限 |
-| “看看今天有哪些 Outlook 邮件，读一下张三那封报价。” | 公司 Microsoft 365 收件箱只读查询与正文读取；可复用现有公司账号配置或在设置页交互授权 |
+| “Remember that I prefer short answers with bullet points.” | Propose a long-term memory for your approval |
+| “Remind me to stretch in ten minutes.” | Create a persistent reminder that returns to the conversation |
+| “Save these ideas, then help me make a to-do list.” | Keep notes in the conversation and put shared todos in Daylight |
+| “Read this public webpage and summarize it in the background.” | Retrieve public webpage text and delegate suitable work to a background Agent |
+| “Find the decision about this project in my notes, with sources.” | Search configured, allowlisted Obsidian folders with file and line citations |
+| “Save these steps as a skill for similar work later.” | Propose a reusable procedure for approval; this does not retrain the model |
+| “What happened with the issue we discussed on WeChat?” | Search collected cross-channel summaries, including dates, sources and open items |
+| “Which Teams messages still need my reply?” | Search Teams messages collected by the backend; account configuration and permissions are required |
+| “Show me today’s Outlook mail and read Zhang’s quotation.” | Query and read mail from the configured Microsoft 365 inbox; this is read-only |
 
-网页左侧「日报」支持按日期用 Tiptap 编辑 Markdown、预览、保存和查看历史，一天一篇，可补写或修改。日报不需要配置模型，保存到业务 PostgreSQL；切换导航保留未保存草稿，刷新或关闭前仍需点击「保存日报」。多个页面同时修改时会阻止旧版本覆盖，保留当前正文供复制、重新读取后合并。旧版 SQLite 中的日报会在首次启动时自动导入，导入成功后保留原文件作为备份。
+The web interface supports multiple conversations, conversation forks, streamed replies, and image and text attachments. The fixed workspace pages are Today, Daylight tasks, notifications, long-term memory, notes, local skills, daily reports, tasks and reminders, and settings. They do not display a chat composer. Notes, memories, remote skill records, reminders, schedules, background task instructions, daily reports and Daylight notes use the shared Tiptap document editor with Markdown source editing, nested lists and task lists, tables, formulas, code highlighting, images and footnotes.
 
-Outlook 邮件由后端统一同步，桌面端和浏览器使用同一缓存。后端可用 `MAIL_ACCOUNT_FILE` 指定公司账号文件；首次无邮件配置时自动连接，后续尊重暂停与断开。也可在「设置 → Outlook 邮件」使用设备代码交互登录（支持 MFA）。首次同步近 30 天收件箱，不提醒历史邮件；之后约每分钟增量同步，Web 显示横幅，桌面端经 API 轮询弹系统通知。不发送、不改变已读、不下载附件。详见[邮件配置与限制](docs/CONFIGURATION.md#outlook--microsoft-365-邮件当前工作区)。
+Opening, reading or switching editor modes does not rewrite the original text. Unchanged blocks keep their original Markdown; changed structures are serialized as Markdown. Source whitespace and line breaks are preserved where possible, and undo can return to the original source. Concurrent edits reject stale writes so the current text can be copied, reloaded and merged.
 
-网页支持多会话、会话分叉、流式回复，以及图片和文本附件。左侧「Daylight 待办」「任务与提醒」「长期记忆」「笔记」「本机技能」是固定管理页面，不展示聊天记录或聊天输入框。笔记、记忆、远程技能记录、提醒、计划、后台任务说明、日报和 Daylight 备注统一使用 Tiptap 文档编辑器，支持嵌套列表与任务清单、表格单元格编辑、公式、代码高亮、图片及脚注。可在正文直接输入 Markdown，也可编辑当前块的语法或切换全文源码；表格支持 Tab 切格，笔记支持快捷保存。
+Daylight stores projects and tasks in PostgreSQL and provides board, list and calendar views, priorities, due dates, labels, subtasks, drag sorting and rich-text notes. Agent tools and the UI use the same global data. Legacy SQLite Daylight data is imported once and retained as a read-only source. Older conversation todos are migrated once into a matching “History” project. The migration is idempotent.
 
-打开、阅读或切换编辑模式不会重写原文；未修改的正文块保留原始 Markdown，修改过的结构按 Markdown 输出。源码中的换行与空白修改会精确保留，撤销可回到最初原文。本机技能管理的是当前电脑的技能文件，远程技能记录保留独立入口。提醒、后台任务和笔记归属当前会话，Daylight 待办、记忆和远程技能记录归属个人空间；切换导航保留草稿，刷新或关闭前需保存。实现、验收与原文边界详见 [Tiptap 统一编辑说明](docs/TIPTAP_UNIFIED_EDITOR.md)。
+Daily reports provide one Markdown page per date with editing, preview, save, calendar navigation and history. Reports do not require a model and are stored in PostgreSQL. Unsaved drafts remain when navigating inside the workspace; leaving or refreshing still requires saving. Concurrent edits are rejected instead of silently overwriting newer content. Legacy SQLite reports are imported once and the source file is retained as a backup.
 
-Daylight 提供项目、四列看板、列表、日历、优先级、截止日期、标签、子任务、拖动排序和富文本备注，界面与 Agent 工具读写同一份全局数据。嵌入页共用小 D 主导航和蓝色主题，内部只保留待办视图、项目及存储设置；面包屑与连接状态、任务中心、帮助整合为单层工作栏，不再叠加聊天首页页头。其他管理页使用白底紧凑页头，聊天首页保留网格背景。窄屏通过「打开导航」展开待办导航。数据保存在业务 PostgreSQL 中；不与原 Daylight 应用实时同步。旧版 `daylight.sqlite` 仅作为一次性导入来源。待办详情可「交给小D执行」并查看关联结果；成功结果进入待确认，由本人决定完成。启动时将旧会话待办一次性迁入对应的「历史待办」项目，保留完成状态与原文，笔记仍保留在原会话；重复启动不会重复导入。
+Outlook mail is synchronized by the backend and shared by the desktop and browser clients. Configure `MAIL_ACCOUNT_FILE`, or use device-code sign-in under Settings → Outlook mail when available. The first sync covers roughly the last 30 days without alerting for historical messages; later syncs are incremental. The product does not send mail, change read state or download attachments.
 
-笔记可在页面新增、修改并保存；并发修改会阻止旧页面覆盖。记忆和技能可直接创建、修改、批准及撤回；本人创建后生效，模型提交的候选仍需批准，修改不改变原审批状态。记忆仍限 280 字，技能正文限 4000 字。提醒和计划可在页面直接创建、修改时间与正文，修改会停止旧调度并重新安排；原暂停计划修改后仍暂停。后台任务可直接启动和停止，运行中说明只读。未配置模型仍可编辑 Daylight 待办、笔记、记忆、技能及日报，执行任务需先配置模型。对话中仍按上下文展示相关结果卡片。可选的微信 iLink 通道用于收发文字及微信提供的语音转写文字。
+### Saving materials, Teams replies and coding tasks
 
-桌面端和 Web 聊天框支持快捷指令。输入 `/` 查看候选，↑↓ 选择，Tab 补全，Enter 执行，Esc 关闭菜单；Shift + Enter 仍然换行，中文输入法选词不会执行指令。
+- **Saving work materials:** Turn conversation content into a draft, approve it as current, and archive an older document with the same name.
+- **Teams replies:** Show the target chat and reply draft, then send only after the user says `确认发送`. Requires backend account access and send permissions.
+- **Coding tasks:** Run Codex or Claude Code in a separate git worktree for an allowlisted local repository, producing a report and branch. A local merge requires the user's `确认合并 <task ID>` message after review; tasks do not automatically push or deploy. The selected coding tool must be installed and authenticated separately.
 
-- `/new`：新建并切换到独立对话，保留旧记录及原有提醒和计划；刷新或重启后默认恢复最新的网页对话。正在回复时先用 `/stop` 停止。
-- `/help`：在输入框上方显示指令说明，不发送给模型。
-- `/stop`：停止当前对话的回复，与“停止”按钮相同，不取消独立的后台计划。
+## Run locally
 
-指令须独占一行、不带参数或附件；带参数及未知指令会提示并保留草稿。正文中提到 `/new`、多行文本或 `/path/to/file` 仍按普通消息发送。本次不改变微信、Teams 的指令行为。
-
-### 资料沉淀、Teams 回复与代码任务
-
-- **资料沉淀：** 将对话整理为待确认的工作资料，确认后转为现行，同名旧资料自动归档。
-- **Teams 回复：** 展示目标聊天和回复草稿，用户本人发送「确认发送」后才发出；需要后端登录及发送权限。
-- **代码任务：** 为配置好的本机仓库启动 Codex 或 Claude Code，在独立 git worktree 中排查修复或开发功能，产出报告和分支。用户审阅后发送「确认合并 任务ID」才本地合并，不自动推送或发布。需要额外安装并登录所选编码工具。
-
-## 本机运行
-
-需要 **Node.js ≥ 22.19**、pnpm 12.9.1 和 Git；聊天与后台任务还需要可用的真实模型服务。
+Requires **Node.js ≥ 22.19**, pnpm 12.9.1 and Git. Chat and background tasks also require a working model service. A PostgreSQL connection is required for Daylight tasks and daily reports.
 
 ```bash
 git clone https://github.com/kingus188/Dee.git
@@ -90,78 +80,77 @@ corepack enable
 pnpm install --frozen-lockfile
 ```
 
-**后台服务：** 首次运行先构建，默认打开 **http://127.0.0.1:3000**，页面、API 和实时连接由同一后台提供。
+**Backend:** Build once, then start the API:
 
 ```bash
 pnpm run build
 pnpm run start:api
 ```
 
-**独立 Web 网关（可选）：** 在另一个终端运行 `pnpm run start:web`，打开 **http://127.0.0.1:8080**；`API_ORIGIN` 指定其连接的后台。
+Open **http://127.0.0.1:3000**. The backend serves the built interface, HTTP API and WebSocket on the same origin.
 
-**桌面端：** 保持后台运行，再运行 `pnpm run desktop`。默认直接连接上述后台地址；可用 `ASSISTANT_SERVER_URL` 指向已部署后台，或在桌面菜单「连接设置」中修改后台服务器地址。旧的 `ASSISTANT_WEB_URL` 仍作兼容入口。
+**Optional Web gateway:** Run `pnpm run start:web` in another terminal and open **http://127.0.0.1:8080**. Set `API_ORIGIN` to change its backend URL.
 
-模型由服务器管理员通过 `LLM_MODELS_FILE` 配置目录，也保留 `LLM_*` 单模型环境变量。桌面与浏览器仅设置后台地址，并从服务器提供的目录中选择模型；Provider、供应商 Base URL、上游模型 ID 和 API Key 均在服务器端管理。选择保存后重启后台生效，无需重启桌面客户端。未配置模型时仍可整理待办、笔记及日报；聊天和生成任务等待服务器完成模型配置。旧版 SQLite 配置保留为兼容来源，详见 [配置说明](docs/CONFIGURATION.md)。
+**Desktop:** Keep the backend running, then run `pnpm run desktop`. Set `ASSISTANT_SERVER_URL` or use the desktop connection menu to choose the backend address. `ASSISTANT_WEB_URL` remains a legacy fallback. The desktop client stores connection settings and system-notification state; it does not embed or start the backend.
 
-产品不提供模拟体验或无模型回复。旧模拟会话及未记录模型的历史会话会保留，正式聊天使用新的真实模型会话。
+Administrators configure models on the server through an `LLM_MODELS_FILE` catalog or the existing single-model `LLM_*` environment variables. Desktop and browser clients only enter the backend address and select a model published by that server. Provider details, upstream URLs, model IDs and API keys stay server-side. Restart the backend after saving a selection. Without a model, you can still manage Daylight, notes, memory, skills and daily reports; chat and generated tasks wait for model configuration.
 
-支持 `openai-completions`、`openai-responses` 和 `anthropic-messages` 三类接口。具体模型、图片理解能力、费用和数据处理方式由所选服务商决定。知识库、通知和微信接入需要单独配置，见 [配置说明](docs/CONFIGURATION.md)。
+Supported API protocols are `openai-completions`, `openai-responses` and `anthropic-messages`. Model availability, image understanding, costs and data handling depend on your provider. Knowledge search, notifications, Outlook, Teams and WeChat need separate configuration; see [Configuration](docs/CONFIGURATION.md).
 
-桌面端仅保存客户端连接配置，不创建助手数据库。关闭窗口或退出桌面应用不停止后端任务；macOS 关闭窗口后仍可接收桌面通知，完全退出则停止客户端轮询。打包命令为 `pnpm run desktop:package`，产物位于 `dist/desktop/`，只含桌面代码和图标，不含后端、网页或微信二进制；目前没有分发签名、公证和自动更新。旧桌面数据不会自动迁移，切换前按[桌面程序](apps/desktop/README.md)选择后端数据目录。
+Run `pnpm run desktop:package` to produce a client-only application under `dist/desktop/`, without the backend, web assets or WeChat binary. Distribution signing, notarization and automatic updates are not included. Existing desktop data is not automatically migrated; see the [desktop guide](apps/desktop/README.md).
 
-## 让小 D 持续运行
+## Keep Xiao D running
 
-后台工作需要服务端保持运行，或在退出后由进程管理器重新拉起。仓库提供 Docker Compose 配置，默认持久化 SQLite 数据并自动重启服务。
+Background work needs a running server, or a process manager that restarts it after an exit. The included Docker Compose setup persists PostgreSQL business data and SQLite Agent data, and restarts the service automatically.
 
 ```bash
 cp .env.example .env
-# 填写真实模型配置和强密码 DEMO_PASSWORD
+# Configure a real model, database and a strong DEMO_PASSWORD password
 docker compose up -d --build
 docker compose ps
 ```
 
-默认访问地址为 **http://127.0.0.1:3300**。对外提供访问时配置 HTTPS 反向代理，并保留登录鉴权；HTTP Basic Auth 用户名为 `demo`。升级前备份数据卷，**不要用 `docker compose down -v` 升级**，它会删除持久数据。
+The default address is **http://127.0.0.1:3300**. For remote access, use an HTTPS reverse proxy and retain authentication; the HTTP Basic Auth username is `demo`. Back up both the PostgreSQL business database and SQLite data before upgrading. **Do not use `docker compose down -v` to upgrade**, as it removes persistent data.
 
-详细步骤见 [部署与备份](docs/DEPLOYMENT.md)。Docker 微信接入需要额外启动 `wx-bot` 容器并完成扫码；本地同样由独立桥接服务运行，桌面端不管理其进程。微信与 Teams 配置见 [微信 iLink 手册](docs/WECHAT.md)。
+See [Deployment and backups](docs/DEPLOYMENT.md). WeChat requires a separate `wx-bot` service and QR-code login; the desktop client does not manage it. The [WeChat and Teams guide](docs/WECHAT.md) covers channel configuration. Detailed guides are primarily in Chinese.
 
-当前服务器的固定入口为 **<https://xiaod.vip.cpolar.cn>**（小 D）。用户名为 `demo`，密码沿用原访问口令；换域名后需重新登录，原密码不变。该入口已启用受保护会话以支持 WebSocket，使用账号预留的 China VIP 子域名，不是随机地址。部署配置、独立穿透服务及运维步骤见 [cpolar 公网部署](docs/DEPLOYMENT.md#7-直接使用-cpolar-公网访问2026-10-26)。
+The existing server is available at the reserved, fixed address **<https://xiaod.vip.cpolar.cn>**. Sign in as `demo` with your existing credentials. Switching hostnames requires a fresh sign-in; your credentials are unchanged. Protected browser sessions support WebSocket access through cpolar. See the [current cpolar deployment](docs/DEPLOYMENT.md#7-直接使用-cpolar-公网访问2026-10-26) for configuration and operations.
 
+## Current boundaries
 
-## 当前边界
+- **Avatar and voice:** SVG/CSS animation is available. Real-time voice conversation, voice cloning, lip synchronization, Live2D and 3D model integration are not implemented.
+- **Memory and data:** Self-hosting stores conversations and memory in your instance. Relevant messages, attachments and retrieved text may still be sent to an external model provider. Never commit `.env`, API keys or WeChat credentials.
+- **Execution and recovery:** Recovery depends on persisted state and the task's recovery semantics. It does not guarantee exactly-once execution of arbitrary external operations. Calendar schedules use their configured IANA timezone: nonexistent daylight-saving times are skipped, repeated times run once at the earlier occurrence, and the 31st is skipped in months without that date. Each run records its answer separately from the fact that it was triggered. Coding tasks are owned by the server process and stop on restart; committed branch changes remain available.
+- **Delivery:** Generic Webhook and Feishu notifications use a persistent outbox, resume after restart and retain failure records after bounded retries. Quiet hours keep events queued until delivery is allowed. Notification read state synchronizes through the server, while offline changes wait locally for a later sync. Receivers should deduplicate by event ID. WeChat uses a separate persistent queue. Real Feishu, WeChat and production delivery need separate validation.
+- **Attachments and access:** Web uploads allow up to 5 files: 5 MiB per image, 200 KiB per UTF-8 text file, 5 MiB per PDF or DOCX, and 10 MiB total. Document extraction is limited to 100,000 characters and reports page or section references; scanned-PDF OCR is not included. The server needs `pdftotext`; DOCX extraction also needs `/usr/bin/unzip` and `/usr/bin/xsltproc`. WeChat media is not parsed. Obsidian access is read-only. Material writes target the designated materials directory and coding changes target configured repository worktrees. General computer control is not provided.
+- **Scope:** This is a personal application without tenant isolation or enterprise role management. Archiving stops that conversation's unfinished tasks. Removing a conversation from the list does not erase all persisted records.
 
-- **形象与声音：** 当前使用 SVG/CSS 动态形象，没有实时语音对话、声音克隆、口型驱动、Live2D 或三维模型接入。
-- **记忆与数据：** 自托管保存对话和记忆；调用外部模型时，相关消息、附件和检索内容仍可能发送给模型服务商。不要提交 `.env`、密钥或微信会话凭据。
-- **执行与恢复：** 恢复依赖已保存的状态和对应任务的可恢复性，不保证任意外部操作只执行一次。日历计划按配置时区运行：跳过不存在的夏令时时刻，重复时刻只取较早一次；每月 31 日跳过缺少该日的月份。逐次回答与“已触发”分开记录。编码 Agent 任务由服务进程持有，重启会中断，分支上已提交的内容保留。
-- **消息送达：** 通用 Webhook／飞书通知先写入 SQLite 队列，重启后恢复，每轮最多尝试 5 次并保留失败记录；「设置 → 通知投递」可查看失败记录和设置时区免打扰，静默期间保留待发送事件，到期后继续投递。通知中心阅读状态保存到服务端，离线修改先在本机排队，页面激活或定时同步。接收端仍应按事件 ID 去重。微信使用独立持久发送队列；真实飞书、微信及生产送达需单独验收。详见[通知配置](docs/CONFIGURATION.md#通知队列与失败记录)。
-- **附件与权限：** 网页单次最多 5 个附件，图片每个 5 MiB、UTF-8 文本每个 200 KiB、PDF/DOCX 每个 5 MiB、总计 10 MiB。文档提取最多 100000 字符并保留页码或段号，5 秒内未完成会明确报错；扫描 PDF 的 OCR 留作后续。服务端需要 `pdftotext`，DOCX 还需要 `/usr/bin/unzip` 与 `/usr/bin/xsltproc`，缺失时明确提示。微信图片、视频和文件尚不解析。Obsidian 知识库只读；资料写入限于指定资料目录，代码修改限于配置仓库的 worktree，不提供通用电脑控制。
-- **适用范围：** 当前面向个人使用，尚无多租户隔离和企业角色权限体系。归档会停止该会话未完成的任务；从列表移除会话不等于彻底删除其持久化记录。
+## Direction
 
-## 数字人方向
+Future work focuses on identity, expression and sustained collaboration. These are **product directions, not shipped features or delivery commitments**.
 
-后续演进围绕小 D 的身份表达和持续协作展开。以下是产品方向，**不代表已交付功能或发布时间承诺**：
-
-| 方向 | 希望带来的体验 |
+| Direction | Intended experience |
 | --- | --- |
-| 形象与角色配置 | 设置称呼、外观和交流风格，保持跨会话一致的身份表达 |
-| 语音交互 | 支持语音输入、语音回复和打断，与任务状态协调 |
-| 更丰富的形象表现 | 将表情、动作和口型与对话、执行事件同步 |
-| 可回顾的长期协作 | 看清记忆来源、授权范围与任务进展，方便纠正和撤销 |
-| 跨入口连续体验 | 在网页和消息通道之间延续任务，并改善通知送达与权限控制 |
+| Configurable identity | Choose a name, appearance and communication style that remain consistent across conversations |
+| Voice interaction | Speak, hear replies and interrupt while keeping task state coherent |
+| Richer expression | Coordinate expressions, motion and lip movement with conversation and execution events |
+| Reviewable collaboration | Understand memory sources, authorization boundaries and task progress; correct or revoke them |
+| Continuity across channels | Continue work between the web and messaging channels, with better delivery and permission controls |
 
-## 开发与扩展
+## Development
 
-技术栈：**TypeScript / React / Electron / Node.js / Pi Durable 1.3.0 / PostgreSQL（pgvector）/ SQLite / WebSocket**。使用 pnpm workspaces、`tsc` 和 esbuild；网页构建已包含在现有 build 命令中。业务待办与日报使用 PostgreSQL，Agent 会话、设置、通知队列及其他持久化数据仍使用 SQLite。
+**TypeScript / React / Electron / Node.js / Pi Durable 1.3.0 / PostgreSQL (pgvector) / SQLite / WebSocket.** The project uses pnpm workspaces, `tsc` and esbuild. Daylight tasks and daily reports use PostgreSQL; Agent conversations, settings, notification outbox and other runtime persistence remain in SQLite. The build command includes the web bundle.
 
-| 目录 | 职责 |
+| Directory | Responsibility |
 | --- | --- |
-| `apps/web` | 小 D 的数字形象、对话和交互界面 |
-| `apps/desktop` | Electron API 客户端、连接配置与系统通知 |
-| `apps/server` | API、数据、任务调度与消息通道集成 |
-| `packages/contracts` | 前后端共同使用的协议类型 |
-| `packages/runtime` | 模型接入、会话与持久化运行时 |
-| `packages/features` | 记忆、技能、资料、知识检索、提醒、任务和 Teams 工具 |
-| `packages/channel-wechat` | 微信消息适配与持久发送队列 |
-| `tests/integration` | 跨模块接口与恢复行为验证 |
+| `apps/web` | Xiao D's avatar, workspace, conversation interface and interactions |
+| `apps/desktop` | Electron API client, connection settings, local skills and system notifications |
+| `apps/server` | API backend, data, task scheduling and messaging integrations |
+| `packages/contracts` | Shared frontend/backend protocol types |
+| `packages/runtime` | Model integration, sessions and the durable runtime |
+| `packages/features` | Memory, skills, materials, knowledge search, reminders, tasks and Teams tools |
+| `packages/channel-wechat` | WeChat message handling and the persistent delivery queue |
+| `tests/integration` | Cross-module API and recovery verification |
 
 ```bash
 pnpm run check
@@ -169,20 +158,20 @@ pnpm --recursive --workspace-concurrency=1 run build
 pnpm test
 ```
 
-测试需要可用的 PostgreSQL（设置 `DATABASE_URL`）；Docker Compose 会启动 `pgvector/pgvector:pg16` 服务。数据库配置见 [配置说明](docs/CONFIGURATION.md)。
+Tests require a reachable PostgreSQL instance through `DATABASE_URL`; Docker Compose starts `pgvector/pgvector:pg16`. See [Configuration](docs/CONFIGURATION.md).
 
-`pnpm start` 和 `pnpm run dev` 都会先构建。`dev` 会在进程退出后重启，但不监听源码变化；修改源码后需重新构建。单包开发与依赖边界见 [架构与开发约定](docs/ARCHITECTURE.md)。
+`pnpm start` and `pnpm run dev` build first. `dev` restarts exited processes but does not watch source files; rebuild after editing. See [Architecture and development](docs/ARCHITECTURE.md) for workspace commands and dependency boundaries.
 
-自动化测试覆盖本地模拟模型、接口、持久化与恢复路径，不代替真实模型、浏览器、微信和生产部署验收。
+Automated tests cover local simulated models, APIs, persistence and recovery. They do not replace real-model, browser, desktop, WeChat, Teams or production deployment validation.
 
-## 更多文档
+## Further reading
 
-[快速开始](docs/GETTING_STARTED.md) · [桌面程序](apps/desktop/README.md) · [配置](docs/CONFIGURATION.md) · [部署与备份](docs/DEPLOYMENT.md) · [微信与 Teams](docs/WECHAT.md) · [故障排查](docs/TROUBLESHOOTING.md) · [v3 设计记录](docs/V3_PLAN.md) · [知识库需求](docs/KNOWLEDGE_FEATURE_REQUIREMENTS.md)
+[Getting started](docs/GETTING_STARTED.md) · [Desktop app](apps/desktop/README.md) · [Configuration](docs/CONFIGURATION.md) · [Deployment](docs/DEPLOYMENT.md) · [WeChat and Teams](docs/WECHAT.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [v3 design record](docs/V3_PLAN.md) · [Knowledge requirements](docs/KNOWLEDGE_FEATURE_REQUIREMENTS.md)
 
-部分文档记录了早期任务中心界面和历史设计；具体界面操作以所运行版本为准，功能规划不代表已实现能力。
+Some guides describe earlier Task Center interfaces and historical designs. Follow the interface in your running version; planned features are not evidence of implemented capabilities.
 
-## 开源与致谢
+## License and acknowledgements
 
-本项目基于 [xiaomoBoy/pi-durable-assistant](https://github.com/xiaomoBoy/pi-durable-assistant) 继续开发，现作为独立仓库维护，保留原作者版权声明。持久化能力由 [Pi Durable](https://github.com/earendil-works/pi) 提供。
+Based on [xiaomoBoy/pi-durable-assistant](https://github.com/xiaomoBoy/pi-durable-assistant), now maintained as an independent repository with the original copyright notice retained. [Pi Durable](https://github.com/earendil-works/pi) provides the persistence runtime.
 
-采用 [MIT 许可证](LICENSE)。本项目并非 Pi Durable、微信或模型服务商的官方产品。
+Licensed under [MIT](LICENSE). This is not an official product of Pi Durable, WeChat or any model provider.

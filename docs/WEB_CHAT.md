@@ -48,7 +48,7 @@ React 页面与对话：新增 `apps/web/src/main.tsx`、`ui/App.tsx`、`ui/Welc
 
 删除被替代的实现：`apps/web/src/main.ts`、`state.ts`、`api/events.ts`、`conversations/controller.ts`、`chat/composer.ts`、`chat/messages.ts`、`chat/tool-cards.ts`、`tasks/center.ts`、`ui/render.ts`、`ui/status.ts`、`ui/workspace.ts`，以及已被 React 测试覆盖的 `apps/web/tests/workspace.test.ts`。原服务端 `http/routes/conversations.ts`、`personal.ts` 和 `tasks.ts` 的逻辑集中到共用 API 入口。
 
-文档：调整 `README.md`、`README.en.md`、`docs/ARCHITECTURE.md`、`docs/DEPLOYMENT.md`，新增本文件。未修改 `AGENTS.md`、`SPEC.md`、持久化定义及远程服务。
+文档：调整 `README.md`、`README.zh-CN.md`、`docs/ARCHITECTURE.md`、`docs/DEPLOYMENT.md`，新增本文件。未修改 `AGENTS.md`、`SPEC.md`、持久化定义及远程服务。
 
 ## 对话样式调整（2026-10-13）
 

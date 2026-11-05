@@ -46,7 +46,7 @@ sqlite
 ## 3. README 已调整的可发现性元素
 
 - H1 使用 **Pi Durable Assistant**；首段同时解释 Durable AI Agent、自托管、崩溃恢复、Subagents、微信等真正可用的能力。
-- 简体中文为主，新增 `README.en.md` 作为英语检索和国际开发者入口。
+- 英文 `README.md` 作为 GitHub 默认入口，`README.zh-CN.md` 提供可切换的简体中文版本。
 - README 第一屏放 CI、MIT、截图、功能价值和准确的项目状态；紧接着是可复制的本地启动命令。
 - 安装、配置、部署、问题排查分离成独立文档，减少 README 长篇配置说明。
 - 所有项目内文档优先使用相对链接，不依赖旧的 `pi-durable-demo` URL。
