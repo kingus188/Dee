@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { TeamsSendRejectedError } from "@assistant/features";
 import { join } from "node:path";
 import type { AppConfig } from "./config.js";
 import type { TeamsStore } from "./teams-store.js";
@@ -19,6 +20,7 @@ type WechatIntegration = {
   sendURL: string;
   sendToken: string;
   notify?: (wxid: string, text: string, messageId: string) => Promise<void>;
+  notifyBatch?: (wxid: string, text: string, messageIds: string[]) => Promise<void>;
   undelivered?: () => Promise<{ text: string; status?: "pending" | "blocked" }[]>;
 };
 
@@ -79,7 +81,7 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
     status: collector.status,
   };
   teamsSender.send = async (chatId, text) => {
-    if (!active) throw new Error("Teams 集成已停止");
+    if (!active) throw new TeamsSendRejectedError("Teams 集成已停止，尚未开始发送");
     await track(sendTeamsMessage(sendToken, chatId, text, store, controller.signal));
   };
   teamsSender.refresh = sync.refresh;
@@ -95,6 +97,7 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   try {
     if (wechat?.enabled) stopForward = startTeamsForward({
       dir, store, getToken, rules: parsed.important, sendURL: wechat.sendURL, sendToken: wechat.sendToken, sync, signal: controller.signal,
+      injectBatch: wechat.notifyBatch ? (wxid, text, messageIds) => active ? wechat.notifyBatch!(wxid, text, messageIds) : Promise.reject(new Error("Teams 集成已停止")) : undefined,
       inject: wechat.notify ? (wxid, text, messageId) => active ? wechat.notify!(wxid, text, messageId) : Promise.reject(new Error("Teams 集成已停止")) : undefined,
       undelivered: wechat.undelivered ? () => active ? wechat.undelivered!() : Promise.resolve([]) : undefined,
       onStuck: (...args) => { if (active) onStuck?.(...args); },

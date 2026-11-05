@@ -69,7 +69,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
         refresh: () => teamsSender.refresh?.() ?? Promise.resolve({ ok: false, lastSuccessAt: teamsSender.syncStatus?.().lastSuccessAt ?? null }),
         syncStatus: () => teamsSender.syncStatus?.() ?? { lastSuccessAt: null },
         read: createTeamsReadPort(teamsStore, teamsSender, config.offline) }), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender, config.offline)),
-        createTeamsAway({ get: () => teamsStore!.away(), set: input => teamsStore!.setAway(input), clear: () => teamsStore!.clearAway() })],
+        createTeamsAway({ get: () => teamsStore!.away(), set: input => teamsStore!.setAway(input), clear: expected => teamsStore!.clearAway(expected) })],
       onReport: error => console.error("Harness 报告：", redact(error instanceof Error ? error.message : error)),
     }, ctx);
     const wechat = config.wechat.enabled ? new WechatChannel({ ...runtime, indexDoc: Index, context: ctx, ...config.wechat, reviewNotification: source => reviewTeamsNotification(teamsStore!, teamsSender, source) }) : null;

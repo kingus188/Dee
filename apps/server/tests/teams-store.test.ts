@@ -126,7 +126,10 @@ test("草稿重放复用 ID，持久化授权来源，过期与新版本检查�
     store.close();
     store = openTeamsStore(directory);
     assert.equal(store.saveDraft(input), id, "重启后仍防重放");
+    assert.equal(store.delivery(id, 1)?.state, "unknown", "重启不能把未完成发送宣称为成功");
     store.release(id);
+    assert.deepEqual(store.pendingDrafts(1, 60_000), [], "未知状态不能用普通失败释放");
+    assert.equal(store.resolveDelivery(id, 1, "pending", 15), true);
     const next = store.saveDraft({ ...input, sourceEntryId: 20, text: "新版" });
     assert.equal(store.claim(id, 1, 60_000), false, "检查后被新版替换也不能发送");
     const other = store.saveDraft({ ...input, chatId: "g", label: "群聊「项目群」" });
@@ -229,4 +232,131 @@ test("工作状态自动代回：到期失效、同状态期只回一次、代�
     store.clearAway();
     assert.equal(store.away(), undefined);
   } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test("发送未知状态持久阻止同聊天的新稿，用户核实仅恢复待发且废弃旧确认", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-teams-unknown-"));
+  let store = openTeamsStore(directory);
+  try {
+    const input = { conversationId: 1, chatId: "p", label: "私聊「张三」", text: "原文", explicit: true, sourceEntryId: 10 };
+    const id = store.saveDraft(input);
+    assert.equal(store.claim(id, 1, 60_000), true);
+    assert.equal(store.resolveDelivery(id, 1, "pending", 20), false, "请求进行中不能解除锁定");
+    store.markDelivery(id, "unknown");
+    store.release(id);
+    assert.equal(store.delivery(id, 1)?.state, "unknown");
+    assert.equal(store.delivery(id, 2), undefined);
+    assert.equal(store.blockedDraft("p")?.id, id);
+    assert.equal(store.unresolvedDrafts(1).length, 1);
+    const another = store.saveDraft({ ...input, conversationId: 2, sourceEntryId: 30 });
+    assert.equal(store.claim(another, 2, 60_000), false, "换会话或重新起草也不能绕过未知结果");
+    assert.equal(store.resolveDelivery(id, 2, "pending", 40), false, "不能跨会话核实");
+    store.close(); store = openTeamsStore(directory);
+    assert.equal(store.blockedDraft("p")?.id, id, "重启保留锁定");
+    assert.equal(store.resolveDelivery(id, 1, "pending", 40), true);
+    assert.equal(store.delivery(id, 1)?.sourceEntryId, 40, "旧的展示和确认不再有效");
+    assert.equal(store.saveDraft(input), id, "核实后的原始起草输入仍防重放");
+    assert.equal(store.claim(id, 1, 60_000), true);
+    store.markDelivery(id, "sent");
+    store.release(id);
+    assert.equal(store.delivery(id, 1)?.state, "sent");
+    assert.equal(store.claim(id, 1, 60_000), false);
+    assert.equal(store.claim(another, 2, 60_000), true);
+    store.markDelivery(another, "unknown");
+    assert.equal(store.resolveDelivery(another, 2, "cancelled", 50), true);
+    assert.equal(store.claim(another, 2, 60_000), false);
+    assert.equal(store.blockedDraft("p"), undefined);
+  } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test("自动代回先占用、未知跨状态期和重启锁定，核实后同源来信仍不重发", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-teams-auto-unknown-"));
+  let store = openTeamsStore(directory);
+  try {
+    assert.equal(store.claimAutoReply("chat", 1, "chat:source", "私聊「同事」", "稍后回复"), true);
+    const attempt = store.blockedAutoReply("chat")!;
+    assert.equal(store.resolveAutoReply(attempt.id, "cancelled"), false, "进行中的请求不能由核实工具解锁");
+    store.close(); store = openTeamsStore(directory);
+    assert.equal(store.blockedAutoReply("chat")?.state, "unknown");
+    assert.equal(store.claimAutoReply("chat", 2, "chat:source", "私聊「同事」", "换状态"), false);
+    assert.equal(store.claimAutoReply("chat", 2, "chat:new", "私聊「同事」", "换状态"), false, "另一来信不能绕过未知状态");
+    const draft = store.saveDraft({ conversationId: 1, chatId: "chat", label: "同事", text: "手动回复", explicit: true, sourceEntryId: 10 });
+    assert.equal(store.claim(draft, 1, 60_000), false, "普通草稿也要尊重自动代回的未知锁定");
+    assert.equal(store.resolveAutoReply(attempt.id, "cancelled"), true);
+    assert.equal(store.unresolvedAutoReplies().length, 0);
+    assert.equal(store.claimAutoReply("chat", 2, "chat:source", "私聊「同事」", "换状态"), false, "处置后同源事件仍保留防重记录");
+    assert.equal(store.claimAutoReply("chat", 1, "chat:new", "私聊「同事」", "同状态"), false, "处置不能使原状态期自动重发");
+    assert.equal(store.claim(draft, 1, 60_000), true);
+    assert.equal(store.claimAutoReply("chat", 2, "chat:new", "私聊「同事」", "换状态"), false, "自动代回也尊重普通草稿占用");
+    store.release(draft);
+    assert.equal(store.claimAutoReply("chat", 2, "chat:new", "私聊「同事」", "换状态"), true);
+    store.releaseAutoReply("chat", 2);
+    assert.equal(store.claimAutoReply("chat", 2, "chat:new", "私聊「同事」", "换状态"), true, "明确拒绝可以重试");
+    store.markAutoReplyUnknown("chat", 2);
+    store.releaseAutoReply("chat", 2);
+    assert.equal(store.blockedAutoReply("chat")?.state, "unknown", "普通释放不能清除未知结果");
+  } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test("旧占用迁移只锁仍有效的近期草稿，过期历史保持未知且封存，不阻断新授权", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-teams-legacy-send-"));
+  const db = new DatabaseSync(join(directory, "agent.sqlite"));
+  db.exec(`CREATE TABLE teams_drafts (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL,
+    chat_id TEXT NOT NULL, label TEXT NOT NULL, text TEXT NOT NULL, created_at TEXT NOT NULL, sent_at TEXT, source_entry_id INTEGER)`);
+  const insert = db.prepare("INSERT INTO teams_drafts (conversation_id, chat_id, label, text, created_at, sent_at, source_entry_id) VALUES (1, ?, '旧聊天', '原文', ?, ?, ?)");
+  for (let i = 0; i < 50; i++) insert.run(`old-${i}`, at(31), at(30), i + 1);
+  insert.run("recent", at(1), at(0), 100);
+  db.close();
+  const store = openTeamsStore(directory);
+  try {
+    assert.equal(store.unresolvedDrafts(1).length, 1, "50 份过期历史不会锁住聊天，仅 1 份近期占用需要核实");
+    assert.equal(store.delivery(1, 1)?.state, "legacy_unknown", "不把历史未知谎称成功");
+    assert.equal(store.claim(1, 1, 100 * 60_000), false, "即便放宽 TTL 也不能重发原草稿");
+    assert.equal(store.saveDraft({ conversationId: 1, chatId: "old-0", label: "旧聊天", text: "原文", sourceEntryId: 1, explicit: true }), 1, "同源输入不能新建副本");
+    assert.equal(store.blockedDraft("old-0"), undefined);
+    const fresh = store.saveDraft({ conversationId: 1, chatId: "old-0", label: "旧聊天", text: "新授权", sourceEntryId: 200, explicit: true });
+    assert.equal(store.claim(fresh, 1, 60_000), true);
+    assert.equal(store.blockedDraft("recent")?.state, "unknown");
+  } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("关闭再开启自动代回保持授权版本递增，不复用历史状态期", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-teams-away-versions-"));
+  const store = openTeamsStore(directory);
+  try {
+    const input = { status: "开会", reply: "稍后回", until: at(-60) };
+    store.setAway(input);
+    const original = store.away()!;
+    const first = original.version;
+    assert.equal(store.clearAway(original), true);
+    assert.equal(store.clearAway(original), false, "重复停止是无副作用的 CAS 失败");
+    assert.equal(store.away(), undefined);
+    store.setAway(input);
+    assert.ok(store.away()!.version > first);
+    assert.equal(store.clearAway(original), false, "旧停止重放不能清除新版本");
+    assert.ok(store.away());
+  } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test("自动代回未知或缺回执后同步到同正文，只作为候选保留待办而不解除未知锁定", async () => {
+  for (const mode of ["unknown", "accepted"] as const) {
+    const directory = await mkdtemp(join(tmpdir(), "pi-teams-auto-receipt-"));
+    const store = openTeamsStore(directory);
+    try {
+      store.record({ ...base, id: "c1:in", createdAt: at(1) });
+      assert.equal(store.claimAutoReply("c1", 1, "c1:in", "张三", "开会中， 稍后回"), true);
+      if (mode === "unknown") store.markAutoReplyUnknown("c1", 1);
+      else store.recordAutoReply("c1", "c1:auto:1", 1, false);
+      const sent = { ...base, id: "c1:actual", direction: "out" as const, senderId: "me", text: "开会中， 稍后回", createdAt: at(0), important: false };
+      store.record(sent);
+      assert.equal(store.message("c1:in")?.repliedAt, null, "可能是自动代回，不能隐藏原来信");
+      assert.equal(store.blockedAutoReply("c1")?.state, mode === "unknown" ? "unknown" : undefined, "候选不能解锁未知结果");
+      store.record({ ...sent, id: "c1:manual", text: "方案下午 3 点给你", createdAt: new Date(Date.now() + 1000).toISOString() });
+      assert.ok(store.message("c1:in")?.repliedAt, "不同正文的本人回复仍正常处理");
+    } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
+  }
 });

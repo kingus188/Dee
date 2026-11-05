@@ -25,11 +25,12 @@ function record(raw: Record<string, unknown>, previous?: { message: Omit<MailRec
   return { id: raw.id, subject: typeof raw.subject === "string" ? raw.subject.slice(0, 1000) : old?.subject ?? "（无主题）",
     sender: from?.emailAddress?.name?.slice(0, 300) ?? old?.sender ?? "", address: from?.emailAddress?.address?.slice(0, 320) ?? old?.address ?? "",
     receivedAt: new Date(time).toISOString(), preview, text, isRead: typeof raw.isRead === "boolean" ? raw.isRead : old?.isRead ?? false,
-    hasAttachments: typeof raw.hasAttachments === "boolean" ? raw.hasAttachments : old?.hasAttachments ?? false };
+    hasAttachments: typeof raw.hasAttachments === "boolean" ? raw.hasAttachments : old?.hasAttachments ?? false,
+    importance: raw.importance === "high" || raw.importance === "low" || raw.importance === "normal" ? raw.importance : old?.importance };
 }
 export async function syncMail(store: MailStore, token: (signal: AbortSignal) => Promise<string>, signal: AbortSignal, fetchImpl: typeof fetch = fetch) {
   const initial = `${GRAPH}/me/mailFolders/inbox/messages/delta?` + new URLSearchParams({
-    "$select": "id,subject,from,receivedDateTime,bodyPreview,body,isRead,hasAttachments", "$top": "50", "$filter": `receivedDateTime ge ${store.state().initialSince}`,
+    "$select": "id,subject,from,receivedDateTime,bodyPreview,body,isRead,hasAttachments,importance", "$top": "50", "$filter": `receivedDateTime ge ${store.state().initialSince}`,
   });
   let cursor = store.state().cursor ?? initial;
   for (let page = 0; page < 20; page++) {

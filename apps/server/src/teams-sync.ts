@@ -5,7 +5,7 @@ import { isImportant, type ImportantRules } from "./teams-rules.js";
 
 export const GRAPH = "https://graph.microsoft.com/v1.0";
 export type GraphMessage = {
-  id: string; createdDateTime: string; messageType?: string;
+  id: string; createdDateTime: string; messageType?: string; importance?: string; deletedDateTime?: string | null;
   from?: { user?: { id?: string; displayName?: string } };
   body?: { content?: string; contentType?: string };
   mentions?: { mentioned?: { user?: { id?: string } } }[];
@@ -13,7 +13,7 @@ export type GraphMessage = {
 };
 type Chat = { id: string; chatType: string; topic?: string | null; lastMessagePreview?: { createdDateTime?: string } | null };
 type Page<T> = { value: T[]; "@odata.nextLink"?: string };
-export type SyncResult = { ok: boolean; lastSuccessAt: string | null; skipped?: string[] };
+export type SyncResult = { ok: boolean; lastSuccessAt: string | null; skipped?: string[]; refreshedChatIds?: string[] };
 // 分页地址不合法或自引用循环是安全问题，不能当成单个聊天的故障跳过。
 class UnsafePaging extends Error {}
 const OVERLAP_MS = 5 * 60_000;
@@ -69,10 +69,12 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
   // 以补旧版第一页水位造成的缺口；之后每轮留 5 分钟重叠，接收同时间晚到的消息。
   function windowOf(chatId: string) {
     const mark = marks[chatId];
-    const pending = store.earliestUnrepliedAt(chatId);
+    // Initial recovery preserves the historical scan. Later delivery checks only
+    // revisit live 24-hour notification sources, not every old unanswered message.
+    const pending = recovered.has(chatId) ? store.earliestNotificationAt?.(chatId) : store.earliestUnrepliedAt(chatId);
     const lower = mark ? Math.min(Date.parse(mark) - (recovered.has(chatId) ? OVERLAP_MS : RECOVERY_MS),
-      !recovered.has(chatId) && pending ? Date.parse(pending) : Infinity) : startedAt;
-    return { lower, newest: mark ? Date.parse(mark) : startedAt };
+      pending ? Date.parse(pending) : Infinity) : pending ? Math.min(startedAt, Date.parse(pending)) : startedAt;
+    return { lower, newest: mark ? Date.parse(mark) : startedAt, pending: !!pending };
   }
 
   // 单个聊天的增量同步：所需页全部读取成功后才入库并推进它的水位。
@@ -90,10 +92,17 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
     for (const message of [...messages.values()].sort((a, b) => Date.parse(a.createdDateTime) - Date.parse(b.createdDateTime))) {
       const sender = message.from?.user;
       const time = Date.parse(message.createdDateTime);
-      if (message.messageType === "message" && sender?.id) {
+      if (message.deletedDateTime) {
+        store.notifications.cancelSource(`${chat.id}:${message.id}`);
+      } else if (message.messageType === "message" && sender?.id) {
         const text = messageText(message), mine = sender.id === meId;
-        store.record({ id: `${chat.id}:${message.id}`, chatId: chat.id, chatType: chat.chatType, chatTopic: chat.topic ?? undefined,
+        const id = `${chat.id}:${message.id}`, previous = store.message?.(id);
+        // The local chat archive is append-only. If a remote source was edited,
+        // conservatively cancel its delayed notice rather than leak stale text.
+        if (!mine && previous && previous.text !== text) store.notifications.cancelSource(id);
+        store.record({ id, chatId: chat.id, chatType: chat.chatType, chatTopic: chat.topic ?? undefined,
           senderId: sender.id, senderName: sender.displayName ?? "未知", direction: mine ? "out" : "in", text,
+          notificationPriority: message.importance === "normal" ? "normal" : message.importance === "high" || message.importance === "urgent" ? "urgent" : undefined,
           createdAt: new Date(time).toISOString(), important: !mine && isImportant(rules, { chatType: chat.chatType, senderId: sender.id,
             senderName: sender.displayName, text, mentionsMe: !!message.mentions?.some(item => item.mentioned?.user?.id === meId) }) });
       }
@@ -111,7 +120,7 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
     if (!me.id) throw new Error("Graph 缺少当前用户标识");
     // 单个聊天（或聊天列表的某一页）失败只跳过它：其余聊天照常入库，但本轮不算成功，
     // 它的水位和 lastSuccessAt 都不推进，下一轮重试。
-    const skipped: string[] = [];
+    const skipped: string[] = [], refreshedChatIds: string[] = [];
     let fault = false;
     const skip = (what: string, error: unknown, chatId?: string) => {
       if (error instanceof UnsafePaging) throw error;
@@ -129,18 +138,18 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
           // lastMessagePreview 是该聊天最新消息的时间：早于本轮时间窗就不可能有要读的消息，
           // 省掉一次请求。仍未回复的来信已经把 lower 压到那条来信，所以不会被跳过。
           const preview = chat.lastMessagePreview?.createdDateTime;
-          if (preview && Date.parse(preview) < window.lower) continue;
-          try { await syncChat(auth, me.id, chat, window); } catch (error) { skip(`聊天 ${chat.id}`, error, chat.id); }
+          if (!window.pending && preview && Date.parse(preview) < window.lower) continue;
+          try { await syncChat(auth, me.id, chat, window); refreshedChatIds.push(chat.id); } catch (error) { skip(`聊天 ${chat.id}`, error, chat.id); }
         }
       }
     } catch (error) { skip("聊天列表", error); }
     signal?.throwIfAborted();
     // 只有可重试的故障才让本轮不算成功；水位已按聊天各自推进。
-    if (fault) return { ok: false, lastSuccessAt, skipped };
+    if (fault) return { ok: false, lastSuccessAt, skipped, refreshedChatIds };
     const completedAt = new Date().toISOString();
     save(statusPath, { lastSuccessAt: completedAt });
     lastSuccessAt = completedAt;
-    return { ok: true, lastSuccessAt, skipped };
+    return { ok: true, lastSuccessAt, skipped, refreshedChatIds };
   }
   return {
     refresh(): Promise<SyncResult> {

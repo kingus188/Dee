@@ -73,7 +73,7 @@ NOTIFY_WEBHOOK_KIND=generic
 NOTIFY_MODE=errors
 ~~~
 
-`errors` 仅对明确失败的后台任务触发通知；如需正常提醒或周期计划触发推送，请设 `NOTIFY_MODE=all`。未设置 URL 则不会外部通知。飞书使用 `feishu` 消息格式，其他接收方使用 `generic` JSON。当前工作区已增加 SQLite outbox、最多 5 次投递尝试和失败记录，重启后恢复；接收方仍需按事件 ID 去重。配置和限制见 [通知队列](CONFIGURATION.md#通知队列与失败记录)。
+`errors` 对明确失败的后台任务、内部结构化紧急或审批事件触发通知；如需正常提醒或周期计划触发推送，请设 `NOTIFY_MODE=all`。未设置 URL 则不会外部通知。飞书使用 `feishu` 消息格式，其他接收方使用 `generic` JSON。当前工作区已增加 SQLite outbox、最多 5 次投递尝试和失败记录，重启后恢复；接收方仍需按事件 ID 去重。配置和限制见 [通知队列](CONFIGURATION.md#通知队列与失败记录)。
 
 ## 4. 质量审计和 Bug 修复记录
 

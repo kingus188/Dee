@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { NotificationOverview, NotificationPreferences, NotificationQuietHours, NotificationStatus } from "@assistant/contracts";
+import type { NotificationOverview, NotificationPreferences, NotificationQuietHours, NotificationStatus, WebhookDigestPreferences } from "@assistant/contracts";
 import { request } from "../api/request.js";
 import { Icon } from "../ui/Icon.js";
 
@@ -18,6 +18,7 @@ const formatTime = (value: number) => new Date(value).toLocaleString("zh-CN");
 
 function QuietHoursSettings() {
   const [draft, setDraft] = useState<NotificationQuietHours | null>(null);
+  const [digest, setDigest] = useState<WebhookDigestPreferences>({ enabled: false, windowSeconds: 60 });
   const [pending, setPending] = useState(false), [error, setError] = useState(""), [feedback, setFeedback] = useState("");
   const busy = useRef(false), live = useRef(true);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
@@ -27,7 +28,7 @@ function QuietHoursSettings() {
     try {
       const data = await request<NotificationPreferences>("/api/notifications/preferences");
       if (!data?.quietHours || typeof data.quietHours.enabled !== "boolean" || ![data.quietHours.start, data.quietHours.end, data.quietHours.timeZone].every(value => typeof value === "string")) throw new Error("偏好响应无效");
-      if (live.current) setDraft(data.quietHours);
+      if (live.current) { setDraft(data.quietHours); setDigest(data.webhookDigest ?? { enabled: false, windowSeconds: 60 }); }
     } catch { if (live.current) setError("免打扰设置读取失败，请重新读取后再保存。"); }
     finally { busy.current = false; if (live.current) setPending(false); }
   }
@@ -35,16 +36,16 @@ function QuietHoursSettings() {
     if (busy.current || !draft) return;
     busy.current = true; setPending(true); setError(""); setFeedback("");
     try {
-      const data = await request<NotificationPreferences>("/api/notifications/preferences", { quietHours: draft });
+      const data = await request<NotificationPreferences>("/api/notifications/preferences", { quietHours: draft, webhookDigest: digest });
       if (!data?.quietHours || typeof data.quietHours.enabled !== "boolean") throw new Error("偏好响应无效");
-      if (live.current) { setDraft(data.quietHours); setFeedback("已保存，新的投递时段即时生效。"); }
+      if (live.current) { setDraft(data.quietHours); setDigest(data.webhookDigest ?? digest); setFeedback("已保存，新的通知偏好已生效。"); }
     } catch { if (live.current) setError("免打扰设置保存失败，请核对时间与 IANA 时区后重试，当前草稿仍保留。"); }
     finally { busy.current = false; if (live.current) setPending(false); }
   }
   function change(patch: Partial<NotificationQuietHours>) { setDraft(previous => previous ? { ...previous, ...patch } : previous); setFeedback(""); }
   return <details className="notification-policy" data-notification-preferences onToggle={event => { if (event.currentTarget.open && !draft) void load(); }}>
-    <summary><Icon name="moon" />免打扰时段<Icon name="chevron-right" /></summary>
-    <p className="settings-field-hint">免打扰期间，通知中心继续保留全部内容；外部通知（含失败事件）在窗口结束后投递。起止时刻按所填时区计算，开始包含、结束排除，支持跨午夜。</p>
+    <summary><Icon name="moon" />免打扰与 Webhook 摘要<Icon name="chevron-right" /></summary>
+    <p className="settings-field-hint">免打扰期间，通知中心继续保留全部内容；普通 Webhook 延后投递，失败、明确紧急和审批事件不受此限制。Outlook 普通新邮件按 1 分钟窗口合并，并在免打扰结束后提示一次摘要；重要邮件可立即触发一次合并摘要；缺少重要性字段的旧邮件也保守即时提示。已同步为已读或移出的邮件不再补发。Teams 普通自动提醒也按 1 分钟窗口合并并遵守此时段；已回复、删除或过期来源会撤销。升级后的 Web 与桌面共用邮件展示租约，正常情况下只提示一端；展示确认丢失后恢复可能重复。起止时刻按所填时区计算，开始包含、结束排除，支持跨午夜。</p>
     {!draft ? <><p role={error ? "alert" : "status"}>{error || "正在读取免打扰设置…"}</p>{error && <button className="header-button" type="button" disabled={pending} onClick={() => void load()}>重新读取</button>}</> : <form aria-label="免打扰设置" aria-busy={pending} onSubmit={event => { event.preventDefault(); void save(); }}>
       <fieldset disabled={pending}>
         <label htmlFor="quiet-enabled"><input id="quiet-enabled" name="quiet-enabled" type="checkbox" checked={draft.enabled} onChange={event => change({ enabled: event.target.checked })} /> 启用免打扰</label>
@@ -52,6 +53,9 @@ function QuietHoursSettings() {
         <label htmlFor="quiet-end">结束时间</label><input id="quiet-end" name="quiet-end" type="time" required value={draft.end} onChange={event => change({ end: event.target.value })} />
         <label htmlFor="quiet-timezone">IANA 时区</label><input id="quiet-timezone" name="quiet-timezone" required maxLength={100} value={draft.timeZone} placeholder="Asia/Shanghai" autoComplete="off" spellCheck={false} onChange={event => change({ timeZone: event.target.value })} />
         <p className="settings-field-hint">例如 Asia/Shanghai、America/New_York、Europe/London 或 UTC。起止时间须不同。</p>
+        <label htmlFor="digest-enabled"><input id="digest-enabled" type="checkbox" checked={digest.enabled} onChange={event => { setDigest(previous => ({ ...previous, enabled: event.target.checked })); setFeedback(""); }} /> 合并普通 Webhook 通知（默认关闭）</label>
+        <label htmlFor="digest-window">摘要窗口（秒）</label><input id="digest-window" type="number" min={10} max={3600} step={1} required value={digest.windowSeconds} onChange={event => { setDigest(previous => ({ ...previous, windowSeconds: Number(event.target.value) })); setFeedback(""); }} />
+        <p className="settings-field-hint">仅在接收端支持摘要协议后启用。普通事件按固定时间窗口合并；失败、明确紧急和审批单独优先投递。已创建的摘要在关闭设置后仍按原 ID 和正文重试，不拆分重发。入队不代表送达。</p>
       </fieldset>
       {error && <p className="settings-error" role="alert">{error}</p>}
       <p className="settings-feedback" role="status" aria-live="polite">{feedback}</p>
@@ -108,7 +112,7 @@ export function NotificationSettings() {
       <div className="notification-channel-copy">
         <strong>{channel ? channel.kind === "teams" ? "Microsoft Teams" : "Webhook 通知" : "当前投递渠道"}</strong>
         <p>{!channel ? error ? "渠道状态尚未读取，请刷新重试。" : "正在读取渠道状态…" : channel.enabled
-          ? channel.mode === "all" ? "全部事件 · 当前投递目标" : channel.mode === "errors" ? "仅错误事件 · 当前投递目标" : "按服务端配置投递 · 当前投递目标"
+          ? channel.mode === "all" ? "全部事件 · 当前投递目标" : channel.mode === "errors" ? "错误、紧急与审批事件 · 当前投递目标" : "按服务端配置投递 · 当前投递目标"
           : channel.mode === "off" ? "通知已关闭或当前处于离线模式，记录仍保留。" : "投递地址未配置或当前处于离线模式，记录仍保留。"}</p>
       </div>
       <span className="notification-channel-state">{!channel ? error ? "待确认" : "读取中" : channel.enabled ? "已启用" : "未启用"}</span>
@@ -143,6 +147,7 @@ export function NotificationSettings() {
             <details className="notification-record-details">
               <summary>投递详情<Icon name="chevron-right" /></summary>
               <dl>
+                {item.memberIds && <div><dt>摘要成员（{item.memberIds.length} 条）</dt><dd>{item.memberIds.join("、")}</dd></div>}
                 <div><dt>事件 ID</dt><dd><code>{item.id}</code></dd></div>
                 <div><dt>创建时间</dt><dd>{formatTime(item.createdAt)}</dd></div>
                 {item.status === "pending" ? <div><dt>下次投递</dt><dd>{formatTime(item.nextAt)}</dd></div> : <div><dt>完成时间</dt><dd>{item.finishedAt === null ? "尚未完成" : formatTime(item.finishedAt)}</dd></div>}
@@ -156,7 +161,7 @@ export function NotificationSettings() {
     </div>
     <details className="notification-policy">
       <summary><Icon name="info" />关于记录与重新投递<Icon name="chevron-right" /></summary>
-      <p id="notifications-retry-hint">仅展示当前投递目标、当前筛选下最近 100 条记录，数量不代表全部历史。重新投递会保留原事件 ID 和正文，并重新获得 5 次投递机会；可能重复送达，接收端需按事件 ID 去重。未启用通知投递时，重新投递暂不可用。</p>
+      <p id="notifications-retry-hint">仅展示当前投递目标、当前筛选下最近 100 个投递单元，数量不代表全部历史。摘要显示为一条记录，成员源记录仍保留；重试摘要会重试全部成员。重新投递会保留原事件 ID 和正文，并重新获得 5 次投递机会；可能重复送达，接收端需按事件 ID 去重。未启用通知投递时，重新投递暂不可用。</p>
     </details>
     <QuietHoursSettings />
   </section>;

@@ -115,7 +115,12 @@ test("发送未确认保留草稿，重试相同消息使用同一 requestId", a
 test("菜单直接展示个人数据，切换分类不显示对话且不发送消息", async t => {
   t.mock.method(apiClient, "connect", async () => {});
   const writes: string[] = [];
+  const deliveryWrites: unknown[] = [];
   t.mock.method(apiClient, "request", async (path: string, body?: unknown) => {
+    if (path === "/api/mail/delivery") {
+      deliveryWrites.push(body);
+      return { latest: 0, items: [], total: 0, urgent: false };
+    }
     if (body !== undefined) writes.push(path);
     return path === "/api/personal" ? {
       memory: [{ id: "preference", text: "每周五整理项目", status: "approved" }],
@@ -136,7 +141,11 @@ test("菜单直接展示个人数据，切换分类不显示对话且不发送�
     assert.equal(document.getElementById("message-history"), null);
     assert.equal(document.querySelector(`[aria-label="${label}"]`)!.getAttribute("aria-current"), "page");
   }
-  assert.deepEqual(writes, []);
+  assert.deepEqual(writes, [], "切换分类不能创建对话、发送聊天或执行其他业务写入");
+  for (const body of deliveryWrites) {
+    assert.deepEqual(Object.keys(body as object), ["clientId"], "通知领取只传递客户端标识");
+    assert.equal(typeof (body as { clientId: unknown }).clientId, "string");
+  }
   await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="继续对话"]')!.click(); });
   assert.ok(document.getElementById("message-history"));
   assert.equal(document.querySelector(".data-panel"), null);

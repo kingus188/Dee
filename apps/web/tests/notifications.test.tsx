@@ -29,7 +29,7 @@ test("通知按服务端筛选读取，不将最近100条当作历史总量，�
   assert.equal(document.querySelector<HTMLDetailsElement>(".notification-record-details")!.open, false);
   assert.equal(document.querySelector("code")!.closest("details")?.className, "notification-record-details");
   assert.match(document.querySelector(".notification-error-preview")!.textContent!, /HTTP 503/);
-  assert.match(document.querySelector(".notification-channel")!.textContent!, /Webhook 通知.*仅错误事件.*已启用/);
+  assert.match(document.querySelector(".notification-channel")!.textContent!, /Webhook 通知.*错误、紧急与审批事件.*已启用/);
   assert.match(document.querySelector(".notification-policy")!.textContent!, /数量不代表全部历史/);
   assert.deepEqual([...document.querySelectorAll(".notification-filters button")].map(button => button.textContent), ["全部", "待发送", "已送达", "失败"]);
   await act(async () => { filterButton(document, "全部").click(); });
@@ -112,14 +112,21 @@ test("重新投递失败不伪造入队成功，首次读取失败不显示空�
   assert.equal(document.querySelector(".settings-feedback")!.textContent, "");
 });
 
-test("邮件轻提示只展示元数据，15秒读取且不新增写入，缺少主题和姓名使用既有元数据回退", async t => {
+test("邮件轻提示只展示元数据，15秒领取且仅写投递状态，不修改邮箱", async t => {
   t.mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
   const calls: { path: string; body: unknown }[] = [];
-  t.mock.method(apiClient, "request", async (path: string, body?: unknown): Promise<MailNotices> => {
+  let claims = 0;
+  t.mock.method(apiClient, "request", async (path: string, body?: unknown) => {
     calls.push({ path, body });
-    return { latest: path.includes("after") ? 3 : 2, items: path.includes("after") ? [{ sequence: 3, message: { id: "mail-metadata", subject: "", sender: "", address: "sender@example.test", receivedAt: "2026-10-26T00:00:00Z", preview: "BODY_MUST_NOT_BE_RENDERED", isRead: false, hasAttachments: true } }] : [] };
+    if (path === "/api/mail/delivery/ack") return { acknowledged: true };
+    assert.equal(path, "/api/mail/delivery", "不得调用修改邮箱或消息内容的接口");
+    claims++;
+    return { latest: claims > 1 ? 3 : 2, items: claims > 1 ? [{ sequence: 3, message: { id: "mail-metadata", subject: "", sender: "", address: "sender@example.test", receivedAt: "2026-10-26T00:00:00Z", preview: "BODY_MUST_NOT_BE_RENDERED", isRead: false, hasAttachments: true } }] : [],
+      ...(claims > 1 ? { delivery: { id: "digest-3", token: "lease-3", leaseUntil: Date.now() + 45_000 } } : {}) } satisfies MailNotices;
   });
-  const { dom } = await mount(t, <MailNotifications />), document = dom.window.document;
+  const { dom, render } = await mount(t, null), document = dom.window.document;
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  await render(<MailNotifications />);
   await act(async () => { t.mock.timers.tick(14999); });
   assert.equal(calls.length, 1);
   assert.equal(document.querySelector(".mail-notice"), null);
@@ -129,7 +136,13 @@ test("邮件轻提示只展示元数据，15秒读取且不新增写入，缺少
   assert.equal(document.querySelector(".mail-notice-subject")!.textContent, "（无主题）");
   assert.equal(document.querySelector(".mail-notice-sender")!.textContent, "sender@example.test");
   assert.doesNotMatch(notice.textContent!, /BODY_MUST_NOT_BE_RENDERED/);
-  assert.deepEqual(calls, [{ path: "/api/mail/notices", body: undefined }, { path: "/api/mail/notices?after=2", body: undefined }]);
+  const clientId = (calls[0].body as { clientId: string }).clientId;
+  assert.equal(typeof clientId, "string");
+  assert.deepEqual(calls, [
+    { path: "/api/mail/delivery", body: { clientId } },
+    { path: "/api/mail/delivery", body: { clientId } },
+    { path: "/api/mail/delivery/ack", body: { clientId, id: "digest-3", token: "lease-3" } },
+  ], "只允许领取和确认本地投递，不发送正文、已读或其他邮箱更改");
   assert.ok(document.querySelector('[aria-label="关闭新邮件提醒"]'));
   await act(async () => { t.mock.timers.tick(5000); });
   assert.equal(document.querySelector(".mail-notice"), null);

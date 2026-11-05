@@ -297,6 +297,18 @@ export class WechatChannel {
               }, this.context);
               continue;
             }
+            if (review.status === "defer") {
+              await this.root.commit(async tx => {
+                const current = (await tx.doc(WechatState)).outbox.find(x => x.id === item.id);
+                if (current?.status === "sending") {
+                  current.status = item.blocked ? "blocked" : "pending";
+                  current.attempts = Math.max(0, current.attempts - 1);
+                  // Recheck cancellation and changed preferences without consuming retries.
+                  current.nextAt = Math.max(now() + 1000, Math.min(review.until, now() + 60_000));
+                }
+              }, this.context);
+              continue;
+            }
             if (review.text !== undefined) item.text = review.text;
             if (this.stopped) return;
             if (item.blocked) {

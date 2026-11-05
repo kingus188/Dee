@@ -122,10 +122,12 @@ test("本地账号来源拒绝缺失、畸形配置和路径注入，错误不�
 test("关闭等待密码请求，迟到成功或失败都不能保存令牌或永久禁止登录", async t => {
   for (const response of [json(token), json({ error: "invalid_grant" }, 400)]) {
     const { dir, file } = await fixture(t); let finish!: (response: Response) => void;
-    const service = createMailService(dir, false, async () => new Promise(resolve => { finish = resolve; }), file);
+    let entered!: () => void;
+    const requested = new Promise<void>(resolve => { entered = resolve; });
+    const service = createMailService(dir, false, async () => new Promise(resolve => { finish = resolve; entered(); }), file);
     const pending = service.refresh();
-    // 等本地文件读取完成并进入 fetch，而不是用固定延时猜测。
-    for (let i = 0; !finish && i < 100; i++) await new Promise(resolve => setImmediate(resolve));
+    // Wait for the actual boundary, not an arbitrary number of event-loop turns.
+    await Promise.race([requested, pending.then(() => assert.fail("refresh completed without entering fetch"))]);
     assert.ok(finish); const closing = service.close(); finish(response);
     await assert.rejects(pending, /取消/); await closing;
     const store = openMailStore(dir); assert.equal(store.state().tokens, null); assert.equal(store.state().accountLoginBlocked, false); store.close();

@@ -1,9 +1,19 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { NotificationPreferences, NotificationReadState } from "@assistant/contracts";
+import type { NotificationPreferences, NotificationReadState, WebhookDigestPreferences } from "@assistant/contracts";
 import { HttpError } from "./errors.js";
 import { validateQuietHours } from "./notification-quiet-hours.js";
 
 const defaults: NotificationPreferences = { quietHours: { enabled: false, start: "22:00", end: "08:00", timeZone: "Asia/Shanghai" } };
+
+const defaultDigest: WebhookDigestPreferences = { enabled: false, windowSeconds: 60 };
+function validateDigest(input: unknown): WebhookDigestPreferences {
+  if (!input || typeof input !== "object") throw new HttpError(400, "Webhook 摘要设置无效");
+  const { enabled, windowSeconds } = input as Record<string, unknown>;
+  if (typeof enabled !== "boolean" || typeof windowSeconds !== "number" || !Number.isInteger(windowSeconds) || windowSeconds < 10 || windowSeconds > 3600) {
+    throw new HttpError(400, "Webhook 摘要窗口须为 10–3600 秒的整数");
+  }
+  return { enabled, windowSeconds };
+}
 
 // Shares the outbox connection and its shutdown path; no separate lifecycle resource.
 export function createNotificationPreferences(db: DatabaseSync) {
@@ -30,12 +40,20 @@ export function createNotificationPreferences(db: DatabaseSync) {
   }
   function get(): NotificationPreferences {
     const row = db.prepare("SELECT value FROM notification_preferences WHERE key = 'quiet-hours'").get();
-    return { quietHours: row ? validateQuietHours(JSON.parse(String(row.value))) : { ...defaults.quietHours } };
+    const digest = db.prepare("SELECT value FROM notification_preferences WHERE key = 'webhook-digest'").get();
+    return { quietHours: row ? validateQuietHours(JSON.parse(String(row.value))) : { ...defaults.quietHours },
+      webhookDigest: digest ? validateDigest(JSON.parse(String(digest.value))) : { ...defaultDigest } };
   }
   function save(input: Record<string, unknown>): NotificationPreferences {
     const quietHours = validateQuietHours(input.quietHours);
-    db.prepare("INSERT INTO notification_preferences(key, value) VALUES ('quiet-hours', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(quietHours));
-    return { quietHours };
+    const webhookDigest = input.webhookDigest === undefined ? undefined : validateDigest(input.webhookDigest);
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const put = db.prepare("INSERT INTO notification_preferences(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+      put.run("quiet-hours", JSON.stringify(quietHours));
+      if (webhookDigest) put.run("webhook-digest", JSON.stringify(webhookDigest));
+      const result = get(); db.exec("COMMIT"); return result;
+    } catch (error) { db.exec("ROLLBACK"); throw error; }
   }
   return { reads, mark, get, save };
 }

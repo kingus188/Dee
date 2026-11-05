@@ -49,7 +49,7 @@ export async function startServer(config: AppConfig, host = config.password ? "0
     stopIntegrations = startServerIntegrations({
       config: app.config, store: app.teamsStore, teamsSender: app.teamsSender, env,
       wechat: { ...app.config.wechat,
-        notify: app.wechat ? (wxid, text, messageId) => app.wechat!.notify("primary", wxid, text, { kind: "teams", messageIds: [messageId] }).then(() => {}) : undefined,
+        notifyBatch: app.wechat ? (wxid, text, messageIds) => app.wechat!.notify("primary", wxid, text, { kind: "teams", messageIds }).then(() => {}) : undefined,
         undelivered: app.wechat ? () => app.wechat!.undelivered() : undefined },
       onStuck: pending => console.error(`Teams 微信提醒待处理：${pending} 条，请检查桥接服务和接收人配置`),
     });

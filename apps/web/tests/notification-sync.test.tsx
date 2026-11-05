@@ -123,7 +123,11 @@ test("通知设置读取并保存免打扰HH:mm和时区，保存失败保留草
   assert.equal(document.querySelector<HTMLInputElement>('[name="quiet-timezone"]')!.value, "Asia/Shanghai");
   const form = details.querySelector("form")!;
   await act(async () => { form.dispatchEvent(new view.dom.window.Event("submit", { bubbles: true, cancelable: true })); });
-  assert.deepEqual(writes, [{ quietHours }]);
+  assert.deepEqual(writes, [{ quietHours, webhookDigest: { enabled: false, windowSeconds: 60 } }]);
+  assert.equal(document.querySelector<HTMLInputElement>("#digest-enabled")!.checked, false);
+  await act(async () => { document.querySelector<HTMLInputElement>("#digest-enabled")!.click(); });
+  await act(async () => { form.dispatchEvent(new view.dom.window.Event("submit", { bubbles: true, cancelable: true })); });
+  assert.deepEqual(writes[1], { quietHours, webhookDigest: { enabled: true, windowSeconds: 60 } });
   assert.match(details.textContent!, /已保存/);
   fails = true;
   await act(async () => { form.dispatchEvent(new view.dom.window.Event("submit", { bubbles: true, cancelable: true })); });

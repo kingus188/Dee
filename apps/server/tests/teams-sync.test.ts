@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTeamsSync, GRAPH } from "../dist/teams-sync.js";
 import { sendTeamsMessage } from "../dist/teams-send.js";
-import type { TeamsStore } from "../dist/teams-store.js";
+import { TeamsSendRejectedError } from "@assistant/features";
+import { openTeamsStore, type TeamsStore } from "../dist/teams-store.js";
 
 const at = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const message = (id: string, createdDateTime: string, mine = false) => ({ id, createdDateTime, messageType: "message", from: { user: { id: mine ? "me" : "peer" } }, body: { content: "text" } });
@@ -30,6 +31,7 @@ test("单个聊天失败只跳过它：不推进它的水位，其余聊天照�
   try {
     const first = await sync.refresh();
     assert.equal(first.ok, false, "有聊天被跳过时本轮不算成功");
+    assert.deepEqual(first.refreshedChatIds, ["c2"], "部分成功不能替失败来源伪造已核对证明");
     // 失败原因要带上请求路径，否则日志无法指出是哪个聊天的哪一页。
     assert.match(first.skipped!.join(" "), /聊天 c1：Graph 503 \/v1\.0\/messages-page2/);
     assert.equal(JSON.parse(await readFile(join(dir, "teams-forward.json"), "utf8")).c1, old);
@@ -114,10 +116,11 @@ test("会议聊天的 403 不算故障：其余聊天照常成功，之后不再
       }) as typeof fetch });
     const first = await sync.refresh();
     assert.equal(first.ok, true, "403 是权限性拒绝，不该让自动提醒停摆");
+    assert.deepEqual(first.refreshedChatIds, ["c1"], "不可读聊天不能被列为已核对");
     assert.match(first.skipped!.join(" "), /聊天 meet：Graph 403 \/v1\.0\/chats\/meet\/messages/);
     assert.ok(saved.has("c1:in1"));
     assert.ok(sync.status().lastSuccessAt);
-    await sync.refresh();
+    assert.deepEqual((await sync.refresh()).refreshedChatIds, ["c1"]);
     assert.equal(asked.filter(x => x === "meet").length, 1, "403 的聊天不再重复请求");
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
@@ -144,4 +147,90 @@ test("久无新消息的聊天不再逐个请求；仍有未回复来信的照�
     assert.equal((await sync.refresh()).ok, true);
     assert.deepEqual(asked.sort(), ["busy", "unreplied"], "没新消息的聊天不请求，未回复的仍要回扫");
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+
+test("Teams 发送区分明确拒绝和结果未知：网络、408、5xx 都不能作为重发依据", async () => {
+  const original = globalThis.fetch;
+  const store = {} as TeamsStore;
+  try {
+    for (const status of [400, 401, 403, 404, 409, 429]) {
+      globalThis.fetch = async () => new Response("", { status });
+      await assert.rejects(sendTeamsMessage(async () => "test", "chat", "text", store), TeamsSendRejectedError);
+    }
+    for (const status of [408, 500, 502, 503, 504]) {
+      globalThis.fetch = async () => new Response("", { status });
+      await assert.rejects(sendTeamsMessage(async () => "test", "chat", "text", store), error => error instanceof Error && !(error instanceof TeamsSendRejectedError));
+    }
+    let posts = 0;
+    globalThis.fetch = async () => { posts++; throw new TypeError("fetch failed"); };
+    await assert.rejects(sendTeamsMessage(async () => "test", "chat", "text", store), error => error instanceof Error && !(error instanceof TeamsSendRejectedError));
+    assert.equal(posts, 1, "底层不能自动重试 POST");
+    await assert.rejects(sendTeamsMessage(async () => { throw new Error("credential error"); }, "chat", "text", store), TeamsSendRejectedError);
+    await assert.rejects(sendTeamsMessage(async () => "test", "chat", "text", store, AbortSignal.abort()), TeamsSendRejectedError);
+    assert.equal(posts, 1, "发送前失败明确没有 POST");
+  } finally { globalThis.fetch = original; }
+});
+
+
+test("自动代回等待凭据时撤回或替换授权，在 POST 之前明确取消", async () => {
+  const original = globalThis.fetch;
+  let resolve!: (token: string) => void;
+  const token = new Promise<string>(done => { resolve = done; });
+  let allowed = true, posts = 0;
+  globalThis.fetch = async () => { posts++; return new Response("{}"); };
+  try {
+    const sending = sendTeamsMessage(() => token, "chat", "text", {} as TeamsStore, undefined, () => allowed);
+    allowed = false;
+    resolve("test");
+    await assert.rejects(sending, TeamsSendRejectedError);
+    assert.equal(posts, 0);
+  } finally { globalThis.fetch = original; }
+});
+
+
+test("提醒送前刷新继续回扫五分钟窗口以前的有效来源，保存重要性并撤销已删除源", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-teams-notification-refresh-"));
+  const store = openTeamsStore(dir);
+  const sourceAt = at(10), replyAt = at(8), recent = at(1);
+  store.record({ id: "chat:source", chatId: "chat", chatType: "oneOnOne", senderId: "peer", senderName: "Peer", direction: "in", text: "text", createdAt: sourceAt, important: true, notificationPriority: "normal" });
+  store.record({ id: "chat:removed", chatId: "chat", chatType: "oneOnOne", senderId: "peer", senderName: "Peer", direction: "in", text: "removed", createdAt: recent, important: true, notificationPriority: "normal" });
+  await writeFile(join(dir, "teams-forward.json"), JSON.stringify({ chat: at(0) }));
+  let round = 0;
+  const sync = createTeamsSync({ dir, store, getToken: async () => "test", fetchImpl: (async (url: string) => {
+    if (url.includes("/me?")) return Response.json({ id: "me" });
+    if (url.includes("/me/chats?")) return Response.json({ value: [{ id: "chat", chatType: "oneOnOne" }] });
+    return Response.json({ value: round++ === 0 ? [message("source", sourceAt)] : [
+      { ...message("urgent", recent), importance: "high" },
+      { ...message("removed", recent), deletedDateTime: at(0) },
+      message("reply", replyAt, true), message("source", sourceAt),
+    ] });
+  }) as typeof fetch });
+  try {
+    assert.equal((await sync.refresh()).ok, true);
+    assert.equal(store.message("chat:source")?.repliedAt, null);
+    assert.equal((await sync.refresh()).ok, true);
+    assert.equal(store.message("chat:source")?.repliedAt, replyAt);
+    assert.equal(store.message("chat:urgent")?.notificationPriority, "urgent");
+    assert.ok(store.message("chat:removed")?.notificationCancelledAt);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("已缓存 Teams 来源被远端编辑后撤销延迟提醒，不注入旧正文或因重扫复活", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-teams-edited-notice-")), store = openTeamsStore(dir);
+  const createdAt = at(1);
+  store.record({ id: "chat:edited", chatId: "chat", chatType: "oneOnOne", senderId: "peer", senderName: "Peer", direction: "in", text: "old private content", createdAt, important: true, notificationPriority: "normal" });
+  await writeFile(join(dir, "teams-forward.json"), JSON.stringify({ chat: createdAt }));
+  const sync = createTeamsSync({ dir, store, getToken: async () => "synthetic", fetchImpl: (async (url: string) => {
+    if (url.includes("/me?")) return Response.json({ id: "me" });
+    if (url.includes("/me/chats?")) return Response.json({ value: [{ id: "chat", chatType: "oneOnOne" }] });
+    return Response.json({ value: [{ ...message("edited", createdAt), body: { content: "redacted replacement" }, importance: "normal" }] });
+  }) as typeof fetch });
+  try {
+    assert.equal((await sync.refresh()).ok, true);
+    assert.ok(store.message("chat:edited")?.notificationCancelledAt);
+    assert.equal(store.pendingPush().length, 0);
+    assert.equal((await sync.refresh()).ok, true);
+    assert.equal(store.pendingPush().length, 0);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });

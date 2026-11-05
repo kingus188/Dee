@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { defineDoc, type ConversationId, type EntryId, type Tx, type Cursor } from "@earendil-works/pi-durable";
 
 export type NotificationSource = { kind: "teams"; messageIds: string[] };
-export type NotificationReview = { status: "send"; text?: string } | { status: "cancel"; reason: string };
+export type NotificationReview = { status: "send"; text?: string } | { status: "cancel"; reason: string } | { status: "defer"; until: number };
 export const WechatNotifications = defineDoc<{
   items: { conversationId: ConversationId; requestId: string; source: NotificationSource }[];
 }>({ kind: "app.wechat.notifications", version: 1, scope: "session", initial: () => ({ items: [] }) });
