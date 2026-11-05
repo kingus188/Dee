@@ -1,0 +1,48 @@
+{
+  "release": "teams-archive-20261105-01",
+  "date": "2026-11-05",
+  "checks": {
+    "typeAndDependencyCheck": true,
+    "tests": { "total": 571, "passed": 571, "failed": 0 },
+    "candidateApiAndWebSmoke": true,
+    "frontendDomSelfCheck": true,
+    "desktop": { "refreshed": true, "home200": true, "mediaEnhancement200": true, "httpErrors": 0, "nativePackageReplaced": false },
+    "referencePrivateChat": {
+      "historyPagesRead": 16,
+      "historyReadComplete": true,
+      "savedMessages": 744,
+      "savedScreenshots": 74,
+      "linkedAttachmentRecords": 43,
+      "unavailableAttachmentOrCardRecords": 16
+    },
+    "databaseMediaDelivery": {
+      "databaseReopened": true,
+      "modelReadable": true,
+      "offlineArchiveRowsRead": 5,
+      "authenticatedPublicStatus": 200,
+      "contentType": "image/png",
+      "imageBytes": 76749
+    },
+    "archiveSnapshot": {
+      "messages": 2260,
+      "discoveredChats": 78,
+      "completedChatBaselines": 4,
+      "failedChats": 0,
+      "savedScreenshots": 190,
+      "pendingScreenshots": 2,
+      "linkedAttachmentRecords": 79,
+      "unavailableAttachmentOrCardRecords": 41,
+      "chatDiscoveryPending": true,
+      "fullArchiveComplete": false,
+      "note": "This is a verified snapshot. Background synchronization continues and later counts can be higher."
+    }
+  },
+  "database": { "containerPath": "/data/agent.sqlite", "archiveExpiryDays": null, "screenshotStorage": "database BLOB", "ordinaryFiles": "original Microsoft 365 links and metadata" },
+  "limits": [
+    "Not every historical chat has completed backfill",
+    "Ordinary shared-file originals are not all copied to the database",
+    "Channel consent is still required",
+    "No native screenshot or exhaustive manual media review was performed",
+    "No Git commit or push"
+  ]
+}

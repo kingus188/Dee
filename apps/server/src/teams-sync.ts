@@ -9,6 +9,7 @@ export type GraphMessage = {
   from?: { user?: { id?: string; displayName?: string } };
   body?: { content?: string; contentType?: string };
   mentions?: { mentioned?: { user?: { id?: string } } }[];
+  attachments?: { name?: string }[];
 };
 type Chat = { id: string; chatType: string; topic?: string | null; lastMessagePreview?: { createdDateTime?: string } | null };
 type Page<T> = { value: T[]; "@odata.nextLink"?: string };
@@ -20,9 +21,10 @@ const RECOVERY_MS = 24 * 60 * 60_000;
 
 export function messageText(message: GraphMessage) {
   const body = message.body?.content ?? "";
-  return (message.body?.contentType === "html" ? body.replace(/<[^>]*>/g, " ") : body)
+  const text = (message.body?.contentType === "html" ? body.replace(/<[^>]*>/g, " ") : body)
     .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
     .replace(/\s+/g, " ").trim().slice(0, 2000);
+  return [text, /<img\b/i.test(body) ? "[截图]" : "", ...(message.attachments ?? []).map(file => `[附件：${file.name || "未命名附件"}]`)].filter(Boolean).join(" ");
 }
 
 // 查询、提醒投递和定时轮询共用同一个采集器；并发刷新合并，不在刷新中产生通知。

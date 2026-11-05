@@ -4,7 +4,9 @@ import type { AppConfig } from "./config.js";
 import type { TeamsStore } from "./teams-store.js";
 import type { TeamsSender } from "./teams-reply-port.js";
 import { createGinaTokenProvider } from "./teams-gina.js";
-import { createTeamsTokenProvider, SEND_SCOPE, type TeamsAccount } from "./teams-auth.js";
+import { createTeamsTokenProvider, SEND_SCOPE, FILES_SCOPE, CHANNELS_SCOPE, type TeamsAccount } from "./teams-auth.js";
+import { createTeamsReader } from "./teams-reader.js";
+import { createTeamsArchiveSync } from "./teams-archive-sync.js";
 import { sendTeamsMessage } from "./teams-send.js";
 import { createTeamsSync } from "./teams-sync.js";
 import { startTeamsForward } from "./teams-forward.js";
@@ -61,6 +63,8 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   const authAccount = validAccount ? account : undefined;
   const getToken = authAccount ? createTeamsTokenProvider(authAccount) : createGinaTokenProvider(parsed.ginaHome!, env);
   const sendToken = authAccount ? createTeamsTokenProvider(authAccount, SEND_SCOPE) : getToken;
+  const getFilesToken = authAccount ? createTeamsTokenProvider(authAccount, FILES_SCOPE) : getToken;
+  const getChannelsToken = authAccount ? createTeamsTokenProvider(authAccount, CHANNELS_SCOPE) : getToken;
   const controller = new AbortController();
   const collector = createTeamsSync({ dir, store, getToken, rules: parsed.important, signal: controller.signal });
   let active = true;
@@ -80,6 +84,12 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   };
   teamsSender.refresh = sync.refresh;
   teamsSender.syncStatus = sync.status;
+  const read = createTeamsReader({ getToken, getFilesToken, getChannelsToken, signal: controller.signal, archive: store.archive });
+  const archiveSync = createTeamsArchiveSync(store.archive, read, controller.signal);
+  teamsSender.read = query => {
+    if (!active) return Promise.reject(new Error("Teams 集成已停止"));
+    return track(read(query));
+  };
 
   let stopForward: (() => Promise<void>) | undefined;
   try {
@@ -92,7 +102,7 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   } catch (error) {
     active = false;
     controller.abort();
-    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus;
+    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus; delete teamsSender.read;
     throw error;
   }
 
@@ -102,6 +112,12 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
     if (active) timer = setTimeout(() => { void poll(); }, 45_000);
   };
   if (!stopForward) void poll();
+  let archiveTimer: NodeJS.Timeout | undefined;
+  const archivePoll = async () => {
+    try { await track(archiveSync.refresh()); } catch { if (active) console.error("Teams 历史归档未完成，稍后重试"); }
+    if (active) archiveTimer = setTimeout(() => { void archivePoll(); }, 45_000);
+  };
+  void archivePoll();
 
   let closing: Promise<void> | undefined;
   return () => {
@@ -109,7 +125,8 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
     active = false;
     controller.abort();
     clearTimeout(timer);
-    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus;
+    clearTimeout(archiveTimer);
+    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus; delete teamsSender.read;
     const forwarding = stopForward?.();
     return closing = Promise.allSettled([...pending, forwarding]).then(() => {});
   };

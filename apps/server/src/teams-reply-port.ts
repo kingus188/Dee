@@ -1,8 +1,8 @@
-import type { TeamsReplyPort, TeamsSyncStatus } from "@assistant/features";
+import type { TeamsReadPort, TeamsReplyPort, TeamsSyncStatus } from "@assistant/features";
 import type { TeamsStore } from "./teams-store.js";
 
 // 发送函数由桌面端在拿到 Teams 令牌后挂上；未挂时 send_teams_reply 会说明未启用。
-export type TeamsSender = { send?: (chatId: string, text: string) => Promise<void>; refresh?: () => Promise<TeamsSyncStatus>; syncStatus?: () => { lastSuccessAt: string | null } };
+export type TeamsSender = { send?: (chatId: string, text: string) => Promise<void>; refresh?: () => Promise<TeamsSyncStatus>; syncStatus?: () => { lastSuccessAt: string | null }; read?: TeamsReadPort };
 
 export function createTeamsReplyPort(store: TeamsStore, sender: TeamsSender, offline = false): TeamsReplyPort {
   return {

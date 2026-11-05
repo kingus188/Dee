@@ -73,7 +73,10 @@ test("Teams synchronizes with WeChat disabled and close detaches stale sender ca
       wechat: { enabled: false, sendURL: "http://localhost:1/must-not-send", sendToken: "test", notify: async () => { throw new Error("disabled"); }, undelivered: async () => { throw new Error("disabled"); } } });
     const refresh = sender.refresh!;
     const send = sender.send!;
+    const read = sender.read!;
+    assert.ok(read);
     assert.equal((await refresh()).ok, true);
+    await read({ kind: "chats" });
     assert.ok(sender.syncStatus!().lastSuccessAt);
     assert.ok(requests.some(url => url.includes("graph.microsoft.com")));
     assert.ok(requests.every(url => !url.includes("localhost")));
@@ -82,6 +85,7 @@ test("Teams synchronizes with WeChat disabled and close detaches stale sender ca
     assert.deepEqual(sender, {});
     assert.equal((await refresh()).ok, false);
     await assert.rejects(send("chat", "text"), /已停止/);
+    await assert.rejects(read({ kind: "chats" }), /已停止/);
     assert.equal(requests.length, count);
   } finally { await close(); globalThis.fetch = original; store.close(); await rm(dir, { recursive: true, force: true }); }
 });

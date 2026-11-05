@@ -9,6 +9,8 @@ import { activityLabel, toolActivities } from "./activities.js";
 import { formatFileSize } from "../ui/format.js";
 import { showToast } from "../ui/toast.js";
 import { Icon } from "../ui/Icon.js";
+import { TeamsMedia } from "./TeamsMedia.js";
+import { TeamsRecords, teamsRecords } from "./TeamsRecords.js";
 
 export function ResponseCard({ text, streaming = false }: { text: string; streaming?: boolean }) {
   const [copied, setCopied] = useState(false);
@@ -38,6 +40,7 @@ type ErrorActions = { onRetry?: (text: string) => void; onSettings?: () => void 
 function TurnCard({ turn, live, busy, onRetry, onSettings }: { turn: ChatTurn; live?: ConversationView["live"]; busy: boolean } & ErrorActions) {
   const info = extractLiveInfo(live);
   const activities = toolActivities(turn.entries, info?.runningTools ?? [], busy);
+  const records = teamsRecords(activities);
   const responses = turn.entries.filter(entry => entry.kind === "assistant" && entry.text && !entry.error);
   const intermediate = responses.slice(0, -1);
   const errorIndex = turn.entries.findLastIndex(entry => !!entry.error);
@@ -49,6 +52,7 @@ function TurnCard({ turn, live, busy, onRetry, onSettings }: { turn: ChatTurn; l
   const hasError = !!failure || turn.entries.some(entry => entry.isError);
   return <section className="chat-turn" data-turn-id={turn.id}>
     <UserMessageBubble entry={turn.user} />
+    {records.length ? <TeamsRecords records={records} /> : <TeamsMedia activities={activities} />}
     {(activities.length > 0 || !!intermediate.length || !!previousErrors.length || !!info?.thinking) && <details className="turn-activities">
       <summary><Icon name="chevron-right" /><span className="activity-count">{activities.length + previousErrors.length}</span><span>{busy ? "正在处理" : hasError ? "有步骤未完成" : "处理过程"}</span></summary>
       <div className="turn-activity-list">{activities.map(activity => <div className="turn-activity" key={activity.id}>
@@ -69,7 +73,8 @@ function TurnCard({ turn, live, busy, onRetry, onSettings }: { turn: ChatTurn; l
         <details className="model-error-details"><summary>查看错误详情</summary><pre>{failure.error}</pre></details>
       </div>
     </div>}
-    {!!responses.length && <div className="message-row assistant-row"><ResponseCard text={responses.at(-1)!.text} /></div>}
+    {!!responses.length && (records.length ? <details className="teams-records-summary"><summary>助手说明</summary><ResponseCard text={responses.at(-1)!.text} /></details>
+      : <div className="message-row assistant-row"><ResponseCard text={responses.at(-1)!.text} /></div>)}
     {info?.text && <div className="message-row assistant-row"><ResponseCard text={info.text} streaming /></div>}
     {busy && !info?.text && <p className="turn-thinking turn-loading" role="status"><span className="activity-spinner" aria-hidden="true" />{info?.runningTools.length ? "正在执行…" : "思考中…"}</p>}
   </section>;

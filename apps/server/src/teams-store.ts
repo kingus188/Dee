@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { TeamsChatRef, TeamsDraft, TeamsDraftInput, TeamsInboxQuery, TeamsMessageRow } from "@assistant/features";
+import { openTeamsArchive } from "./teams-archive-store.js";
+import { teamsRecords } from "./teams-records.js";
 
 export type TeamsMessage = {
   id: string; chatId: string; chatType: string; senderId: string; senderName: string;
@@ -12,7 +14,10 @@ const iso = (ms: number) => new Date(ms).toISOString();
 // Teams 聊天记录与「已推送 / 已回复」标记，与 Agent 同库（agent.sqlite）。
 export function openTeamsStore(dataDir: string) {
   const db = new DatabaseSync(join(dataDir, "agent.sqlite"));
+  let archive: ReturnType<typeof openTeamsArchive>;
   try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    archive = openTeamsArchive(db);
     db.exec(`PRAGMA busy_timeout = 5000;
       CREATE TABLE IF NOT EXISTS teams_messages (
         id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, chat_type TEXT NOT NULL,
@@ -50,9 +55,19 @@ export function openTeamsStore(dataDir: string) {
   const row = (r: Record<string, unknown>): TeamsMessageRow & { id: string; chatId: string; chatTopic: string | null } => ({
     id: String(r.id), chatId: String(r.chat_id), chatTopic: (r.chat_topic as string | null) ?? null, chatType: String(r.chat_type), senderName: String(r.sender_name), direction: r.direction as "in" | "out", text: String(r.text),
     createdAt: String(r.created_at), important: r.important === 1, pushedAt: (r.pushed_at as string | null) ?? null, repliedAt: (r.replied_at as string | null) ?? null,
+    media: archive.mediaRows(String(r.chat_id), String(r.id).slice(String(r.chat_id).length + 1)),
   });
 
   return {
+    archive,
+    records(rows: TeamsMessageRow[]) {
+      const messages = rows.flatMap(row => {
+        if (!row.id || !row.chatId) return [];
+        const message = archive.message(row.chatId, row.id.slice(row.chatId.length + 1));
+        return message ? [{ ...message, chatId: row.chatId }] : [];
+      });
+      return messages.length === rows.length ? teamsRecords(archive, messages) : [];
+    },
     // 重复写入同一条消息无副作用；用户自己发出的消息会把此前该聊天里的未回复来信标为已回复。
     record(message: TeamsMessage) {
       db.exec("BEGIN IMMEDIATE");
