@@ -22,7 +22,6 @@ import StorageSettings from './features/settings/StorageSettings.js'
 import useTodoData from './hooks/useTodoData.js'
 import {
   localDate,
-  isOverdue,
   newTask,
   priorities,
   selectTasks,
@@ -59,33 +58,7 @@ function DaylightContent({ active, headerActions, taskId }: DaylightPageProps) {
   const isCalendar = scope === 'calendar'
   const currentProject = data.projects.find((project) => project.id === scope)
   const tasks = selectTasks(data.tasks, scope, query, priority, sort)
-  const scopedTasks = selectTasks(data.tasks, scope, '', '', 'newest')
-  const completed = scopedTasks.filter((task) => task.status === 'done').length
-  const completion = scopedTasks.length
-    ? Math.round((completed / scopedTasks.length) * 100)
-    : 0
-  const title =
-    currentProject?.name ||
-    {
-      all: '全部待办',
-      today: '今天',
-      overdue: '逾期待办',
-      completed: '已完成',
-      calendar: '日历',
-    }[scope] ||
-    '我的待办'
-  const subtitle =
-    currentProject?.description ||
-    {
-      all: '从一个想法开始，让每件事都有着落。',
-      today: '把注意力留给今天，一次推进一件事。',
-      overdue: '重新安排这些待办，让进度回到手中。',
-      completed: '每一件完成的小事，都是向前的一步。',
-    }[scope]
-
-  const dateLabel = new Intl.DateTimeFormat('zh-CN', {
-    month: 'long', day: 'numeric', weekday: 'long',
-  }).format(new Date())
+  const title = currentProject?.name || '把事情一件件做好'
 
   useEffect(() => { void refresh() }, [])
 
@@ -113,6 +86,8 @@ function DaylightContent({ active, headerActions, taskId }: DaylightPageProps) {
         settings === null
       ) {
         event.preventDefault()
+        const options = searchRef.current?.closest('details')
+        if (options) options.open = true
         searchRef.current?.focus()
       }
     }
@@ -189,26 +164,9 @@ function DaylightContent({ active, headerActions, taskId }: DaylightPageProps) {
               {headerActions}
             </div>
           </header>
-          <TaskNavigation
-            data={data}
-            scope={scope}
-            disabled={disabled}
-            navigate={navigate}
-            createProject={createProject}
-            openSettings={openSettings}
-          />
-          {isCalendar && (
-            <label className="task-search calendar-search">
-              <SearchOutlined />
-              <input ref={searchRef} aria-label="搜索待办" placeholder="搜索待办…" value={query} onChange={(event) => setQuery(event.target.value)} />
-              <kbd>⌘ K</kbd>
-            </label>
-          )}
-          {!isCalendar && (
-            <>
+          <>
               <div className="project-header">
                 <div className="project-intro">
-                  <p className="task-eyebrow">{dateLabel}</p>
                   <div className="title-row">
                     <h1>{title}</h1>
                     {currentProject && (
@@ -222,34 +180,42 @@ function DaylightContent({ active, headerActions, taskId }: DaylightPageProps) {
                       </button>
                     )}
                   </div>
-                  <p>{subtitle}</p>
                 </div>
                 <button
                   className="button primary new-task"
                   disabled={disabled}
-                  onClick={() => createTask()}
+                  onClick={() => {
+                    const input = document.getElementById('daylight-quick-add')
+                    if (!isCalendar && data.projects.length && input) input.focus()
+                    else createTask()
+                  }}
                 >
-                  <PlusOutlined /> 新建待办
+                  <PlusOutlined /> 新增
                 </button>
               </div>
-              <nav className="task-focus-strip" aria-label="待办概览">
-                <button aria-pressed={scope === 'today'} onClick={() => navigate('today')}><span>今天要做</span><strong>{data.tasks.filter(task => task.dueDate === localDate() && task.status !== 'done').length}</strong><small>跨项目的今日清单</small></button>
-                <button className="task-focus-overdue" aria-pressed={scope === 'overdue'} onClick={() => navigate('overdue')}><span>已经逾期</span><strong>{data.tasks.filter(task => isOverdue(task)).length}</strong><small>留一点时间重新安排</small></button>
-                <button aria-pressed={scope === 'completed'} onClick={() => navigate('completed')}><span>已经完成</span><strong>{data.tasks.filter(task => task.status === 'done').length}</strong><small>每一小步都算数</small></button>
-              </nav>
+          <TaskNavigation
+            data={data}
+            scope={scope}
+            disabled={disabled}
+            navigate={navigate}
+            createProject={createProject}
+            openSettings={openSettings}
+          />
+              <details className="task-display-options">
+                <summary>搜索与显示{query || (!isCalendar && priority) ? ' · 已筛选' : ''}</summary>
               <div className="board-toolbar">
                 <div className="view-tabs" role="group" aria-label="显示方式">
                   <button
-                    aria-pressed={view === 'board'}
-                    className={view === 'board' ? 'active' : ''}
-                    onClick={() => setView('board')}
+                    aria-pressed={!isCalendar && view === 'board'}
+                    className={!isCalendar && view === 'board' ? 'active' : ''}
+                    onClick={() => { if (isCalendar) setScope('all'); setView('board') }}
                   >
                     <AppstoreOutlined /> 看板
                   </button>
                   <button
-                    aria-pressed={view === 'list'}
-                    className={view === 'list' ? 'active' : ''}
-                    onClick={() => setView('list')}
+                    aria-pressed={!isCalendar && view === 'list'}
+                    className={!isCalendar && view === 'list' ? 'active' : ''}
+                    onClick={() => { if (isCalendar) setScope('all'); setView('list') }}
                   >
                     <UnorderedListOutlined /> 列表
                   </button>
@@ -266,11 +232,12 @@ function DaylightContent({ active, headerActions, taskId }: DaylightPageProps) {
                     />
                     <kbd>⌘ K</kbd>
                   </label>
-                <div className="board-filters">
+                {!isCalendar && <div className="board-filters">
                   <label>
                     <span className="sr-only">筛选优先级</span>
                     <select
                       aria-label="筛选优先级"
+                      disabled={isCalendar}
                       value={priority}
                       onChange={(event) => setPriority(event.target.value)}
                     >
@@ -286,6 +253,7 @@ function DaylightContent({ active, headerActions, taskId }: DaylightPageProps) {
                     <span className="sr-only">排序方式</span>
                     <select
                       aria-label="排序方式"
+                      disabled={isCalendar}
                       value={sort}
                       onChange={(event) => setSort(event.target.value)}
                     >
@@ -295,39 +263,15 @@ function DaylightContent({ active, headerActions, taskId }: DaylightPageProps) {
                       <option value="priority">优先级</option>
                     </select>
                   </label>
-                </div>
-                </div>
-              </div>
-              <div className="board-summary">
-                <span>
-                  <span className="task-total">{scopedTasks.length}</span> 条待办
-                  <b>·</b> {scopedTasks.length - completed} 条待完成
-                  {(query || priority) && (
-                    <span className="filter-result">
-                      {' '}
-                      · 筛选后 {tasks.length} 条
-                      <button
-                        className="text-button"
-                        onClick={() => {
-                          setQuery('')
-                          setPriority('')
-                        }}
-                      >
-                        清除筛选 <CloseOutlined />
-                      </button>
-                    </span>
-                  )}
-                </span>
-                <div className="summary-progress">
-                  <span>已完成 {completed} 条</span>
-                  <div role="progressbar" aria-label="待办完成比例" aria-valuenow={completion} aria-valuemin={0} aria-valuemax={100}>
-                    <i style={{ width: `${completion}%` }} />
-                  </div>
-                  <strong>{completion}%</strong>
+                </div>}
                 </div>
               </div>
-            </>
-          )}
+              </details>
+              {(query || (!isCalendar && priority)) && !isCalendar && <div className="task-filter-summary" role="status">
+                筛选后 {tasks.length} 条
+                <button className="text-button" onClick={() => { setQuery(''); setPriority('') }}>清除筛选 <CloseOutlined /></button>
+              </div>}
+          </>
           <div hidden={isCalendar || !data.projects.length || !!loadError || loading}>
             <TaskQuickAdd projects={data.projects} projectId={currentProject?.id} dueDate={scope === 'today' ? localDate() : null} disabled={disabled} onSave={task => mutate(() => store.saveTask(task), '已添加待办')} />
           </div>
@@ -410,13 +354,6 @@ function DaylightContent({ active, headerActions, taskId }: DaylightPageProps) {
           )}
           <footer className="main-footer">
             <span role="status"><i className={busy || loading || loadError ? 'is-saving' : ''} />{loading ? '正在读取待办…' : loadError ? '读取失败，请重试' : busy ? '正在保存…' : '所有更改已保存'}</span>
-            <span>
-              {isCalendar
-                ? '拖动待办调整日期 · 点击标题编辑'
-                : view === 'board'
-                  ? '拖动卡片切换状态 · 点击标题编辑'
-                  : '在状态选项中移动待办'}
-            </span>
           </footer>
         </main>
       </div>

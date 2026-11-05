@@ -99,7 +99,7 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
       <div className="pending-meta"><span className="pending-name">{file.name}</span><span className="pending-size">{formatFileSize(file.size)}</span></div>
       <button type="button" className="btn-remove-pending" aria-label={`移除 ${file.name}`} onClick={() => remove(file)}>×</button>
     </div>)}</div>}
-    <div className="composer-main"><textarea ref={textarea} className="chat-textarea" id="chat-textarea" aria-label="给小 D 发消息" role="combobox" aria-autocomplete="list" aria-expanded={menuVisible} aria-controls={menuVisible ? "composer-commands" : undefined} aria-activedescendant={menuVisible ? `command-${suggestions[selectedIndex].name}` : undefined} placeholder="说说你的想法，输入 / 查看快捷指令…" rows={1} value={draft} onChange={event => setDraft(event.target.value)}
+    <div className="composer-main"><textarea ref={textarea} className="chat-textarea" id="chat-textarea" aria-label="给小 D 发消息" role="combobox" aria-autocomplete="list" aria-expanded={menuVisible} aria-controls={menuVisible ? "composer-commands" : undefined} aria-activedescendant={menuVisible ? `command-${suggestions[selectedIndex].name}` : undefined} placeholder="发消息，或交代一件事…" rows={1} value={draft} onChange={event => setDraft(event.target.value)}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
       onKeyDown={event => {
         if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -113,8 +113,8 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
       }}
       onPaste={event => { if (event.clipboardData.files.length) { event.preventDefault(); void addFiles(event.clipboardData.files); } }} />
       <div className="composer-actions">{busy && <button type="button" className="btn-abort" id="btn-abort" style={{ display: "inline-flex" }} onClick={() => { void stopReply().catch(() => showToast("暂时没能停止回复，请重试。", "error")); }}>停止</button>}
-        <button type="button" className="icon-button attach-button" disabled={processing} aria-label="添加图片或文件" onClick={() => { fileInput.current!.value = ""; fileInput.current!.click(); }}><Icon name="paperclip" /></button>
-        <button type="button" className="btn-send" id="btn-send" aria-label={sending ? "正在发送" : "发送消息"} aria-busy={sending} disabled={sending || processing || (!draft.trim() && !attachments.length)} onClick={() => void submit()}><Icon name="send" /></button>
+        <button type="button" className="icon-button attach-button" disabled={processing} aria-label="添加附件（图片或文件）" onClick={() => { fileInput.current!.value = ""; fileInput.current!.click(); }}><Icon name="paperclip" /><span>添加附件</span></button>
+        <button type="button" className="btn-send" id="btn-send" aria-label={sending ? "正在发送" : "发送消息"} aria-busy={sending} disabled={sending || processing || (!draft.trim() && !attachments.length)} onClick={() => void submit()}><Icon name="arrow-up" /></button>
       </div>
     </div>
     <input ref={fileInput} type="file" multiple className="file-input-hidden" accept="image/png,image/jpeg,image/webp,image/gif,text/*,.md,.json,.ts,.tsx,.py,.yaml,.yml,.csv,.log,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.docx" onChange={event => { if (event.target.files) void addFiles(event.target.files); }} />

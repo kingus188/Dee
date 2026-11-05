@@ -6,7 +6,7 @@ const LocalSkillsPage = lazy(() => import("./LocalSkillsPage.js").then(module =>
 const NotesPage = lazy(() => import("./NotesPage.js").then(module => ({ default: module.NotesPage })));
 const TasksPage = lazy(() => import("./TasksPage.js").then(module => ({ default: module.TasksPage })));
 
-export function WorkspaceData({ group, owner, connect, headerActions }: { group: CardGroup | null; owner: number | null; connect: () => Promise<number>; headerActions?: ReactNode }) {
+export function WorkspaceData({ group, owner, connect, headerActions, skillSource, onSkillSourceChange }: { group: CardGroup | null; owner: number | null; connect: () => Promise<number>; headerActions?: ReactNode; skillSource?: "remote"; onSkillSourceChange?: (remote: boolean) => void }) {
   const [opened, setOpened] = useState<Partial<Record<CardGroup, true>>>({});
   const [context, setContext] = useState<number | null>(owner), [error, setError] = useState("");
   useEffect(() => { if (group) setOpened(old => ({ ...old, [group]: true })); }, [group]);
@@ -19,7 +19,7 @@ export function WorkspaceData({ group, owner, connect, headerActions }: { group:
   }, [group, context]);
   return <>
     {opened.memory && <div hidden={group !== "memory"}><PageLoad><PersonalPage kind="memory" active={group === "memory"} /></PageLoad></div>}
-    {opened.skills && <div hidden={group !== "skills"}><PageLoad><LocalSkillsPage active={group === "skills"} /></PageLoad></div>}
+    {opened.skills && <div hidden={group !== "skills"}><PageLoad><LocalSkillsPage active={group === "skills"} remote={skillSource === "remote"} onRemoteChange={onSkillSourceChange} /></PageLoad></div>}
     {(["notes", "tasks"] as const).map(kind => opened[kind] && <div className={kind === "notes" ? "notes-page-host" : undefined} hidden={group !== kind} key={kind}>
       <PageLoad>{context === null ? error ? <p role="alert" className="workspace-error">{error}</p> : <p role="status">正在读取数据空间…</p> : kind === "notes" ? <NotesPage key={context} owner={context} active={group === kind} headerActions={headerActions} /> : <TasksPage key={context} owner={context} active={group === kind} />}</PageLoad>
     </div>)}

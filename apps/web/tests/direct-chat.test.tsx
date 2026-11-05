@@ -140,7 +140,7 @@ test("菜单直接展示个人数据，切换分类不显示对话且不发送�
   await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="继续对话"]')!.click(); });
   assert.ok(document.getElementById("message-history"));
   assert.equal(document.querySelector(".data-panel"), null);
-  await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="首页"]')!.click(); });
+  await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="今日概览"]')!.click(); });
     await act(async () => { document.querySelector<HTMLButtonElement>(".today-shortcut")!.click(); });
   assert.match(document.querySelector<HTMLTextAreaElement>("#chat-textarea")!.value, /Daylight 待办/);
   assert.equal(document.getElementById("workspace")!.dataset.view, "chat");
@@ -164,7 +164,7 @@ test("状态浮层在外部点击、焦点移出、Escape 和切换页面时关�
   await act(async () => { document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   assert.equal(service.open, false); assert.equal(document.activeElement, summary);
   await open();
-  await act(async () => { document.querySelector<HTMLAnchorElement>('[aria-label="首页"]')!.focus(); });
+  await act(async () => { document.querySelector<HTMLAnchorElement>('[aria-label="继续对话"]')!.focus(); });
   assert.equal(service.open, false);
   await open();
   await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="继续对话"]')!.click(); });

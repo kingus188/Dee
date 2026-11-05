@@ -2,7 +2,7 @@ import type { DaylightSnapshot, PersonalData, WorkspaceActivities, WorkspaceMail
 import type { CardGroup } from "../chat/cards.js";
 import { Icon } from "../ui/Icon.js";
 import { isDaylightSnapshot, isPersonalData, isWorkspaceActivities, isWorkspaceMail } from "./data.js";
-import { greeting } from "./model.js";
+import { activityPhase } from "./model.js";
 import { TodayApprovals, TodayMail, TodayProgress, TodayTasks } from "./TodaySections.js";
 import { usePageResource } from "./usePageResource.js";
 
@@ -30,6 +30,11 @@ export function TodayPage({ active, onPrompt, onGroup, onDaylight, onActivities,
   const resources = [daylight, personal, activities, mail];
   const loading = resources.some(resource => resource.loading);
   const now = new Date();
+  // Quiet successful empty states, but never hide an error or incomplete data.
+  const showProgress = !activities.data || !!activities.error || activities.data.truncated || activities.data.items.some(item => item.status === "failed" || ["running", "pending"].includes(activityPhase(item)));
+  const showApprovals = !personal.data || !!personal.error || [...personal.data.memory, ...personal.data.skills].some(item => item.status === "pending");
+  const mailAttention = !!mail.error || !!mail.data?.status.error;
+
 
   function refreshAll() {
     for (const resource of resources) resource.refresh();
@@ -37,19 +42,21 @@ export function TodayPage({ active, onPrompt, onGroup, onDaylight, onActivities,
 
   return <div className="today-page" hidden={!active}>
     <header className="today-page-header">
-      <div><p className="today-date"><Icon name="calendar-days" /><time dateTime={`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`}>{now.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "long" })}</time></p><h1>今天</h1><p className="today-greeting">{greeting(now)}</p></div>
+      <div><p className="today-date"><Icon name="calendar-days" /><time dateTime={`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`}>{now.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "long" })}</time></p><h1>今天</h1></div>
       <button type="button" className="today-refresh-button" disabled={loading} onClick={refreshAll}><Icon name="rotate-ccw" />{loading ? "正在更新" : "刷新"}</button>
     </header>
     <div className="today-workspace-grid">
       <TodayTasks resource={daylight} onDaylight={onDaylight} />
-      <TodayProgress resource={activities} onActivities={onActivities} onConversation={onConversation} />
-      <TodayApprovals resource={personal} onGroup={onGroup} />
-      <TodayMail resource={mail} onSettings={onSettings} />
+      {showProgress && <TodayProgress resource={activities} onActivities={onActivities} onConversation={onConversation} />}
+      {showApprovals && <TodayApprovals resource={personal} onGroup={onGroup} />}
     </div>
-    <section className="today-shortcuts" aria-labelledby="today-shortcuts-title">
-      <div className="today-shortcuts-heading"><h2 id="today-shortcuts-title">从一句话开始</h2><p>交给小 D，一起往前走。</p></div>
+    <details className="today-secondary" open={mailAttention || undefined}>
+      <summary><Icon name="mail" /><span>最近邮件</span>{mailAttention && <span className="today-secondary-attention">需要检查</span>}<Icon name="chevron-down" /></summary>
+      <TodayMail resource={mail} onSettings={onSettings} />
+    </details>
+    <details className="today-secondary today-shortcuts">
+      <summary><Icon name="message-circle" /><span>从一句话开始</span><Icon name="chevron-down" /></summary>
       <div className="today-shortcut-list">{prompts.map(prompt => <button type="button" key={prompt.label} className="today-shortcut" onClick={() => onPrompt(prompt.text)}><Icon name={prompt.icon} /><span>{prompt.label}</span><Icon name="arrow-up-right" /></button>)}</div>
-    </section>
-    <p className="today-page-footnote">显示个人空间中的真实记录 · 页面可见时每 30 秒更新</p>
+    </details>
   </div>;
 }

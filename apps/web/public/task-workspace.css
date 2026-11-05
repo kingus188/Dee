@@ -231,3 +231,73 @@
   .daylight-workspace .quick-add-options .button { min-height: 38px; margin-left: 0; justify-content: center; }
   .daylight-workspace .list-view td { padding: 0; }
 }
+
+/* Minimal task workspace: content first, secondary controls on demand. */
+.daylight-workspace .project-header,
+.daylight-workspace .task-navigation-row,
+.daylight-workspace .task-display-options,
+.daylight-workspace .task-filter-summary,
+.daylight-workspace .task-calm-list,
+.daylight-workspace .task-quick-add,
+.daylight-workspace .main-footer {
+  width: min(880px, calc(100% - 80px));
+  margin-inline: auto;
+}
+.daylight-workspace .project-header { padding: 48px 0 28px; }
+.daylight-workspace .title-row h1 { font-size: 28px; letter-spacing: -.035em; font-weight: 550; }
+.daylight-workspace .project-header .new-task { min-height: 38px; padding: 8px 15px; border-radius: 20px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border); }
+.daylight-workspace .task-navigation-row { padding: 0; align-items: flex-start; gap: 10px; }
+.daylight-workspace .task-scope-tabs { gap: 26px; border-bottom: 1px solid var(--border); flex: 1; }
+.daylight-workspace .task-scope-tabs button { min-height: 47px; padding: 0 0 13px; border-bottom: 2px solid transparent; border-radius: 0; gap: 7px; font-size: 13px; }
+.daylight-workspace .task-scope-tabs button[aria-current="page"] { background: transparent; color: var(--primary); border-bottom-color: var(--primary); }
+.daylight-workspace .task-project-options { flex-basis: 100%; }
+.daylight-workspace summary { cursor: pointer; width: fit-content; color: var(--text-muted); font-size: 11px; padding: 10px 0; min-height: 36px; }
+.daylight-workspace summary:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; border-radius: 4px; }
+.daylight-workspace .task-project-tools { flex-wrap: wrap; padding: 4px 0 12px; gap: 10px; }
+.daylight-workspace .task-project-tools .text-button { min-height: 36px; font-size: 12px; }
+.daylight-workspace .task-display-options { margin-bottom: 12px; }
+.daylight-workspace .board-toolbar { padding: 6px 0 14px; margin: 0; border: 0; }
+.daylight-workspace .task-tools { flex: 1; }
+.daylight-workspace .task-search { flex: 1; min-width: 180px; }
+.daylight-workspace .task-filter-summary { display: flex; align-items: center; gap: 14px; color: var(--text-muted); font-size: 12px; padding-bottom: 12px; }
+.daylight-workspace .task-quick-add { padding: 3px 12px; margin-bottom: 12px; border-radius: 9px; background: var(--bg-page); }
+.daylight-workspace .quick-add-title input { min-height: 48px; }
+.daylight-workspace .quick-add-title .text-button { min-height: 40px; flex-shrink: 0; font-size: 12px; }
+.daylight-workspace .quick-add-details summary { padding-top: 0; min-height: 28px; font-size: 10px; }
+.daylight-workspace .quick-add-details[open] { padding-bottom: 10px; }
+.daylight-workspace .task-calm-list { padding: 0; min-height: 0; flex: 0 0 auto; }
+.daylight-workspace .task-rows { list-style: none; margin: 0; padding: 0; }
+.daylight-workspace .task-row { display: flex; align-items: center; gap: 18px; min-height: 90px; padding: 20px 0; border-bottom: 1px solid var(--border); }
+.daylight-workspace .task-row > .list-check { width: 24px; min-width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; padding: 0; }
+.daylight-workspace .task-row .list-check:not(.is-done) > .anticon { opacity: 0; }
+.daylight-workspace .task-row .list-check:not(.is-done):hover > .anticon,
+.daylight-workspace .task-row .list-check:not(.is-done):focus-visible > .anticon { opacity: .5; }
+.daylight-workspace .task-row-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 7px; align-items: flex-start; text-align: left; padding: 0; }
+.daylight-workspace .task-calm-list .list-task-name { font-size: 14px; font-weight: 450; line-height: 1.65; overflow-wrap: anywhere; text-decoration: none; }
+.daylight-workspace .task-row.is-done .list-task-name { color: var(--text-muted); text-decoration: line-through; }
+.daylight-workspace .task-row-meta { display: flex; flex-wrap: wrap; gap: 7px 13px; color: var(--text-muted); font-size: 11px; }
+.daylight-workspace .task-important { color: var(--danger); }
+.daylight-workspace .task-row-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; color: var(--text-muted); font-size: 11px; }
+.daylight-workspace .task-row-side select { min-height: 32px; border-color: transparent; background: transparent; padding: 4px; font-size: 11px; max-width: 100px; }
+.daylight-workspace .task-row-side .task-review-status { color: var(--danger); }
+.daylight-workspace .task-row-side .overdue { color: var(--danger); }
+.daylight-workspace .main-footer { padding: 18px 0 30px; margin-top: 0; font-size: 10px; opacity: .75; }
+.daylight-workspace .task-calm-list .empty-state { min-height: 160px; padding: 32px 16px; }
+@container (max-width: 600px) {
+  .daylight-workspace .project-header,
+  .daylight-workspace .task-navigation-row,
+  .daylight-workspace .task-display-options,
+  .daylight-workspace .task-filter-summary,
+  .daylight-workspace .task-calm-list,
+  .daylight-workspace .task-quick-add,
+  .daylight-workspace .main-footer { width: calc(100% - 40px); }
+  .daylight-workspace .project-header { padding: 28px 0 22px; flex-direction: row; align-items: center; gap: 12px; }
+  .daylight-workspace .title-row h1 { font-size: 23px; }
+  .daylight-workspace .project-header .new-task { width: auto; min-width: 70px; font-size: 11px; }
+  .daylight-workspace .task-row { gap: 12px; padding: 18px 0; }
+  .daylight-workspace .task-calm-list .list-task-name { font-size: 13px; }
+  .daylight-workspace .task-row-side { font-size: 10px; }
+  .daylight-workspace .board-toolbar { margin: 0; }
+  .daylight-workspace .task-tools { width: 100%; }
+  .daylight-workspace .task-scope-tabs { gap: 25px; }
+}

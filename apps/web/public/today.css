@@ -343,3 +343,29 @@
   .today-page button:active,
   .activity-page button:active { transform: none; }
 }
+
+/* Today is a quiet optional overview, with errors and decisions left visible. */
+.today-page { max-width: 1000px; padding: 40px 56px 64px; }
+.today-page-header h1 { font-size: 28px; font-weight: 550; }
+.today-workspace-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.today-page .today-panel { background: transparent; border-radius: 0; padding: 24px 0; border-bottom: 1px solid var(--border); }
+.today-page .today-panel-heading h2 { font-size: 15px; font-weight: 550; }
+.today-page .today-panel-heading > .icon { display: none; }
+.today-page .today-task-totals { font-size: 12px; gap: 20px; }
+.today-page .today-task-totals strong { font-size: 17px; }
+.today-page .today-empty { min-height: 0; padding: 16px 0; }
+.today-page .today-empty strong { font-size: 13px; font-weight: 400; color: var(--text-muted); }
+.today-page .today-task-footer { margin-top: 12px; padding-top: 0; }
+.today-page .today-approval-link { background: var(--bg-subtle); border-radius: 9px; }
+.today-secondary { border-bottom: 1px solid var(--border); }
+.today-secondary > summary { display: flex; align-items: center; gap: 10px; min-height: 64px; cursor: pointer; list-style: none; font-size: 13px; color: var(--text-muted); }
+.today-secondary > summary::-webkit-details-marker { display: none; }
+.today-secondary > summary .icon { width: 17px; height: 17px; }
+.today-secondary > summary .icon:last-child { margin-left: auto; width: 14px; }
+.today-secondary[open] > summary .icon:last-child { transform: rotate(180deg); }
+.today-secondary-attention { color: var(--danger); font-size: 11px; }
+.today-secondary .today-panel { border: 0; padding-top: 4px; }
+.today-secondary.today-shortcuts { margin-top: 0; }
+.today-secondary .today-shortcut-list { padding-bottom: 20px; }
+.today-secondary .today-shortcut { background: var(--bg-subtle); border: 0; }
+@media (max-width: 700px) { .today-page { padding: 26px 24px 40px; }.today-page-header h1 { font-size: 25px; }.today-page .today-panel { padding-block: 20px; }.today-secondary > summary { min-height: 58px; } }

@@ -1,11 +1,13 @@
 import type { CardGroup } from "../chat/cards.js";
 
 export type WorkspacePage = "home" | "chat" | "daylight" | "activity" | "data" | "reports" | "settings";
-export type WorkspaceRoute = { page: WorkspacePage; group: CardGroup | null; conversationId?: number; taskId?: string };
+export type WorkspaceRoute = { page: WorkspacePage; group: CardGroup | null; conversationId?: number; taskId?: string; skillSource?: "remote" };
 const groups: Record<string, CardGroup> = { memory: "memory", skills: "skills", notes: "notes", schedules: "tasks" };
 
 export function readWorkspaceRoute(hash: string): WorkspaceRoute {
+  if (!hash || hash === "#" || hash === "#/") return { page: "chat", group: null };
   const [name, rawId, extra] = hash.replace(/^#\/?/, "").split("/");
+  if (name === "skills" && rawId === "remote" && extra === undefined) return { page: "data", group: "skills", skillSource: "remote" };
   if (name === "tasks" && rawId && extra === undefined) {
     try {
       const taskId = decodeURIComponent(rawId);
@@ -21,6 +23,7 @@ export function readWorkspaceRoute(hash: string): WorkspaceRoute {
 }
 
 export function workspaceHash(route: WorkspaceRoute): string {
+  if (route.page === "data" && route.group === "skills" && route.skillSource === "remote") return "#skills/remote";
   const name = route.page === "data" ? route.group === "tasks" ? "schedules" : route.group ?? "memory" : route.page === "home" ? "today" : route.page === "daylight" ? "tasks" : route.page;
   if (route.page === "daylight" && route.taskId) return `#tasks/${encodeURIComponent(route.taskId)}`;
   return `#${name}${route.conversationId && (route.page === "chat" || (route.page === "data" && ["tasks", "notes"].includes(route.group ?? ""))) ? `/${route.conversationId}` : ""}`;

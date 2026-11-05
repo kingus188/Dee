@@ -1,17 +1,5 @@
-import {
-  CheckOutlined,
-  SearchOutlined,
-  ArrowRightOutlined,
-} from '@ant-design/icons'
-import {
-  statuses,
-  priorities,
-  progress,
-  isOverdue,
-  type Task,
-  type Project,
-  type Status,
-} from '../../domain/todo.js'
+import { CheckOutlined, SearchOutlined } from '@ant-design/icons'
+import { statuses, priorities, progress, isOverdue, localDate, type Task, type Project, type Status } from '../../domain/todo.js'
 
 interface Props {
   tasks: Task[]
@@ -22,99 +10,36 @@ interface Props {
   createTask: () => void
 }
 
-export default function TaskList({
-  tasks,
-  projects,
-  disabled,
-  move,
-  onEdit,
-  createTask,
-}: Props) {
-  return (
-    <div className="list-view">
-      {tasks.length ? (
-        <table>
-          <thead>
-            <tr>
-              <th>任务名称</th>
-              <th>项目</th>
-              <th>状态</th>
-              <th>优先级</th>
-              <th>截止日期</th>
-              <th>进度</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tasks.map((task) => (
-              <tr key={task.id}>
-                <td>
-                  <div className="list-title">
-                    <button
-                      className={`list-check ${task.status === 'done' ? 'is-done' : ''}`}
-                      disabled={disabled}
-                      aria-label={`${task.status === 'done' ? '重新打开' : '完成'} ${task.title}`}
-                      onClick={() =>
-                        void move(
-                          task.id,
-                          task.status === 'done' ? 'todo' : 'done',
-                        )
-                      }
-                    >
-                      <CheckOutlined />
-                    </button>
-                    <button
-                      className="list-task-name"
-                      onClick={() => onEdit(task)}
-                    >
-                      {task.title}
-                    </button>
-                  </div>
-                </td>
-                <td data-label="项目">
-                  {
-                    projects.find((project) => project.id === task.projectId)
-                      ?.name
-                  }
-                </td>
-                <td data-label="状态">
-                  <select
-                    aria-label={`${task.title} 状态`}
-                    disabled={disabled}
-                    value={task.status}
-                    onChange={(event) =>
-                      void move(task.id, event.target.value as Status)
-                    }
-                  >
-                    {statuses.map((status) => (
-                      <option key={status.id} value={status.id}>
-                        {status.label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td data-label="优先级">
-                  <span className={`priority-label priority-${task.priority}`}>
-                    {priorities[task.priority]}
-                  </span>
-                </td>
-                <td data-label="截止日期" className={isOverdue(task) ? 'overdue' : ''}>
-                  {task.dueDate || '—'}
-                </td>
-                <td data-label="进度">{progress(task)}%</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <div className="empty-state">
-          <SearchOutlined />
-          <h2>没有找到待办</h2>
-          <p>试试其他关键词，或添加一条新的待办。</p>
-          <button className="button" onClick={() => createTask()}>
-            新建待办 <ArrowRightOutlined />
-          </button>
+/** Keep the title and next action visible; full task controls live in the editor. */
+export default function TaskList({ tasks, projects, disabled, move, onEdit, createTask }: Props) {
+  return <div className="list-view task-calm-list">
+    {tasks.length ? <ul className="task-rows">
+      {tasks.map(task => <li key={task.id} className={`task-row ${task.status === 'done' ? 'is-done' : ''}`}>
+        <button className={`list-check ${task.status === 'done' ? 'is-done' : ''}`} disabled={disabled}
+          role="checkbox" aria-checked={task.status === 'done'}
+          aria-label={`${task.status === 'done' ? '重新打开' : '完成'} ${task.title}`}
+          onClick={() => void move(task.id, task.status === 'done' ? 'todo' : 'done')}><CheckOutlined /></button>
+        <button className="task-row-copy" onClick={() => onEdit(task)}>
+          <span className="list-task-name">{task.title}</span>
+          <span className="task-row-meta">
+            <span>{projects.find(project => project.id === task.projectId)?.name}</span>
+            {task.priority === 'high' && <span className="task-important">{priorities[task.priority]}</span>}
+            {!!task.checklist.length && <span>子任务 {progress(task)}%</span>}
+          </span>
+        </button>
+        <div className="task-row-side">
+          <select aria-label={`${task.title} 状态`} disabled={disabled} value={task.status}
+            className={task.status === 'review' ? 'task-review-status' : ''}
+            onChange={event => void move(task.id, event.target.value as Status)}>
+            {statuses.map(status => <option key={status.id} value={status.id}>{status.label}</option>)}
+          </select>
+          {task.dueDate && <time dateTime={task.dueDate} className={isOverdue(task) ? 'overdue' : ''}>{task.dueDate === localDate() ? '今天' : task.dueDate}</time>}
         </div>
-      )}
-    </div>
-  )
+      </li>)}
+    </ul> : <div className="empty-state">
+      <SearchOutlined /><h2>这里暂时没有待办</h2>
+      <p>可以添加一件事，或换个筛选看看。</p>
+      <button className="text-button" disabled={disabled} onClick={createTask}>新建待办</button>
+    </div>}
+  </div>
 }

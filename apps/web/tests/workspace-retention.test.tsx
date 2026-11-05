@@ -108,7 +108,7 @@ test("App 今日离开后暂停轮询，返回刷新失败仍保留四类成功�
   assert.deepEqual(api.requests, hiddenRequests);
 
   for (const path of paths) api.failures.add(path);
-  await act(async () => { document.querySelector<HTMLAnchorElement>('[aria-label="首页"]')!.click(); });
+  await act(async () => { document.querySelector<HTMLAnchorElement>('[aria-label="今日概览"]')!.click(); });
   assert.equal(document.getElementById("workspace")!.dataset.view, "home");
   assert.equal(document.querySelector<HTMLElement>(".today-page")!.hidden, false);
   assert.deepEqual(api.requests.toSorted(), [...hiddenRequests, ...paths].toSorted());
@@ -148,7 +148,7 @@ test("App 动态筛选进入来源会话后浏览器返回，保留筛选、展�
   assert.equal(dom.window.location.hash, "#activity");
   assert.equal(document.getElementById("workspace")!.dataset.view, "activity");
   assert.equal(document.querySelector<HTMLElement>(".activity-page")!.hidden, false);
-  assert.deepEqual(api.requests.toSorted(), [...initialRequests, "/api/workspace/activities"].toSorted());
+  assert.deepEqual(api.requests.toSorted(), [...initialRequests, "/api/workspace/activities", "/api/personal"].toSorted());
   assert.match(document.querySelector('.activity-filter[aria-pressed="true"]')!.textContent!, /^已结束/);
   assert.equal(document.querySelectorAll(".activity-record-list .activity-record").length, 1);
   assert.match(document.querySelector(".activity-record-list")!.textContent!, /已完成的分析/);
