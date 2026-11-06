@@ -24,9 +24,9 @@ export function createTeamsGraph(fetchImpl: typeof fetch, signal?: AbortSignal) 
 			signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
 		});
 		if (!response.ok) {
-			if (response.status === 403) throw new Error("Teams 读取被拒绝：请核对当前账号访问权及该功能的微软委托授权");
-			if (response.status === 401) throw new Error("Teams 登录已失效，请重新登录");
-			if (response.status === 404) throw new Error("Teams 消息或文件不存在，或当前账号无权访问");
+			if (response.status === 403) throw Object.assign(new Error("Teams 读取被拒绝：请核对当前账号访问权及该功能的微软委托授权"), { status: 403 });
+			if (response.status === 401) throw Object.assign(new Error("Teams 登录已失效，请重新登录"), { status: 401 });
+			if (response.status === 404) throw Object.assign(new Error("Teams 消息或文件不存在，或当前账号无权访问"), { status: 404 });
 			if (response.status === 429 || response.status === 503) {
         const retry = response.headers.get("retry-after");
         const milliseconds = retry && /^\d+(?:\.\d+)?$/.test(retry) ? Number(retry) * 1000 : retry ? Date.parse(retry) - Date.now() : 60_000;

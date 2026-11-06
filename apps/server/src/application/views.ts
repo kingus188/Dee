@@ -19,18 +19,22 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
         }
 		const message = entry.model?.[0];
 		if (!message) continue;
+		// Preserve recorded message time only; legacy entries must not inherit the current or conversation time.
+		const time = Number.isFinite(message.timestamp) && Number.isFinite(new Date(message.timestamp).getTime())
+			? { timestamp: message.timestamp } : {};
 		if (entry.kind === "pi.user" && message.role === "user") {
 			const split = splitUserContent(message.content);
 			const { attachments } = split;
 			for (const a of attachments) {
 				if (a.kind === "image" && a.index !== undefined) a.url = `/api/conversations/${conversationId}/images/${entry.id}/${a.index}`;
 			}
-			entries.push({ id: entry.id, kind: "user", text: withQuote(split), attachments });
+			entries.push({ id: entry.id, kind: "user", text: withQuote(split), attachments, ...time });
 		} else if (entry.kind === "pi.assistant" && message.role === "assistant") {
 			const parts = Array.isArray(message.content) ? message.content : [];
 			entries.push({
 				id: entry.id,
 				kind: "assistant",
+				...time,
 				text: contentText(parts),
 				toolCalls: parts.filter((p) => p.type === "toolCall").map((p) => ({ id: p.id, name: p.name, args: p.arguments })),
 				error: message.stopReason === "error" ? redact(message.errorMessage || "模型调用失败") : undefined,
@@ -39,6 +43,7 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
 			entries.push({
 				id: entry.id,
 				kind: "tool",
+				...time,
 				toolCallId: message.toolCallId,
 				name: message.toolName,
 				// 去掉 Harness 给错误结果包的 <harness> 标签，前端只显示人话

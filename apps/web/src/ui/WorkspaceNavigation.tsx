@@ -28,13 +28,13 @@ export function WorkspaceNavigation({ route, onNavigate, onHelp, inert = false }
     return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("focusin", close); document.removeEventListener("keydown", escape); };
   }, [more]);
   function link(next: WorkspaceRoute, label: string, icon: string, aria = label) {
-    const active = route.page === next.page && route.group === next.group;
+    const active = (route.page === next.page || (route.page === "teams" && next.page === "chat")) && route.group === next.group;
     return <a key={label} className="workspace-nav-link" href={workspaceHash(next)} aria-label={aria} title={label} data-tooltip={label} aria-current={active ? "page" : undefined} onClick={event => {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault(); onNavigate(next); if (more) toggle.current?.focus();
     }}><Icon name={icon} /><span>{label}</span>{active && <span className="workspace-nav-current" aria-hidden="true" />}</a>;
   }
-  const secondaryActive = !primary.some(item => item.page === route.page);
+  const secondaryActive = route.page !== "teams" && !primary.some(item => item.page === route.page);
   return <aside className="sidebar" aria-label="主导航" inert={inert}>
     <nav id="workspace-primary-nav" className="workspace-primary-nav" aria-label="个人工作空间">{primary.map(item => link({ page: item.page, group: null }, item.label, item.icon, item.aria))}<button ref={toggle} className="workspace-more-button" type="button" aria-label="更多菜单" title="更多" data-tooltip="更多" aria-expanded={more} data-active={secondaryActive} aria-controls="workspace-personal-nav" onClick={() => setMore(value => !value)}><Icon name="more-horizontal" /><span>更多</span></button></nav>
     <section ref={panel} id="workspace-personal-nav" className="workspace-personal-nav" data-open={more} hidden={!more} aria-label="个人内容与设置"><nav aria-label="个人内容">{link({ page: "home", group: null }, "今日", "calendar-days", "今日概览")}{personal.map(item => link({ page: item.page, group: item.group }, item.label, item.icon))}</nav><div className="workspace-nav-footer">{link({ page: "settings", group: null }, "连接与设置", "settings")}<button className="workspace-nav-link" type="button" onClick={() => { setMore(false); toggle.current?.focus(); onHelp(); }}><Icon name="circle-help" /><span>使用指南</span></button></div></section>

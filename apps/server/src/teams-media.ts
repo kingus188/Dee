@@ -18,13 +18,15 @@ export function createTeamsMedia({ archive, graph, getToken, fetchImpl = fetch, 
     async discover(chatId: string, messages: ArchivedMessage[], token: string) {
       for (const message of messages) {
         if (!/<img\b/i.test(message.body?.content ?? "")) continue;
+        const revision = archive.sourceRevision(chatId);
+        if (JSON.stringify(archive.message(chatId, message.id)) !== JSON.stringify(message)) continue;
         try {
           const data = await graph<{ value: { id: string }[] }>(token, graphPageUrl(base(chatId, message.id)));
           if (!Array.isArray(data.value) || data.value.some(item => !item.id)) throw new Error("Teams 截图列表格式无效");
-          archive.hosted(chatId, message.id, data.value.map(item => item.id));
+          archive.hosted(chatId, message.id, data.value.map(item => item.id), revision);
         } catch {
           signal?.throwIfAborted();
-          archive.hostedFailure(chatId, message.id);
+          archive.hostedFailure(chatId, message.id, revision);
         }
       }
     },
@@ -34,16 +36,17 @@ export function createTeamsMedia({ archive, graph, getToken, fetchImpl = fetch, 
       const token = await getToken();
       for (const item of pending) {
         signal?.throwIfAborted();
+        const revision = archive.sourceRevision(item.chat_id);
         try {
           const url = graphPageUrl(base(item.chat_id, item.message_id) + `/${encodeURIComponent(item.source)}/$value`);
           const response = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` }, redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) });
           const mime = response.headers.get("content-type")?.split(";")[0] ?? "";
           const bytes = await boundedBytes(response, 5 * 1024 * 1024);
           parseAttachments([{ name: "screenshot", mimeType: mime, data: bytes.toString("base64") }]);
-          archive.saveBytes(item.id, mime, bytes);
+          archive.saveBytes(item.id, mime, bytes, revision);
         } catch (error) {
           signal?.throwIfAborted();
-          archive.mediaFailure(item.id, error instanceof Error && /上限/.test(error.message) ? "截图超过保存上限" : "截图保存失败，等待重试或检查权限");
+          archive.mediaFailure(item.id, error instanceof Error && /上限/.test(error.message) ? "截图超过保存上限" : "截图保存失败，等待重试或检查权限", revision);
         }
       }
     },

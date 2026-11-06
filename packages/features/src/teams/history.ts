@@ -6,7 +6,7 @@ import type { Attachment } from "../attachments/index.js";
 export type TeamsReadQuery =
 	| { kind: "chats"; cursor?: string }
 	| { kind: "channels"; teamId?: string; cursor?: string }
-	| { kind: "history"; chatId?: string; teamId?: string; channelId?: string; messageId?: string; replies?: boolean; cursor?: string; archiveSync?: boolean }
+	| { kind: "history"; chatId?: string; teamId?: string; channelId?: string; messageId?: string; replies?: boolean; cursor?: string; archiveSync?: boolean; downloadMedia?: boolean }
 	| { kind: "files"; query: string; offset?: number }
 	| { kind: "file"; driveId: string; itemId: string }
 	| { kind: "archive"; chatId?: string; text?: string; before?: string; limit?: number }

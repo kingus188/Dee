@@ -12,6 +12,7 @@ import { mailApi } from "../mail-api.js";
 import { daylightApi } from "../daylight-api.js";
 import { notificationApi } from "../notification-api.js";
 import { teamsTriageApi } from "../teams-triage-api.js";
+import { teamsConversationsApi } from "../teams-conversations-api.js";
 import { createWorkspace } from "./workspace.js";
 import { createDaylightExecution } from "./daylight-execution.js";
 
@@ -61,6 +62,8 @@ export function createApi(context: AppContext) {
     if (mailResult) return await mailResult;
     const notificationResult = notificationApi(context, method, url, body);
     if (notificationResult) return notificationResult;
+    const conversationsResult = await teamsConversationsApi(context, method, url);
+    if (conversationsResult) return conversationsResult;
     const teamsResult = await teamsTriageApi(context, method, url, body);
     if (teamsResult) return teamsResult;
     if (method === "GET" && path === "/api/daily-reports") return { status: 200, data: await dailyReports.list() };

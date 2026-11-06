@@ -253,3 +253,19 @@ button:active:not(:disabled), .workspace-nav-link:active { transform: scale(.98)
   .workspace-local-skills .workspace-content-search, .workspace-local-filter { width: 100%; }.workspace-local-filter select { flex: 1; max-width: none; min-width: 0; }
   .workspace-local-roots li { align-items: flex-start; }.workspace-local-roots .text-button { flex-shrink: 0; }
 }
+
+/* Both conversation sources share one switcher rather than adding another rail. */
+.conversation-source { display: flex; align-items: center; gap: 10px; position: relative; margin: 0 8px 18px; min-width: 0; color: var(--text-main); }
+.conversation-source > .icon:first-child { color: var(--primary); width: 24px; height: 24px; }
+.conversation-source select { appearance: none; min-width: 0; flex: 1; min-height: 44px; padding: 8px 30px 8px 0; border: 0; border-radius: 7px; background: transparent; color: inherit; font: inherit; font-size: 17px; font-weight: 550; cursor: pointer; }
+.conversation-source select:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
+.conversation-source > .icon:last-child { position: absolute; right: 8px; pointer-events: none; width: 16px; height: 16px; }
+.conversation-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 20px; width: calc(100% - 64px); max-width: 1056px; min-height: 100px; margin: 0 auto; border-bottom: 1px solid var(--shell-divider); }
+.conversation-title { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 23px; font-weight: 600; line-height: 1.5; letter-spacing: -.02em; }
+.conversation-header-actions { display: flex; align-items: center; flex: none; gap: 4px; }
+@media (max-width: 700px) {
+  .conversation-header { width: calc(100% - 32px); min-height: 74px; gap: 10px; }
+  .conversation-title { font-size: 18px; }
+  .conversation-header-actions { gap: 0; }
+  .conversation-header .header-button { padding-inline: 6px; }
+}

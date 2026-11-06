@@ -19,6 +19,8 @@ export type Usage = {
 };
 export type ViewEntry = {
   id: number; kind: "user" | "assistant" | "tool"; text: string;
+  /** Source message time in Unix milliseconds; absent when no valid time was recorded. */
+  timestamp?: number;
   attachments?: AttachmentSummary[];
   toolCalls?: { id: string; name: string; args: ToolArgs }[];
   error?: string; toolCallId?: string; name?: string; isError?: boolean;

@@ -17,12 +17,12 @@ test("长期归档保存原文、附件与截图，重启和 90 天缓存清理�
   let store = openTeamsStore(dir);
   try {
     store.archive.bindAccount("owner"); store.archive.chats([{ id: "chat" }]);
-    store.archive.save("chat", [oldMessage]); store.archive.hosted("chat", "old", ["hosted"]);
+    store.archive.save("chat", [{ ...oldMessage, body: { content: oldMessage.body.content + '<img src="https://graph.microsoft.com/v1.0/chats/chat/messages/old/hostedContents/hosted/$value">' } }]); store.archive.hosted("chat", "old", ["hosted"]);
     const image = store.archive.mediaRows("chat", "old").find(m => m.kind === "image")!;
     store.archive.saveBytes(image.id, "image/png", png);
-    store.archive.save("chat", [{ ...oldMessage, body: { content: "更新正文".repeat(1000) } }]);
+    store.archive.save("chat", [{ ...oldMessage, body: { content: "更新正文".repeat(1000) + '<img src="https://graph.microsoft.com/v1.0/chats/chat/messages/old/hostedContents/hosted/$value">' } }]);
     assert.equal(store.archive.status().messages, 1);
-    assert.equal(store.archive.search({ limit: 10 }).items[0].body.content.length, 4000);
+    assert.ok(store.archive.search({ limit: 10 }).items[0].body.content.startsWith("更新正文".repeat(1000)));
     assert.equal(store.archive.media(image.id)?.bytes?.length, png.length);
     store.close(); store = openTeamsStore(dir);
     assert.equal(store.archive.status().messages, 1, "归档独立于临时消息缓存的保留期限");
@@ -107,7 +107,7 @@ test("图片下载失败不伪造已保存，记录失败状态并限制重试�
       if (url.includes("/me?")) return Response.json({ id: "owner" });
       if (url.endsWith("/$value")) return new Response("not an image", { headers: { "content-type": "image/png" } });
       if (url.endsWith("/hostedContents")) return Response.json({ value: [{ id: "hosted" }] });
-      return Response.json({ value: [{ ...oldMessage, body: { content: '<img src="image">' } }] });
+      return Response.json({ value: [{ ...oldMessage, body: { content: '<img src="https://graph.microsoft.com/v1.0/chats/chat/messages/old/hostedContents/hosted/$value">' } }] });
     } });
     const result = await read({ kind: "history", chatId: "chat" });
     const image = result.media!.find(m => m.kind === "image")!;
@@ -147,7 +147,7 @@ test("截图列表权限失败保留原文和明确失败状态，不阻断聊�
       const url = String(input);
       if (url.includes("/me?")) return Response.json({ id: "owner" });
       if (url.endsWith("/hostedContents")) return new Response("", { status: 403 });
-      return Response.json({ value: [{ ...oldMessage, body: { content: '<img src="image">' } }] });
+      return Response.json({ value: [{ ...oldMessage, body: { content: '<img src="https://graph.microsoft.com/v1.0/chats/chat/messages/old/hostedContents/hosted/$value">' } }] });
     } });
     const result = await read({ kind: "history", chatId: "chat" });
     assert.equal(archive.status().messages, 1);

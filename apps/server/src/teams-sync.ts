@@ -84,6 +84,7 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
   // 单个聊天的增量同步：所需页全部读取成功后才入库并推进它的水位。
   async function syncChat(auth: string, meId: string, chat: Chat, window: { lower: number; newest: number }) {
     const { lower } = window;
+    const accessGeneration = store.triage?.accessGeneration(chat.id);
     let newest = window.newest;
     const messages = new Map<string, GraphMessage>();
     for await (const page of pages<GraphMessage>(auth, `/chats/${encodeURIComponent(chat.id)}/messages?$top=50&$orderby=createdDateTime desc`)) {
@@ -92,6 +93,7 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
       if (page.length && page.every(message => Date.parse(message.createdDateTime) < lower)) break;
     }
     signal?.throwIfAborted();
+    if (store.triage && !store.triage.access(chat.id, true, accessGeneration)) throw new Error("Teams 访问状态已变化，停止旧同步并保留水位");
     // 中断可用消息 ID 安全重放。
     for (const message of [...messages.values()].sort((a, b) => Date.parse(a.createdDateTime) - Date.parse(b.createdDateTime))) {
       const sender = message.from?.user;
@@ -115,7 +117,6 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
     const next = { ...marks, [chat.id]: new Date(newest).toISOString() };
     save(markPath, next);
     Object.assign(marks, next);
-    store.triage?.access(chat.id, true);
     recovered.add(chat.id);
   }
 

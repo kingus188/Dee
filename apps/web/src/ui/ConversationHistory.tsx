@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { ConversationItem } from "@assistant/contracts";
 import { request } from "../api/request.js";
+import { ConversationSource } from "./ConversationSource.js";
 import { Icon } from "./Icon.js";
 
-export function ConversationHistory({ active, currentId, onOpen, onClose, onNew, newDisabled = false, autoFocus = true, refreshKey = 0 }: {
+export function ConversationHistory({ active, currentId, onOpen, onClose, onNew, newDisabled = false, autoFocus = true, refreshKey = 0, load = false, onItems, onTeams }: {
   active: boolean; currentId: number | null; onOpen: (id: number) => void; onClose: () => void;
+  load?: boolean; onItems?: (items: ConversationItem[]) => void; onTeams?: () => void;
   onNew?: () => void; newDisabled?: boolean; autoFocus?: boolean; refreshKey?: number;
 }) {
   const panel = useRef<HTMLElement>(null);
@@ -12,11 +14,11 @@ export function ConversationHistory({ active, currentId, onOpen, onClose, onNew,
   const [older, setOlder] = useState(false);
   const [error, setError] = useState(""), [ready, setReady] = useState(false), [revision, refresh] = useState(0);
   useEffect(() => {
-    if (!active) return;
+    if (!active && !load) return;
     let current = true; setError("");
-    void request<ConversationItem[]>("/api/conversations").then(data => { if (current) { setItems(data.filter(item => !item.archivedAt)); setReady(true); } }).catch(reason => { if (current) setError(reason instanceof Error ? reason.message : "历史记录读取失败"); });
+    void request<ConversationItem[]>("/api/conversations").then(data => { if (current) { const next = data.filter(item => !item.archivedAt); setItems(next); onItems?.(next); setReady(true); } }).catch(reason => { if (current) setError(reason instanceof Error ? reason.message : "历史记录读取失败"); });
     return () => { current = false; };
-  }, [active, currentId, revision, refreshKey]);
+  }, [active, load, currentId, revision, refreshKey, onItems]);
   useEffect(() => { if (active && autoFocus) panel.current?.querySelector<HTMLInputElement>("input")?.focus(); }, [active]);
   useEffect(() => {
     if (!active) return;
@@ -32,6 +34,7 @@ export function ConversationHistory({ active, currentId, onOpen, onClose, onNew,
   const visible = needle || older ? found : found.slice(0, 6);
   return <aside ref={panel} id="conversation-history" className="conversation-history" hidden={!active} aria-label="历史对话">
     <header><a className="history-brand" href="#chat" onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !currentId) return; event.preventDefault(); onOpen(currentId); }} aria-label="Dee 对话">Dee</a><button className="icon-button history-close" type="button" aria-label="关闭历史对话" onClick={onClose}><Icon name="x" /></button></header>
+    {onTeams && <ConversationSource source="assistant" onAssistant={() => {}} onTeams={onTeams} />}
     {onNew && <button className="conversation-new-button" type="button" disabled={newDisabled} onClick={onNew}><Icon name="plus" /><span>新对话</span></button>}
     <label className="history-search"><Icon name="search" /><input aria-label="搜索历史对话" placeholder="搜索对话" value={query} onChange={event => setQuery(event.target.value)} /></label>
     <h2 className="history-heading">{needle ? "搜索结果" : "最近对话"}</h2>
