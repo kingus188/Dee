@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ConversationView } from "@assistant/contracts";
 import type { PendingAttachment } from "../types.js";
 import { sendMessage, abortConversation } from "../api/chat.js";
@@ -31,7 +31,30 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
   const attachments = owner === null ? [] : fileDrafts.current.get(owner) ?? [];
   const processing = owner !== null && processingOwners.current.has(owner);
   draftRef.current = draft;
-  useEffect(() => { const input = textarea.current!; input.style.height = "auto"; input.style.height = input.scrollHeight + "px"; setSelected(0); dismissMenu(false); }, [draft]);
+  function fitDraft() {
+    const input = textarea.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = input.scrollHeight + "px";
+  }
+  useLayoutEffect(fitDraft, [draft]);
+  useEffect(() => { setSelected(0); dismissMenu(false); }, [draft]);
+  useEffect(() => {
+    const input = textarea.current!;
+    let width = input.clientWidth;
+    // Sidebar/panel changes rewrap an unchanged draft without a window resize.
+    // Ignore height-only observations to avoid a ResizeObserver feedback loop.
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(entries => {
+      const nextWidth = entries[0]?.contentRect.width;
+      if (nextWidth !== undefined && nextWidth !== width) {
+        width = nextWidth;
+        if (nextWidth > 0) fitDraft();
+      }
+    });
+    observer?.observe(input);
+    window.addEventListener("resize", fitDraft);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", fitDraft); };
+  }, []);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -126,16 +149,18 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
     finally { sendingRef.current = false; if (mounted.current) setSending(false); }
   }
   return <div className="input-box-wrapper" data-dragging={dragging} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) dismissMenu(true); }} onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); void addFiles(event.dataTransfer.files); }}>
+    <div className="composer-context">
     {wechat && <div className="wechat-conversation-notice" id="wechat-conversation-notice" role="note"><Icon name="message-circle" /><p><strong>微信里的 Dee</strong><span>这是你与 Dee 的微信会话，不是微信收件箱。在此发送消息后，Dee 的回复可能同步到此会话绑定的微信接收方。</span></p></div>}
     {sourcePending && <p className="conversation-source-pending" role="status">正在读取会话来源…</p>}
     {processing && <p role="status">正在处理本对话的附件…</p>}
-    {menuVisible && <CommandMenu commands={suggestions} selected={selectedIndex} busy={busy} help={help && !draft.trim()} onSelect={command => { void submit(`/${command.name}`); textarea.current?.focus(); }} onClose={() => { dismissMenu(true); textarea.current?.focus(); }} />}
     {dragging && <p role="status">松开以添加图片、PDF、DOCX 或文本文件</p>}
     {!!attachments.length && <div className="attachments-preview">{attachments.map((file, i) => <div className="pending-chip" key={i}>
       {file.previewUrl && <img className="pending-thumb" src={file.previewUrl} alt={file.name} />}
       <div className="pending-meta"><span className="pending-name">{file.name}</span><span className="pending-size">{formatFileSize(file.size)}</span></div>
       <button type="button" className="btn-remove-pending" aria-label={`移除 ${file.name}`} onClick={() => { if (owner !== null) remove(owner, file); }}>×</button>
     </div>)}</div>}
+    </div>
+    {menuVisible && <CommandMenu commands={suggestions} selected={selectedIndex} busy={busy} help={help && !draft.trim()} onSelect={command => { void submit(`/${command.name}`); textarea.current?.focus(); }} onClose={() => { dismissMenu(true); textarea.current?.focus(); }} />}
     <div className="composer-main">
       <button type="button" className="icon-button attach-button" disabled={processing || sourcePending} aria-label="添加附件（图片或文件）" title="添加附件（图片或文件）" onClick={() => { pickerOwner.current = owner ?? undefined; fileInput.current!.value = ""; fileInput.current!.click(); }}><Icon name="paperclip" /></button>
       <textarea ref={textarea} className="chat-textarea" id="chat-textarea" aria-label={wechat ? "给微信里的 Dee 发消息" : "给小 D 发消息"} aria-describedby={wechat ? "wechat-conversation-notice" : undefined} role="combobox" aria-autocomplete="list" aria-expanded={menuVisible} aria-controls={menuVisible ? "composer-commands" : undefined} aria-activedescendant={menuVisible ? `command-${suggestions[selectedIndex].name}` : undefined} placeholder={wechat ? "继续与微信里的 Dee 对话…" : "随心输入，告诉我你的想法或需要…"} rows={1} value={draft} onChange={event => setDraft(event.target.value)}
