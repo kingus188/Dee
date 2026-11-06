@@ -123,14 +123,43 @@ test("通知设置读取并保存免打扰HH:mm和时区，保存失败保留草
   assert.equal(document.querySelector<HTMLInputElement>('[name="quiet-timezone"]')!.value, "Asia/Shanghai");
   const form = details.querySelector("form")!;
   await act(async () => { form.dispatchEvent(new view.dom.window.Event("submit", { bubbles: true, cancelable: true })); });
-  assert.deepEqual(writes, [{ quietHours, webhookDigest: { enabled: false, windowSeconds: 60 } }]);
+  assert.deepEqual(writes, [{ quietHours, webhookDigest: { enabled: false, windowSeconds: 60 }, webhookAttention: { enabled: false, maxPerHour: 6, cooldownSeconds: 300 } }]);
   assert.equal(document.querySelector<HTMLInputElement>("#digest-enabled")!.checked, false);
   await act(async () => { document.querySelector<HTMLInputElement>("#digest-enabled")!.click(); });
   await act(async () => { form.dispatchEvent(new view.dom.window.Event("submit", { bubbles: true, cancelable: true })); });
-  assert.deepEqual(writes[1], { quietHours, webhookDigest: { enabled: true, windowSeconds: 60 } });
+  assert.deepEqual(writes[1], { quietHours, webhookDigest: { enabled: true, windowSeconds: 60 }, webhookAttention: { enabled: false, maxPerHour: 6, cooldownSeconds: 300 } });
   assert.match(details.textContent!, /已保存/);
   fails = true;
   await act(async () => { form.dispatchEvent(new view.dom.window.Event("submit", { bubbles: true, cancelable: true })); });
   assert.match(details.querySelector('[role="alert"]')!.textContent!, /保存.*失败|未保存/);
   assert.equal(document.querySelector<HTMLInputElement>('[name="quiet-start"]')!.value, "22:00");
+});
+
+test("减少打扰需要显式开启，保存预算并允许关闭；不隐藏失败或修改已有提醒设置", async t => {
+  const quietHours = { enabled: true, start: "22:00", end: "08:00", timeZone: "Asia/Shanghai" };
+  let preferences = { quietHours, webhookDigest: { enabled: false, windowSeconds: 60 }, webhookAttention: { enabled: false, maxPerHour: 3, cooldownSeconds: 90 } };
+  const writes: unknown[] = [];
+  t.mock.method(apiClient, "request", async (path: string, body?: unknown) => {
+    if (path.includes("preferences")) {
+      if (body) { writes.push(body); preferences = body as typeof preferences; }
+      return preferences;
+    }
+    return { enabled: true, mode: "all", kind: "generic", items: [] };
+  });
+  const view = await mount(t, <NotificationSettings />), document = view.dom.window.document;
+  const details = document.querySelector<HTMLDetailsElement>('[data-notification-preferences]')!;
+  await act(async () => { details.open = true; details.dispatchEvent(new view.dom.window.Event("toggle")); });
+  const control = document.querySelector<HTMLInputElement>("#attention-enabled")!;
+  assert.equal(control.checked, false); assert.equal(writes.length, 0);
+  assert.equal(document.querySelector<HTMLInputElement>("#attention-budget")!.value, "3");
+  assert.equal(document.querySelector<HTMLInputElement>("#attention-cooldown")!.value, "90");
+  assert.match(details.textContent!, /失败、明确紧急、审批、定时提醒和周期计划不受新增预算限制/);
+  const form = details.querySelector("form")!;
+  await act(async () => { control.click(); });
+  await act(async () => { form.dispatchEvent(new view.dom.window.Event("submit", { bubbles: true, cancelable: true })); });
+  assert.equal(preferences.webhookAttention.enabled, true);
+  assert.deepEqual(preferences.quietHours, quietHours);
+  await act(async () => { control.click(); });
+  await act(async () => { form.dispatchEvent(new view.dom.window.Event("submit", { bubbles: true, cancelable: true })); });
+  assert.equal(preferences.webhookAttention.enabled, false);
 });

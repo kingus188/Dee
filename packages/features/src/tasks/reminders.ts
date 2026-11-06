@@ -55,7 +55,7 @@ const ReminderTask = defineTask<{ at: number; text: string }, { phase: "sleep" }
 				{ type: "input", content: `[定时提醒] ${task.input.text}`, whenBusy: "followUp", requestId: `reminder:${task.id}` },
 				taskContext,
 			);
-			await notifyEvent({ id: "reminder:" + task.id, type: "reminder", text: "定时提醒：" + task.input.text });
+			await notifyEvent({ sources: [{ source: `conv:${runtime.conversationId}` }], id: "reminder:" + task.id, type: "reminder", text: "定时提醒：" + task.input.text });
 			await runtime.commit(async (tx) => {
 				const item = (await tx.doc(Reminders, runtime.conversationId)).items.find((i) => i.id === task.id);
 				if (item) item.status = "fired";

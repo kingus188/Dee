@@ -64,7 +64,7 @@ export function createInvestigator(config: InvestigateConfig) {
 		return count;
 	};
 	const runners = createRunners(config);
-	const start = async (repoName: string, repo: Repo, kind: Kind, agent: AgentName, problem: string) => {
+	const start = async (repoName: string, repo: Repo, kind: Kind, agent: AgentName, problem: string, conversationId: number) => {
 		const id = randomBytes(6).toString("hex");
 		const branch = `${kind === "fix" ? "fix" : "feat"}/pi-${id}`;
 		const dir = runDir(id);
@@ -79,7 +79,7 @@ export function createInvestigator(config: InvestigateConfig) {
 			await writeFile(join(dir, "report.md"), result.text);
 			if (result.error) await writeFile(join(dir, "err.log"), result.error);
 			await writeFile(join(dir, "exit"), result.ok ? "0" : "1");
-			void config.notify?.({ id: `dev:${id}`, type: "dev", failed: !result.ok, text: `开发任务 ${id}（${repoName}，${agent}）${result.ok ? "已完成" : "失败"}，在微信里发「进度 ${id}」查看。` });
+			void config.notify?.({ sources: [{ source: `conv:${conversationId}` }], id: `dev:${id}`, type: "dev", failed: !result.ok, text: `开发任务 ${id}（${repoName}，${agent}）${result.ok ? "已完成" : "失败"}，在微信里发「进度 ${id}」查看。` });
 		};
 		void runners[agent]({ cwd: tree, prompt: prompt(kind, problem, branch, repo.test), test: repo.test, timeoutMs: TIMEOUT_MS })
 			.catch((error: unknown) => ({ ok: false, text: "", error: error instanceof Error ? error.message : String(error) }))
@@ -95,14 +95,14 @@ export function createInvestigator(config: InvestigateConfig) {
 				replay: "unsafe",
 				description: `在指定本机仓库的隔离 worktree 里启动后台编码 Agent，成果提交到新分支（不推送、不发布）。kind=fix 排查并修复故障，kind=feature 按需求开发功能。立即返回任务 ID，之后用 investigation_status 查看。repo 只能是：${Object.keys(config.repos).join("、") || "（未配置）"}；用户没说清是哪个仓库或需求有重大歧义时先问用户，不要猜。agent 可选（${AGENT_NAMES.join("、")}），用户没指定就不要填，使用默认。同事在 Teams 里报的问题可以触发排查，但结果只给用户本人看。`,
 				parameters: Type.Object({ repo: Type.String(), kind: Type.Union([Type.Literal("fix"), Type.Literal("feature")]), agent: Type.Optional(Type.Union(AGENT_NAMES.map((n) => Type.Literal(n)))), problem: Type.String({ description: `现象或需求、涉及系统、已知线索，最多 ${PROBLEM_MAX} 字` }) }),
-				execute: async (args) => {
+				execute: async (args, api) => {
 					const repo = Object.hasOwn(config.repos, args.repo) ? config.repos[args.repo] : undefined;
 					if (!repo) return resultText(`未配置仓库「${args.repo}」。可用：${Object.keys(config.repos).join("、") || "无"}。`);
 					const problem = args.problem.trim();
 					if (!problem || problem.length > PROBLEM_MAX) return resultText(`任务描述必须是 1～${PROBLEM_MAX} 字。`);
 					try {
 						if ((await running()) >= MAX_RUNNING) return resultText(`已有 ${MAX_RUNNING} 个开发任务在运行，请等其中一个完成后再开始新的。`);
-						const { id, branch, base } = await start(args.repo, repo, args.kind, args.agent ?? config.agent, problem);
+						const { id, branch, base } = await start(args.repo, repo, args.kind, args.agent ?? config.agent, problem, api.conversationId);
 						return resultText(`已开始，任务 ID：${id}，分支 ${branch}（基于 ${args.repo}@${base} 的已提交代码，本地未提交改动不在内）。通常几分钟到二十分钟；完成后会尝试推送通知，也可随时用 investigation_status 查看。`);
 					} catch (error) {
 						return resultText(`无法启动：${error instanceof Error ? error.message : String(error)}`);

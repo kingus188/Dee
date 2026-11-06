@@ -62,13 +62,13 @@ test("阅读标记保留最近500个版本，校验键与批量长度且失败�
 
 test("免打扰起止与时区严格验证，持久设置不泄漏渠道正文", async t => {
   const f = await fixture(t);
-  assert.deepEqual(f.api("GET", "/api/notifications/preferences")?.data, { quietHours: { ...quiet, enabled: false }, webhookDigest: { enabled: false, windowSeconds: 60 } });
-  assert.deepEqual(f.api("POST", "/api/notifications/preferences", { quietHours: quiet })?.data, { quietHours: quiet, webhookDigest: { enabled: false, windowSeconds: 60 } });
+  assert.deepEqual(f.api("GET", "/api/notifications/preferences")?.data, { quietHours: { ...quiet, enabled: false }, webhookDigest: { enabled: false, windowSeconds: 60 }, webhookAttention: { enabled: false, maxPerHour: 6, cooldownSeconds: 300 } });
+  assert.deepEqual(f.api("POST", "/api/notifications/preferences", { quietHours: quiet })?.data, { quietHours: quiet, webhookDigest: { enabled: false, windowSeconds: 60 }, webhookAttention: { enabled: false, maxPerHour: 6, cooldownSeconds: 300 } });
   for (const patch of [{ start: "25:00" }, { start: "9:00" }, { end: "08:60" }, { start: "08:00" }, { timeZone: "Invalid/Zone" }, { enabled: "yes" }, { timeZone: "" }]) {
     assert.throws(() => f.api("POST", "/api/notifications/preferences", { quietHours: { ...quiet, ...patch } }), { status: 400 });
   }
   await f.restart();
-  assert.deepEqual(f.api("GET", "/api/notifications/preferences")?.data, { quietHours: quiet, webhookDigest: { enabled: false, windowSeconds: 60 } });
+  assert.deepEqual(f.api("GET", "/api/notifications/preferences")?.data, { quietHours: quiet, webhookDigest: { enabled: false, windowSeconds: 60 }, webhookAttention: { enabled: false, maxPerHour: 6, cooldownSeconds: 300 } });
   assert.doesNotMatch(JSON.stringify(f.api("GET", "/api/notifications/preferences")), /notify\.example|events|body/);
 });
 
@@ -98,7 +98,7 @@ test("关闭免打扰立即释放队列；已有失败记录保留，显式重�
   f.at("2026-10-25T15:00:00Z");
   assert.equal(f.queue.list()[0].status, "failed");
   assert.equal(f.queue.retry("failed"), "queued"); await f.queue.flush(); assert.equal(f.sent.length, 5);
-  f.api("POST", "/api/notifications/preferences", { quietHours: { ...quiet, enabled: false }, webhookDigest: { enabled: false, windowSeconds: 60 } });
+  f.api("POST", "/api/notifications/preferences", { quietHours: { ...quiet, enabled: false }, webhookDigest: { enabled: false, windowSeconds: 60 }, webhookAttention: { enabled: false, maxPerHour: 6, cooldownSeconds: 300 } });
   f.fail(false); await f.queue.flush(); assert.equal(f.sent.length, 6); assert.equal(f.queue.list()[0].status, "sent");
 });
 
@@ -137,7 +137,7 @@ test("紧急、失败和审批绕过免打扰，较早普通事件不阻塞且�
 });
 
 
-test("旧 outbox 优先级迁移保留原文和幂等键，不根据通知正文猜紧急程度", async t => {
+test("旧 outbox 保留原文、优先级和幂等键；缺少来源信息时不自动发送", async t => {
   const dir = await mkdtemp(join(tmpdir(), "pi-notification-legacy-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const at = Date.parse("2026-10-25T15:30:00Z");
@@ -158,10 +158,18 @@ test("旧 outbox 优先级迁移保留原文和幂等键，不根据通知正文
   try {
     queue.preferences.save({ quietHours: quiet });
     await queue.flush();
-    assert.deepEqual(sent, [{ id: "approval", body: '{"type":"approval"}' }, { id: "failure", body: '{"failed":true,"text":"原始失败"}' }]);
-    assert.deepEqual(queue.list("pending").map(item => item.id), ["malformed", "normal"]);
+    assert.deepEqual(sent, []);
+    assert.deepEqual(queue.list("cancelled").map(item => item.id), ["approval", "failure", "malformed", "normal"]);
+    assert.ok(queue.list().every(item => item.attempts === 0 && item.lastError === "Source provenance unavailable"));
     await queue.enqueue({ id: "failure", body: "new body must not overwrite", priority: "normal" });
-    await queue.flush(); assert.equal(sent.length, 2);
+    await queue.flush(); assert.equal(sent.length, 0);
+    assert.equal(queue.retry("failure"), "conflict");
+    const inspect = new DatabaseSync(join(dir, "agent.sqlite"));
+    try {
+      const records = inspect.prepare("SELECT id,priority,body FROM notification_outbox ORDER BY id").all();
+      assert.deepEqual(records.map(row => [row.id, row.priority]), [["approval", "approval"], ["failure", "urgent"], ["malformed", "normal"], ["normal", "normal"]]);
+      assert.equal(records[1].body, '{"failed":true,"text":"原始失败"}');
+    } finally { inspect.close(); }
   } finally { await queue.close(); }
 });
 

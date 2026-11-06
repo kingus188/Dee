@@ -3,16 +3,17 @@ import type { AppConfig } from "./config.js";
 import { createApplication } from "./application/index.js";
 import { createHttpServer } from "./http/server.js";
 import { startEpisodeJob } from "./episode-job.js";
-import { conversationBatches, teamsBatches } from "./episode-sources.js";
+import { conversationBatches, episodeSourceAllowed, teamsBatches } from "./episode-sources.js";
 import { startServerIntegrations } from "./integrations.js";
 
 export async function startServer(config: AppConfig, host = config.password ? "0.0.0.0" : "127.0.0.1", env: NodeJS.ProcessEnv = {}) {
   const app = await createApplication(config);
   const server = createHttpServer(app);
   // 情景摘要需要真实模型；未配置模型时不启动。
-  const stopEpisodes = app.modelConfigured ? startEpisodeJob({
+  const stopEpisodes = app.modelConfigured && !app.config.offline ? startEpisodeJob({
     store: app.episodeStore, summarize: app.summarize,
-    collect: async cursorOf => [...await conversationBatches(app, cursorOf), ...teamsBatches(app.teamsStore, cursorOf)],
+    collect: async cursorOf => [...await conversationBatches(app, cursorOf), ...teamsBatches(app.teamsStore, cursorOf, app.episodeStore)],
+    allowSource: (source, channel) => episodeSourceAllowed(app, source, channel),
     log: message => console.error("情景摘要：" + app.redact(message)),
   }) : () => {};
   let closing: Promise<void> | undefined;
@@ -49,7 +50,7 @@ export async function startServer(config: AppConfig, host = config.password ? "0
     stopIntegrations = startServerIntegrations({
       config: app.config, store: app.teamsStore, teamsSender: app.teamsSender, env,
       wechat: { ...app.config.wechat,
-        notifyBatch: app.wechat ? (wxid, text, messageIds) => app.wechat!.notify("primary", wxid, text, { kind: "teams", messageIds }).then(() => {}) : undefined,
+        notifyBatch: app.wechat ? (wxid, text, messageIds, sourceRevisions) => app.wechat!.notify("primary", wxid, text, { kind: "teams", messageIds, sourceRevisions }).then(() => {}) : undefined,
         undelivered: app.wechat ? () => app.wechat!.undelivered() : undefined },
       onStuck: pending => console.error(`Teams 微信提醒待处理：${pending} 条，请检查桥接服务和接收人配置`),
     });

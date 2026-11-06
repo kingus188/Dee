@@ -167,3 +167,18 @@ test("整体同步成功不能替不可读来源背书；已落库处理事实�
     assert.equal((await reviewTeamsNotification(f.store, { refresh }, source)).status, "cancel");
   } finally { await f.close(); }
 });
+
+test("生成回复继承完整聊天版本，撤回非提醒上文后重启也不能投递", async () => {
+  const f = await fixture();
+  try {
+    f.store.record({ ...incoming("chat:context", "chat"), createdAt: at(15), important: false, text: "SYNTHETIC_WITHDRAWN_CONTEXT" });
+    f.store.record(incoming("chat:latest", "chat"));
+    const source = { kind: "teams" as const, messageIds: ["chat:latest"], sourceRevisions: [{ source: "teams:chat", revision: f.store.sourceRevision("teams:chat") }] };
+    await f.channel().notify("primary", "wxid_test", "[Teams 新消息] 上文 SYNTHETIC_WITHDRAWN_CONTEXT", source);
+    await f.settle();
+    assert.deepEqual((await f.state())!.outbox[0].source?.sourceRevisions, source.sourceRevisions);
+    f.store.revokeMessage("chat", "chat:context"); await f.restart(); await f.deliver();
+    assert.equal((await f.state())!.outbox[0].status, "cancelled"); assert.equal(f.calls(), 0);
+    assert.equal(f.store.message("chat:latest")?.text, "需要查看的原文", "latest source can remain valid while its context is withdrawn");
+  } finally { await f.close(); }
+});

@@ -14,7 +14,7 @@ export function notificationApi(context: Pick<AppContext, "config" | "notificati
   }
   if (method === "GET" && url.pathname === "/api/notifications") {
     const status = url.searchParams.get("status");
-    if (status !== null && status !== "pending" && status !== "sent" && status !== "failed") throw new HttpError(400, "通知状态无效");
+    if (status !== null && status !== "pending" && status !== "sent" && status !== "failed" && status !== "cancelled") throw new HttpError(400, "通知状态无效");
     const data: NotificationOverview = {
       enabled: !config.offline && !!config.notifications.url && config.notifications.mode !== "off",
       mode: config.notifications.mode || "errors", kind: config.notifications.kind || "generic",

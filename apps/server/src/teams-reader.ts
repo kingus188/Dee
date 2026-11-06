@@ -25,14 +25,19 @@ export function createTeamsReader({ getToken, getFilesToken = getToken, getChann
 		if (!me.id) throw new Error("Teams 登录身份无效");
 		archive.bindAccount(me.id); bound = true;
 	}
-	async function save(chatId: string, messages: ArchivedMessage[], token: string) {
+	async function save(chatId: string, messages: ArchivedMessage[], token: string, revision?: number) {
 		if (!archive || !media) return undefined;
 		await bind(token);
-		archive.save(chatId, messages);
-		await media.discover(chatId, messages, token);
+		archive.save(chatId, messages, revision);
+		const accepted = messages.flatMap(message => { const current = archive.message(chatId, message.id); return current ? [current] : []; });
+		await media.discover(chatId, accepted, token);
 		await media.download();
 		return messages.flatMap(m => archive.mediaRows(chatId, m.id));
 	}
+	const currentMessage = (chatId: string, message: ArchivedMessage): ArchivedMessage => archive?.message(chatId, message.id) ?? {
+		id: message.id, createdDateTime: message.createdDateTime, lastModifiedDateTime: message.lastModifiedDateTime,
+		deletedDateTime: message.deletedDateTime, body: { content: "[来源已撤回或暂不可用]", contentType: "text" },
+	};
 	async function page(path: string, cursor: string | undefined, token: string) {
 		const url = graphPageUrl(path, cursor);
 		const data = await graph<Page>(token, url);
@@ -72,14 +77,17 @@ export function createTeamsReader({ getToken, getFilesToken = getToken, getChann
 				if (query.messageId) path += `/${segment(query.messageId)}`;
 				if (query.replies) path += "/replies";
 				const token = await (chat ? getToken() : getChannelsToken());
+				const revision = chat ? archive?.sourceRevision(query.chatId!) : undefined;
 				if (query.messageId && !query.replies) {
 					if (query.cursor) throw new Error("读取指定消息不接受分页");
-					const data = await graph<ArchivedMessage>(token, graphPageUrl(path));
-          const savedMedia = chat ? await save(query.chatId!, [data], token) : undefined;
+					let data = await graph<ArchivedMessage>(token, graphPageUrl(path));
+          const savedMedia = chat ? await save(query.chatId!, [data], token, revision) : undefined;
+          if (chat && archive) data = currentMessage(query.chatId!, data);
           return { data, media: savedMedia, records: chat && archive ? teamsRecords(archive, [{ ...data, chatId: query.chatId! }]) : undefined };
 				}
 				const result = await page(path + (chat ? `?$top=50&$orderby=${query.archiveSync ? "lastModifiedDateTime" : "createdDateTime"} desc` : "?$top=50"), query.cursor, token);
-        const savedMedia = chat ? await save(query.chatId!, result.data.items as ArchivedMessage[], token) : undefined;
+        const savedMedia = chat ? await save(query.chatId!, result.data.items as ArchivedMessage[], token, revision) : undefined;
+        if (chat && archive) result.data.items = (result.data.items as ArchivedMessage[]).map(message => currentMessage(query.chatId!, message));
         return { ...result, media: savedMedia, records: chat && archive ? teamsRecords(archive, (result.data.items as ArchivedMessage[]).map(m => ({ ...m, chatId: query.chatId! }))) : undefined };
 			}
 			case "files": {

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { createSourceLifecycle } from "./source-lifecycle.js";
+import { messageText } from "./teams-message-text.js";
 
 export type ArchivedMessage = {
   id: string; createdDateTime: string; lastModifiedDateTime?: string; deletedDateTime?: string;
@@ -14,6 +16,8 @@ const textOf = (message: ArchivedMessage) => (message.body?.content ?? "").repla
 const safeLink = (value?: string) => { try { const u = new URL(value ?? ""); return u.protocol === "https:" && !u.username && !u.password ? u.href : undefined; } catch { return undefined; } };
 
 export function openTeamsArchive(db: DatabaseSync) {
+  const sources = createSourceLifecycle(db);
+  const allowed = (chat: string, id: string) => sources.allowed(`teams:${chat}`, undefined, [`${chat}:${id}`]);
   db.exec(`CREATE TABLE IF NOT EXISTS teams_archive_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS teams_archive_chats (id TEXT PRIMARY KEY, value TEXT NOT NULL, cursor TEXT, complete INTEGER NOT NULL DEFAULT 0,
       newest TEXT, scan_floor TEXT, scanned_at TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', retry_at TEXT NOT NULL DEFAULT '');
@@ -24,15 +28,21 @@ export function openTeamsArchive(db: DatabaseSync) {
       source TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, url TEXT, mime TEXT, bytes BLOB,
       status TEXT NOT NULL DEFAULT 'pending', error TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, retry_at TEXT NOT NULL DEFAULT '');
     CREATE INDEX IF NOT EXISTS teams_archive_media_message ON teams_archive_media(chat_id,message_id);`);
+  // Upgrade old archives before any reader can see them. Deletion markers
+  // predate the shared ledger and must not become live just because it is new.
+  for (const item of db.prepare("SELECT chat_id,id FROM teams_archive_messages WHERE json_valid(value) AND COALESCE(json_extract(value,'$.deletedDateTime'),'')!=''").all()) {
+    sources.revoke(`teams:${String(item.chat_id)}`, `${String(item.chat_id)}:${String(item.id)}`);
+  }
   const saveChat = db.prepare("INSERT INTO teams_archive_chats(id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value");
   const saveMessage = db.prepare(`INSERT INTO teams_archive_messages(chat_id,id,created_at,sender,text,value,saved_at) VALUES (?,?,?,?,?,?,?)
     ON CONFLICT(chat_id,id) DO UPDATE SET created_at=excluded.created_at,sender=excluded.sender,text=excluded.text,value=excluded.value,saved_at=excluded.saved_at`);
   const insertMedia = db.prepare(`INSERT INTO teams_archive_media(id,chat_id,message_id,source,name,kind,url,status) VALUES (?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET name=excluded.name,url=excluded.url`);
-  const mediaRows = (chatId: string, messageId: string): ArchiveMedia[] => (db.prepare("SELECT id,name,kind,url,status,error FROM teams_archive_media WHERE chat_id=? AND message_id=? ORDER BY id").all(chatId, messageId) as Record<string, string>[])
+  const mediaRows = (chatId: string, messageId: string): ArchiveMedia[] => !allowed(chatId, messageId) ? [] : (db.prepare("SELECT id,name,kind,url,status,error FROM teams_archive_media WHERE chat_id=? AND message_id=? ORDER BY id").all(chatId, messageId) as Record<string, string>[])
     .map(r => ({ id: r.id, name: r.name, kind: r.kind as "image" | "file", status: r.status, ...(r.url ? { url: r.url } : {}),
       ...(r.status === "ready" ? { previewUrl: `/api/teams/media/${r.id}` } : {}), ...(r.error ? { error: r.error } : {}) }));
   return {
+    sourceRevision: (chatId: string) => sources.revision(`teams:${chatId}`),
     bindAccount(identity: string) {
       const key = digest(identity);
       const row = db.prepare("SELECT value FROM teams_archive_meta WHERE key='owner'").get() as { value: string } | undefined;
@@ -42,11 +52,29 @@ export function openTeamsArchive(db: DatabaseSync) {
     chats(items: ArchivedChat[]) {
       for (const chat of items) { if (!chat.id) throw new Error("Teams 聊天缺少标识"); saveChat.run(chat.id, JSON.stringify(chat)); }
     },
-    save(chatId: string, messages: ArchivedMessage[]) {
+    save(chatId: string, messages: ArchivedMessage[], expectedRevision?: number) {
       if (messages.some(m => !m.id || !Number.isFinite(Date.parse(m.createdDateTime)))) throw new Error("Teams 归档消息标识或时间无效");
       db.exec("BEGIN IMMEDIATE");
       try {
+        const staleSnapshot = expectedRevision !== undefined && sources.revision(`teams:${chatId}`) !== expectedRevision;
+        const hasCache = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='teams_messages'").get();
         for (const message of messages) {
+          const previous = db.prepare("SELECT text,value FROM teams_archive_messages WHERE chat_id=? AND id=?").get(chatId, message.id);
+          const previousMessage = previous ? JSON.parse(String(previous.value)) as ArchivedMessage : undefined;
+          const incomingAt = Date.parse(message.lastModifiedDateTime ?? message.createdDateTime);
+          const previousAt = previousMessage ? Date.parse(previousMessage.lastModifiedDateTime ?? previousMessage.createdDateTime) : -Infinity;
+          // Deletion is monotonic. For ordinary content, reject known older
+          // versions and network reads that crossed a source change.
+          if (!message.deletedDateTime && (incomingAt < previousAt || (staleSnapshot && !(incomingAt > previousAt)))) continue;
+          const cached = hasCache ? db.prepare("SELECT text,source_stale FROM teams_messages WHERE id=?").get(`${chatId}:${message.id}`) : undefined;
+          if (message.deletedDateTime || (previous && previous.text !== textOf(message)) || (cached && !cached.source_stale && cached.text !== messageText(message))) {
+            if (message.deletedDateTime) sources.revoke(`teams:${chatId}`, `${chatId}:${message.id}`);
+            else sources.invalidate(`teams:${chatId}`);
+            if (hasCache) {
+              db.prepare("UPDATE teams_messages SET notification_cancelled_at=COALESCE(notification_cancelled_at,?),source_stale=1 WHERE id=?")
+                .run(new Date().toISOString(), `${chatId}:${message.id}`);
+            }
+          }
           saveMessage.run(chatId, message.id, message.createdDateTime, message.from?.user?.displayName ?? "", textOf(message), JSON.stringify(message), new Date().toISOString());
           for (const [index, file] of (message.attachments ?? []).entries()) {
             const source = `attachment:${file.id ?? index}`;
@@ -73,10 +101,13 @@ export function openTeamsArchive(db: DatabaseSync) {
       return chat?.topic || chat?.members?.map(m => m.displayName).filter(Boolean).join("、") || "聊天记录";
     },
     message(chatId: string, id: string): ArchivedMessage | undefined {
+      if (!allowed(chatId, id)) return;
       const row = db.prepare("SELECT value FROM teams_archive_messages WHERE chat_id=? AND id=?").get(chatId, id) as { value: string } | undefined;
       return row ? JSON.parse(row.value) as ArchivedMessage : undefined;
     },
     media(id: string) {
+      const origin = db.prepare("SELECT chat_id,message_id FROM teams_archive_media WHERE id=?").get(id);
+      if (!origin || !allowed(String(origin.chat_id), String(origin.message_id))) return;
       return db.prepare("SELECT name,mime,bytes,status FROM teams_archive_media WHERE id=?").get(id) as { name: string; mime: string | null; bytes: Uint8Array | null; status: string } | undefined;
     },
     saveBytes(id: string, mime: string, bytes: Uint8Array) {
@@ -88,7 +119,9 @@ export function openTeamsArchive(db: DatabaseSync) {
         .run(error, new Date(Date.now() + 5 * 60_000).toISOString(), id);
     },
     pendingMedia(limit: number) {
-      return db.prepare("SELECT id,chat_id,message_id,source FROM teams_archive_media WHERE kind='image' AND status IN ('pending','failed') AND attempts<3 AND retry_at<=? LIMIT ?")
+      return db.prepare(`SELECT id,chat_id,message_id,source FROM teams_archive_media m WHERE kind='image' AND status IN ('pending','failed') AND attempts<3 AND retry_at<=?
+        AND NOT EXISTS (SELECT 1 FROM source_message_revocations r WHERE r.source='teams:'||m.chat_id AND r.message_id=m.chat_id||':'||m.message_id)
+        AND NOT EXISTS (SELECT 1 FROM source_lifecycle s WHERE s.source='teams:'||m.chat_id AND s.revoked_at IS NOT NULL) LIMIT ?`)
         .all(new Date().toISOString(), limit) as { id: string; chat_id: string; message_id: string; source: string }[];
     },
     discoveryCursor(value?: string | null) {
@@ -108,7 +141,8 @@ export function openTeamsArchive(db: DatabaseSync) {
         .run(reason, new Date(Date.now() + 5 * 60_000).toISOString(), new Date().toISOString(), chatId);
     },
     search(query: { chatId?: string; text?: string; before?: string; limit: number }) {
-      const conditions: string[] = [], values: (string | number)[] = [];
+      const conditions: string[] = ["NOT EXISTS (SELECT 1 FROM source_message_revocations r WHERE r.source='teams:'||teams_archive_messages.chat_id AND r.message_id=teams_archive_messages.chat_id||':'||teams_archive_messages.id)",
+        "NOT EXISTS (SELECT 1 FROM source_lifecycle s WHERE s.source='teams:'||teams_archive_messages.chat_id AND s.revoked_at IS NOT NULL)"], values: (string | number)[] = [];
       if (query.chatId) { conditions.push("chat_id=?"); values.push(query.chatId); }
       if (query.text) { conditions.push("(instr(lower(text),lower(?))>0 OR instr(lower(sender),lower(?))>0)"); values.push(query.text, query.text); }
       if (query.before) {

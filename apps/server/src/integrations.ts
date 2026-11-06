@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { TeamsSendRejectedError } from "@assistant/features";
 import { join } from "node:path";
+import type { NotificationSource } from "@assistant/channel-wechat";
 import type { AppConfig } from "./config.js";
 import type { TeamsStore } from "./teams-store.js";
 import type { TeamsSender } from "./teams-reply-port.js";
@@ -12,6 +13,7 @@ import { sendTeamsMessage } from "./teams-send.js";
 import { createTeamsSync } from "./teams-sync.js";
 import { startTeamsForward } from "./teams-forward.js";
 import type { ImportantRules } from "./teams-rules.js";
+import { createTeamsEpisodeAccess } from "./teams-episode-access.js";
 
 type ForwardConfig = { account?: TeamsAccount; ginaHome?: string; important?: ImportantRules };
 
@@ -19,8 +21,8 @@ type WechatIntegration = {
   enabled: boolean;
   sendURL: string;
   sendToken: string;
-  notify?: (wxid: string, text: string, messageId: string) => Promise<void>;
-  notifyBatch?: (wxid: string, text: string, messageIds: string[]) => Promise<void>;
+  notify?: (wxid: string, text: string, messageId: string, sourceRevisions?: NotificationSource["sourceRevisions"]) => Promise<void>;
+  notifyBatch?: (wxid: string, text: string, messageIds: string[], sourceRevisions?: NotificationSource["sourceRevisions"]) => Promise<void>;
   undelivered?: () => Promise<{ text: string; status?: "pending" | "blocked" }[]>;
 };
 
@@ -87,6 +89,8 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   teamsSender.refresh = sync.refresh;
   teamsSender.syncStatus = sync.status;
   const read = createTeamsReader({ getToken, getFilesToken, getChannelsToken, signal: controller.signal, archive: store.archive });
+  const episodeAccess = createTeamsEpisodeAccess({ getToken, signal: controller.signal, bindAccount: id => store.archive.bindAccount(id) });
+  teamsSender.canReadEpisodeSource = chatId => active ? track(episodeAccess(chatId)) : Promise.resolve(false);
   const archiveSync = createTeamsArchiveSync(store.archive, read, controller.signal);
   teamsSender.read = query => {
     if (!active) return Promise.reject(new Error("Teams 集成已停止"));
@@ -97,15 +101,15 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   try {
     if (wechat?.enabled) stopForward = startTeamsForward({
       dir, store, getToken, rules: parsed.important, sendURL: wechat.sendURL, sendToken: wechat.sendToken, sync, signal: controller.signal,
-      injectBatch: wechat.notifyBatch ? (wxid, text, messageIds) => active ? wechat.notifyBatch!(wxid, text, messageIds) : Promise.reject(new Error("Teams 集成已停止")) : undefined,
-      inject: wechat.notify ? (wxid, text, messageId) => active ? wechat.notify!(wxid, text, messageId) : Promise.reject(new Error("Teams 集成已停止")) : undefined,
+      injectBatch: wechat.notifyBatch ? (wxid, text, messageIds, sourceRevisions) => active ? wechat.notifyBatch!(wxid, text, messageIds, sourceRevisions) : Promise.reject(new Error("Teams 集成已停止")) : undefined,
+      inject: wechat.notify ? (wxid, text, messageId, sourceRevisions) => active ? wechat.notify!(wxid, text, messageId, sourceRevisions) : Promise.reject(new Error("Teams 集成已停止")) : undefined,
       undelivered: wechat.undelivered ? () => active ? wechat.undelivered!() : Promise.resolve([]) : undefined,
       onStuck: (...args) => { if (active) onStuck?.(...args); },
     });
   } catch (error) {
     active = false;
     controller.abort();
-    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus; delete teamsSender.read;
+    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus; delete teamsSender.read; delete teamsSender.canReadEpisodeSource;
     throw error;
   }
 
@@ -129,7 +133,7 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
     controller.abort();
     clearTimeout(timer);
     clearTimeout(archiveTimer);
-    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus; delete teamsSender.read;
+    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus; delete teamsSender.read; delete teamsSender.canReadEpisodeSource;
     const forwarding = stopForward?.();
     return closing = Promise.allSettled([...pending, forwarding]).then(() => {});
   };

@@ -169,3 +169,14 @@ test("manual retry only requeues failures, survives restart and preserves event 
     assert.equal(outbox.retry("failed:1"), "conflict");
   } finally { await outbox.close(); await rm(dir, { recursive: true, force: true }); }
 });
+
+test("response cleanup failure cannot erase an already confirmed HTTP delivery result", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-outbox-receipt-"));
+  const queue = openNotificationOutbox(dir, { url: "https://unused.example.test/webhook", mode: "all", kind: "generic" }, async () =>
+    new Response(new ReadableStream({ cancel() { throw new Error("cleanup failed"); } }), { status: 200 }));
+  t.after(async () => { await queue.close(); await rm(dir, { recursive: true, force: true }); });
+  await queue.enqueue({ id: "acknowledged", body: "{}" });
+  await queue.flush();
+  assert.equal(queue.list()[0].status, "sent");
+  assert.equal(queue.list()[0].lastError, null);
+});
