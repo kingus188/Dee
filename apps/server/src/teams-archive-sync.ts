@@ -30,6 +30,7 @@ export function createTeamsArchiveSync(archive: TeamsArchive, read: TeamsReadPor
       } catch (error) {
         signal?.throwIfAborted();
         archive.failure(chat.id, "聊天归档尚未完成，等待重试或检查权限");
+        if (error && typeof error === "object" && "retryAfterMs" in error) throw error;
       }
     }
   }

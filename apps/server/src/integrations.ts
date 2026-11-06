@@ -14,6 +14,8 @@ import { createTeamsSync } from "./teams-sync.js";
 import { startTeamsForward } from "./teams-forward.js";
 import type { ImportantRules } from "./teams-rules.js";
 import { createTeamsEpisodeAccess } from "./teams-episode-access.js";
+import { startTeamsPolling } from "./teams-polling.js";
+import { createTeamsFetch } from "./teams-throttle.js";
 
 type ForwardConfig = { account?: TeamsAccount; ginaHome?: string; important?: ImportantRules };
 
@@ -70,7 +72,8 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   const getFilesToken = authAccount ? createTeamsTokenProvider(authAccount, FILES_SCOPE) : getToken;
   const getChannelsToken = authAccount ? createTeamsTokenProvider(authAccount, CHANNELS_SCOPE) : getToken;
   const controller = new AbortController();
-  const collector = createTeamsSync({ dir, store, getToken, rules: parsed.important, signal: controller.signal });
+  const graphFetch = createTeamsFetch();
+  const collector = createTeamsSync({ dir, store, getToken, rules: parsed.important, signal: controller.signal, fetchImpl: graphFetch });
   let active = true;
   const pending = new Set<Promise<unknown>>();
   function track<T>(operation: Promise<T>) {
@@ -88,8 +91,8 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   };
   teamsSender.refresh = sync.refresh;
   teamsSender.syncStatus = sync.status;
-  const read = createTeamsReader({ getToken, getFilesToken, getChannelsToken, signal: controller.signal, archive: store.archive });
-  const episodeAccess = createTeamsEpisodeAccess({ getToken, signal: controller.signal, bindAccount: id => store.archive.bindAccount(id) });
+  const read = createTeamsReader({ getToken, getFilesToken, getChannelsToken, signal: controller.signal, archive: store.archive, fetchImpl: graphFetch });
+  const episodeAccess = createTeamsEpisodeAccess({ getToken, signal: controller.signal, bindAccount: id => store.archive.bindAccount(id), fetchImpl: graphFetch });
   teamsSender.canReadEpisodeSource = chatId => active ? track(episodeAccess(chatId)) : Promise.resolve(false);
   const archiveSync = createTeamsArchiveSync(store.archive, read, controller.signal);
   teamsSender.read = query => {
@@ -113,28 +116,19 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
     throw error;
   }
 
-  let timer: NodeJS.Timeout | undefined;
-  const poll = async () => {
-    try { await sync.refresh(); } catch (error) { if (active) console.error("Teams 同步失败：", error instanceof Error ? error.message : String(error)); }
-    if (active) timer = setTimeout(() => { void poll(); }, 45_000);
-  };
-  if (!stopForward) void poll();
-  let archiveTimer: NodeJS.Timeout | undefined;
-  const archivePoll = async () => {
-    try { await track(archiveSync.refresh()); } catch { if (active) console.error("Teams 历史归档未完成，稍后重试"); }
-    if (active) archiveTimer = setTimeout(() => { void archivePoll(); }, 45_000);
-  };
-  void archivePoll();
+  const stopSync = !stopForward ? startTeamsPolling({ settings: store.triage.settings, run: sync.refresh,
+    onError: error => { if (active) console.error("Teams 同步失败：", error instanceof Error ? error.message : String(error)); } }) : undefined;
+  const stopArchive = startTeamsPolling({ settings: store.triage.settings, archive: true,
+    run: async () => { await track(archiveSync.refresh()); return { ok: true }; },
+    onError: () => { if (active) console.error("Teams 历史归档未完成，稍后重试"); } });
 
   let closing: Promise<void> | undefined;
   return () => {
     if (closing) return closing;
     active = false;
     controller.abort();
-    clearTimeout(timer);
-    clearTimeout(archiveTimer);
     delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus; delete teamsSender.read; delete teamsSender.canReadEpisodeSource;
     const forwarding = stopForward?.();
-    return closing = Promise.allSettled([...pending, forwarding]).then(() => {});
+    return closing = Promise.allSettled([...pending, forwarding, stopSync?.(), stopArchive()]).then(() => {});
   };
 }

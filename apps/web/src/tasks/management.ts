@@ -37,5 +37,17 @@ export function managementCards(data: Management, conversationId: string): Conve
       meta: "开始于 " + fmt(item.createdAt), details: item.result || undefined, actions,
     });
   }
+  for (const goal of data.goals ?? []) {
+    const status = { running: "自主执行中", waiting_time: "等待唤醒", waiting_user: "等待你补充", blocked: "执行受阻", review: "待验收", completed: "已完成", cancelled: "已取消" }[goal.status];
+    const actions: CardAction[] = [];
+    if (goal.status === "review") actions.push({ label: "确认完成", kind: "request", path: `/api/goals/${goal.id}/accept`, body: { revision: goal.revision } });
+    if (goal.status !== "completed" && goal.status !== "cancelled") actions.push({ label: "取消委托", kind: "request", path: `/api/goals/${goal.id}/cancel`, body: { revision: goal.revision } });
+    cards.push({
+      key: "goal:" + goal.id, group: "tasks", title: "个人委托", text: goal.text + "\n\n验收标准：" + goal.criteria,
+      status, tone: goal.status === "blocked" ? "error" : goal.status === "completed" ? "done" : "pending",
+      meta: `${goal.round}/${goal.maxRounds} 轮 · ${goal.usedTokens} Tokens` + (goal.wakeAt ? " · 唤醒：" + fmt(goal.wakeAt) : "") + (goal.status === "waiting_user" ? " · 请在聊天中补充信息以继续" : ""),
+      details: [goal.summary, ...goal.history.map(step => `第 ${step.round} 轮：${step.summary}\n${step.evidence.join("\n")}`)].join("\n\n"), actions,
+    });
+  }
   return cards;
 }

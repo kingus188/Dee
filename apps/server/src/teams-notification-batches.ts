@@ -13,11 +13,11 @@ export type TeamsNotice = {
 export type TeamsNotificationBatch = { id: string; messageIds: string[]; sourceRevisions: { source: string; revision: number }[]; prompt: string; text: string; priority: NotificationPriority; nextAt: number };
 export const teamsNoticePriority = (items: readonly Pick<TeamsNotice, "notificationPriority">[]): NotificationPriority =>
   items.some(item => item.notificationPriority === "approval") ? "approval" :
-    items.some(item => item.notificationPriority !== "normal") ? "urgent" : "normal";
+    items.some(item => item.notificationPriority === "urgent") ? "urgent" : "normal";
 
 // Batches freeze membership and generated input before asynchronous injection. A restart,
 // new arrival or unknown injection result must retry that same source set, not regroup it.
-export function createTeamsNotificationBatches<T extends TeamsNotice>(db: DatabaseSync, row: (value: Record<string, unknown>) => T) {
+export function createTeamsNotificationBatches<T extends TeamsNotice>(db: DatabaseSync, row: (value: Record<string, unknown>) => T, normalDelay = () => 30 * 60_000) {
   db.exec(`CREATE TABLE IF NOT EXISTS teams_notification_batches (
     id TEXT PRIMARY KEY, message_ids TEXT NOT NULL, prompt TEXT NOT NULL, text TEXT NOT NULL,
     priority TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL,
@@ -30,8 +30,9 @@ export function createTeamsNotificationBatches<T extends TeamsNotice>(db: Databa
     sourceRevisions: value.source_revisions ? JSON.parse(String(value.source_revisions)) : [],
     prompt: String(value.prompt), text: String(value.text), priority: value.priority as NotificationPriority, nextAt: Number(value.next_at) });
   const quietHours = () => preferences.get().quietHours;
-  const candidates = `FROM teams_messages m WHERE important = 1 AND direction = 'in' AND pushed_at IS NULL AND replied_at IS NULL
-    AND notification_cancelled_at IS NULL AND created_at >= ? AND NOT EXISTS (SELECT 1 FROM teams_notification_members n WHERE n.message_id = m.id)`;
+  const candidates = `FROM visible_teams_messages m WHERE important = 1 AND direction = 'in' AND pushed_at IS NULL AND replied_at IS NULL
+    AND notification_cancelled_at IS NULL AND created_at >= ? AND NOT EXISTS (SELECT 1 FROM teams_chat_access a WHERE a.chat_id=m.chat_id AND a.available=0)
+    AND NOT EXISTS (SELECT 1 FROM teams_notification_members n WHERE n.message_id = m.id)`;
   const current = (batch: TeamsNotificationBatch) => batch.sourceRevisions.length > 0 && batch.sourceRevisions.every(ref => sources.allowed(ref.source, ref.revision));
   const cancel = (id: string) => { db.prepare("UPDATE teams_notification_batches SET status='cancelled',finished_at=? WHERE id=? AND status='pending'").run(Date.now(), id); };
   return {
@@ -50,7 +51,7 @@ export function createTeamsNotificationBatches<T extends TeamsNotice>(db: Databa
         if (priority === "normal") {
           const latest = db.prepare("SELECT MAX(MAX(created_at, COALESCE(finished_at, 0))) AS at FROM teams_notification_batches WHERE priority = 'normal'").get();
           const pending = db.prepare("SELECT 1 FROM teams_notification_batches WHERE priority = 'normal' AND status = 'pending' LIMIT 1").get();
-          if (pending || notificationDeliveryAt(quietHours(), now, priority, Math.max(Date.parse(selected[0].createdAt) + 60_000, merge ? Number(latest?.at ?? 0) + 60_000 : 0)) > now) {
+          if (pending || notificationDeliveryAt(quietHours(), now, priority, Math.max(Date.parse(selected[0].createdAt) + normalDelay(), merge ? Number(latest?.at ?? 0) + normalDelay() : 0)) > now) {
             db.exec("COMMIT"); return;
           }
         }

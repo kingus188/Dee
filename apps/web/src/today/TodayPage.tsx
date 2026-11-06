@@ -1,10 +1,12 @@
-import type { DaylightSnapshot, PersonalData, WorkspaceActivities, WorkspaceMail } from "@assistant/contracts";
+import type { DaylightSnapshot, PersonalData, WorkspaceActivities, WorkspaceMail, TeamsTriageOverview } from "@assistant/contracts";
 import type { CardGroup } from "../chat/cards.js";
 import { Icon } from "../ui/Icon.js";
 import { isDaylightSnapshot, isPersonalData, isWorkspaceActivities, isWorkspaceMail } from "./data.js";
 import { activityPhase } from "./model.js";
 import { TodayApprovals, TodayMail, TodayProgress, TodayTasks } from "./TodaySections.js";
 import { usePageResource } from "./usePageResource.js";
+import { TeamsTriage } from "../teams/TeamsTriage.js";
+import { isTeamsTriageOverview } from "../teams/data.js";
 
 export type TodayPageProps = {
   active: boolean;
@@ -27,7 +29,8 @@ export function TodayPage({ active, onPrompt, onGroup, onDaylight, onActivities,
   const personal = usePageResource<PersonalData>("/api/personal", active, isPersonalData);
   const activities = usePageResource<WorkspaceActivities>("/api/workspace/activities", active, isWorkspaceActivities);
   const mail = usePageResource<WorkspaceMail>("/api/workspace/mail", active, isWorkspaceMail);
-  const resources = [daylight, personal, activities, mail];
+  const teams = usePageResource<TeamsTriageOverview>("/api/teams/triage", active, isTeamsTriageOverview);
+  const resources = [daylight, personal, activities, mail, teams];
   const loading = resources.some(resource => resource.loading);
   const now = new Date();
   // Quiet successful empty states, but never hide an error or incomplete data.
@@ -50,6 +53,7 @@ export function TodayPage({ active, onPrompt, onGroup, onDaylight, onActivities,
       {showProgress && <TodayProgress resource={activities} onActivities={onActivities} onConversation={onConversation} />}
       {showApprovals && <TodayApprovals resource={personal} onGroup={onGroup} />}
     </div>
+    <TeamsTriage resource={teams} active={active} onDaylight={onDaylight} onCreated={daylight.refresh} />
     <details className="today-secondary" open={mailAttention || undefined}>
       <summary><Icon name="mail" /><span>最近邮件</span>{mailAttention && <span className="today-secondary-attention">需要检查</span>}<Icon name="chevron-down" /></summary>
       <TodayMail resource={mail} onSettings={onSettings} />

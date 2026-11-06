@@ -63,6 +63,12 @@ Daily reports provide one Markdown page per date with editing, preview, save, ca
 
 Outlook mail is synchronized by the backend and shared by the desktop and browser clients. Configure `MAIL_ACCOUNT_FILE`, or use device-code sign-in under Settings → Outlook mail when available. The first sync covers roughly the last 30 days without alerting for historical messages; later syncs are incremental. The product does not send mail, change read state or download attachments.
 
+### Durable personal goals
+
+You can ask Xiao D to “organize the materials for project A and report conclusions, sources and missing information.” `start_goal` saves the objective and acceptance criteria, then proceeds in rounds with evidence. When information is missing, the same goal waits for your input and resumes through `control_goal`; timed waits survive server restarts. Workers can only query materials, mail, Teams and tasks. They cannot send messages, delete data or change business records, and their internal steps do not become global todos. A delivered result enters pending review and is completed only after you accept it. Status reports are appended as passive messages without triggering another tool run in the main conversation. Tasks and reminders, and conversation cards, show progress, evidence, acceptance and cancellation controls.
+
+Goals default to 12 rounds (configurable from 1 to 24), expire within 24 hours (a shorter limit can be set), and allow up to 5 minutes of active work per round. Each goal has a provider-reported budget of 50,000 tokens; usage from workers started before cancellation or a requirement change still counts, and an in-flight request can exceed the limit. At most 3 goals run at once. Repeated progress, a missing checkpoint, exhausted limits or an inability to continue stop execution with an explanation. User updates use revision checks, and cancelled goals cannot restart automatically. User input and timed wake-ups are supported; new mail or Teams messages do not directly resume goals. Real-model judgments and cited content still require your review. APIs: `GET /api/goals`, `POST /api/conversations/:id/goals` and `POST /api/goals/:id/{resume,cancel,accept}`. Control requests require the current `revision`; `resume` also requires the user's additional `input`.
+
 ### Saving materials, Teams replies and coding tasks
 
 - **Saving work materials:** Turn conversation content into a draft, approve it as current, and archive an older document with the same name.

@@ -5,6 +5,9 @@ import { resultText } from "../results.js";
 import { createSchedules } from "./schedules.js";
 import { createBackground } from "./background.js";
 import { createReminders } from "./reminders.js";
+import { requireUserInstruction } from "../user-instruction.js";
+import { GoalTask, goalTools, goalHooks, goalSection } from "../goals/index.js";
+export { Goals, GoalWorker, GoalTask, createGoalInTx, controlGoalInTx } from "../goals/index.js";
 import type { NotifyEvent } from "./notifications.js";
 export * from "./documents.js";
 export * from "./parameters.js";
@@ -22,8 +25,11 @@ export function createTaskCenter(notifyEvent: NotifyEvent, onSettled: (run: Exec
  const { BackgroundTask, backgroundInTx } = background;
 const V3: Extension = defineExtension({
   name: "v3-task-center",
-  tasks: [ScheduleTask, BackgroundTask],
+  tasks: [ScheduleTask, BackgroundTask, GoalTask],
+  hooks: goalHooks,
+  sections: [goalSection],
   tools: [
+    ...goalTools,
     defineTool({
       name: "schedule_task", replay: "safe",
       description: "按分钟延迟或日历规则执行任务。calendar 使用 IANA 时区与 HH:mm；weekly.weekdays 为 1～7（周一为1）。两种时间方式只能选一种。可用 daylightTaskId 关联已有待办，运行记录会保留结果。",
@@ -37,6 +43,7 @@ const V3: Extension = defineExtension({
         ])),
       }),
       execute: async (args, api, context) => {
+        await requireUserInstruction(api, context);
         const item = await api.commit((tx) => scheduleInTx(tx, api.conversationId, args, "tool:" + api.callId), context);
         return resultText("计划已创建：" + item.id);
       },
@@ -46,6 +53,7 @@ const V3: Extension = defineExtension({
       description: "把一项独立工作交给可跨进程恢复的后台子 Agent，立即返回任务编号，不等待它完成",
       parameters: Type.Object({ text: Type.String(), daylightTaskId: Type.Optional(Type.String()) }),
       execute: async (args, api, context) => {
+        await requireUserInstruction(api, context);
         const item = await api.commit((tx) => backgroundInTx(tx, api.conversationId, args, "tool:" + api.callId), context);
         return resultText("后台子 Agent 已启动：" + item.id);
       },

@@ -27,7 +27,11 @@ export function createTeamsGraph(fetchImpl: typeof fetch, signal?: AbortSignal) 
 			if (response.status === 403) throw new Error("Teams 读取被拒绝：请核对当前账号访问权及该功能的微软委托授权");
 			if (response.status === 401) throw new Error("Teams 登录已失效，请重新登录");
 			if (response.status === 404) throw new Error("Teams 消息或文件不存在，或当前账号无权访问");
-			if (response.status === 429) throw new Error("微软暂时限制读取频率，请稍后重试");
+			if (response.status === 429 || response.status === 503) {
+        const retry = response.headers.get("retry-after");
+        const milliseconds = retry && /^\d+(?:\.\d+)?$/.test(retry) ? Number(retry) * 1000 : retry ? Date.parse(retry) - Date.now() : 60_000;
+        throw Object.assign(new Error("微软暂时限制读取频率，请稍后重试"), { retryAfterMs: Number.isFinite(milliseconds) ? Math.max(1000, milliseconds) : 60_000 });
+      }
 			throw new Error(`Teams 读取失败（HTTP ${response.status}），未将失败当作空结果`);
 		}
 		return await response.json() as T;

@@ -6,6 +6,7 @@ import { resultText as text } from "../results.js";
 import type { NotifyEvent } from "./notifications.js";
 import { normalizeRequestId } from "./parameters.js";
 import { detach } from "../results.js";
+import { requireUserInstruction } from "../user-instruction.js";
 
 export function normalizeReminder(input: { text?: unknown; minutesFromNow?: unknown }) {
 	if (typeof input.text !== "string" || !input.text.trim() || input.text.trim().length > 1000) throw new Error("提醒内容必须是 1～1000 字");
@@ -87,6 +88,7 @@ const remindMe = defineTool({
 	parameters: Type.Object({ minutes: Type.Number(), text: Type.String({ description: "要提醒的事" }) }),
 	replay: "safe",
 	execute: async (args, api, callContext) => {
+		await requireUserInstruction(api, callContext);
 		const minutes = Math.min(1440, Math.max(0.25, args.minutes));
 		const result = await api.commit(async (tx) => {
 			const reminders = await tx.doc(Reminders, api.conversationId);

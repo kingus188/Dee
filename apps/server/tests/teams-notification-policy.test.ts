@@ -11,7 +11,7 @@ import { startTeamsForward } from "../dist/teams-forward.js";
 const start = Date.parse("2026-11-05T23:00:00Z");
 const quiet = { enabled: true, start: "22:00", end: "08:00", timeZone: "UTC" };
 const item = (id: string, priority: TeamsMessage["notificationPriority"] = "normal"): TeamsMessage => ({ id, chatId: id, chatType: "oneOnOne", senderId: "sender", senderName: "Test",
-  direction: "in", text: id, createdAt: new Date(Date.now() - 61_000).toISOString(), important: true, notificationPriority: priority });
+  direction: "in", text: id, createdAt: new Date(Date.now() - 31 * 60_000).toISOString(), important: true, notificationPriority: priority });
 async function fixture(t: test.TestContext) {
   t.mock.timers.enable({ apis: ["Date"], now: start });
   const dir = await mkdtemp(join(tmpdir(), "teams-notification-policy-"));
@@ -53,7 +53,7 @@ test("unknown injection retries the frozen source set after restart; a new arriv
   f.restart(); f.store.record(item("new")); f.at(start + 60_000);
   await f.run(async ids => { calls.push(ids); });
   assert.deepEqual(calls, [["a", "b"], ["a", "b"]]);
-  f.at(start + 120_000); await f.run(async ids => { calls.push(ids); });
+  f.at(start + 31 * 60_000); await f.run(async ids => { calls.push(ids); });
   assert.deepEqual(calls.at(-1), ["new"]);
 });
 
@@ -77,15 +77,17 @@ test("handled sources cancel before injection or sending; a quiet-period retry n
   await f.run(async () => { assert.fail("handled source must not inject"); });
 });
 
-test("new ordinary messages wait one minute and normal batches are rate limited; legacy unknown priority fails open", async t => {
+test("normal messages wait the configured digest window and legacy unknown priority respects quiet hours", async t => {
   const f = await fixture(t);
   f.store.record({ ...item("new"), createdAt: new Date().toISOString() });
   const calls: string[][] = [];
   await f.run(async ids => { calls.push(ids); }); assert.equal(calls.length, 0);
-  f.at(start + 60_000); await f.run(async ids => { calls.push(ids); }); assert.deepEqual(calls, [["new"]]);
+  f.at(start + 29 * 60_000); await f.run(async ids => { calls.push(ids); }); assert.equal(calls.length, 0);
+  f.at(start + 30 * 60_000); await f.run(async ids => { calls.push(ids); }); assert.deepEqual(calls, [["new"]]);
   f.preferences.save({ quietHours: quiet });
   f.store.record({ ...item("legacy"), notificationPriority: undefined });
-  await f.run(async ids => { calls.push(ids); }); assert.deepEqual(calls.at(-1), ["legacy"]);
+  await f.run(async ids => { calls.push(ids); }); assert.deepEqual(calls, [["new"]]);
+  assert.equal((await reviewTeamsNotification(f.store, f.sender, { kind: "teams", messageIds: ["legacy"] })).status, "defer");
 });
 
 
@@ -95,6 +97,19 @@ test("deleted Teams sources cancel both queued injection and pre-send review wit
   f.store.record(item("removed", "urgent"));
   assert.equal((await reviewTeamsNotification(f.store, {}, { kind: "teams", messageIds: ["removed"] })).status, "cancel");
   await f.run(async () => { assert.fail("deleted source must not inject"); });
+});
+
+test("an unavailable chat cannot freeze a new normal batch or block other chats", async t => {
+  const f = await fixture(t);
+  f.store.record(item("unavailable"));
+  const old = f.store.notifications.create(true, () => ({ prompt: "old", text: "old" }))!;
+  f.store.triage.access("unavailable", false);
+  assert.deepEqual(f.store.notifications.ready(), [], "source revision cancels the frozen pending batch");
+  f.store.record(item("other")); f.at(start + 31 * 60_000);
+  const calls: string[][] = [];
+  await f.run(async ids => { calls.push(ids); });
+  assert.deepEqual(calls, [["other"]]);
+  assert.equal(f.store.notifications.claim(old.id), false);
 });
 
 test("partial handling rebuilds model input before injection while preserving frozen deduplication IDs", async t => {
@@ -126,10 +141,10 @@ test("partial handling rebuilds model input before injection while preserving fr
 test("deleted or edited source text is excluded from later notification history without changing read-only history", async t => {
   const f = await fixture(t);
   for (const id of ["deleted", "edited"]) {
-    f.store.record({ ...item(id), chatId: "same-chat", text: `${id.toUpperCase()}_OLD_PRIVATE_TEXT`, createdAt: new Date(start - 180_000).toISOString() });
+    f.store.record({ ...item(id), chatId: "same-chat", text: `${id.toUpperCase()}_OLD_PRIVATE_TEXT`, createdAt: new Date(start - 33 * 60_000).toISOString() });
     f.store.notifications.cancelSource(id);
   }
-  f.store.record({ ...item("context"), chatId: "same-chat", text: "KEEP_VALID_HISTORY", important: false, createdAt: new Date(start - 120_000).toISOString() });
+  f.store.record({ ...item("context"), chatId: "same-chat", text: "KEEP_VALID_HISTORY", important: false, createdAt: new Date(start - 32 * 60_000).toISOString() });
   f.store.record({ ...item("fresh"), chatId: "same-chat", text: "CURRENT_NEW_REQUEST" });
   assert.match(f.store.recentInChat("same-chat", new Date().toISOString(), 10).map(row => row.text).join(" "), /DELETED_OLD_PRIVATE_TEXT/, "read-only historical API remains unchanged");
   let calls = 0;
@@ -145,7 +160,7 @@ test("deleted or edited source text is excluded from later notification history 
 
 test("frozen prompts bind older chat context and cancel before model injection after its withdrawal", async t => {
   const f = await fixture(t);
-  f.store.record({ ...item("chat:context", "urgent"), chatId: "chat", createdAt: new Date(start - 180_000).toISOString(), important: false, text: "SYNTHETIC_WITHDRAWN_CONTEXT" });
+  f.store.record({ ...item("chat:context", "urgent"), chatId: "chat", createdAt: new Date(start - 33 * 60_000).toISOString(), important: false, text: "SYNTHETIC_WITHDRAWN_CONTEXT" });
   f.store.record({ ...item("chat:latest", "urgent"), chatId: "chat" });
   const batch = f.store.notifications.create(true, () => ({ prompt: "SYNTHETIC_WITHDRAWN_CONTEXT", text: "private context" }))!;
   assert.equal(batch.sourceRevisions[0].revision, 0);

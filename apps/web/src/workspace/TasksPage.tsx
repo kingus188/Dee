@@ -53,10 +53,10 @@ export function TasksPage({ owner, active }: { owner: number; active: boolean })
     } catch (error) { setError(errorMessage(error)); }
     finally { busy.current = false; setPending(false); }
   }
-  async function manage(path: string) {
+  async function manage(path: string, body: { revision: number } | Record<string, never> = {}) {
     if (busy.current) return;
     busy.current = true; setPending(true); setError("");
-    try { await request(path, {}); setFeedback("操作已完成"); await load(); }
+    try { await request(path, body); setFeedback("操作已完成"); await load(); }
     catch (error) { setError(errorMessage(error)); }
     finally { busy.current = false; setPending(false); }
   }
@@ -78,7 +78,7 @@ export function TasksPage({ owner, active }: { owner: number; active: boolean })
           <div className="workspace-record-actions">
             {schedule && (schedule.status === "active" || schedule.status === "paused") && <button type="button" disabled={pending} onClick={() => select({ kind: "schedules", item: schedule })}>编辑计划</button>}
             {reminder?.status === "scheduled" && <button type="button" disabled={pending} onClick={() => select({ kind: "reminders", item: reminder })}>编辑提醒</button>}
-            {card.actions?.map(action => action.kind === "request" && <button type="button" key={action.path} disabled={pending} onClick={() => void manage(action.path)}>{action.label}</button>)}
+            {card.actions?.map(action => action.kind === "request" && <button type="button" key={action.path} disabled={pending} onClick={() => void manage(action.path, action.body)}>{action.label}</button>)}
           </div>
         </article>;
       })}

@@ -83,6 +83,6 @@ function TurnCard({ turn, live, busy, onRetry, onSettings }: { turn: ChatTurn; l
 export const ChatThread = memo(function ChatThread({ view, onRetry, onSettings }: { view: ConversationView | null } & ErrorActions) {
   const turns = chatTurns(view?.entries ?? []);
   const busy = !!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length;
-  if (!turns.length) return busy ? <div className="message-row assistant-row"><ResponseCard text="思考中…" streaming /></div> : <div className="chat-welcome"><span aria-hidden="true">D.</span><h1>有什么想交给我？</h1><p>我在，慢慢说。</p></div>;
+  if (!turns.length) return busy ? <div className="message-row assistant-row"><ResponseCard text="思考中…" streaming /></div> : <div className="chat-welcome"><h1>有什么想交给我？</h1></div>;
   return <>{turns.map((turn, index) => <TurnCard key={turn.id} turn={turn} live={index === turns.length - 1 ? view?.live : undefined} busy={index === turns.length - 1 && busy} onRetry={index === turns.length - 1 ? onRetry : undefined} onSettings={onSettings} />)}</>;
 });
