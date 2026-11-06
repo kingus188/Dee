@@ -35,13 +35,12 @@ export default function TaskQuickAdd({ projects, projectId, dueDate, disabled, o
   }
 
   return <form className="task-quick-add" aria-label="快速添加待办" onSubmit={event => { event.preventDefault(); void submit() }}>
-    <div className="quick-add-title"><PlusOutlined /><input aria-label="新待办标题" placeholder="添加一件要做的事…" value={title} required maxLength={160} disabled={disabled} onChange={event => setTitle(event.target.value)} /><span className="quick-add-hint">Enter 添加</span></div>
-    <div className="quick-add-options">
+    <div className="quick-add-title"><PlusOutlined /><input id="daylight-quick-add" aria-label="新待办标题" placeholder="添加一件事，按 Enter 保存" value={title} required maxLength={160} disabled={disabled} onChange={event => setTitle(event.target.value)} /><button type="submit" className="text-button" disabled={disabled || !title.trim() || !selectedProject}>添加</button></div>
+    <details className="quick-add-details"><summary>项目、日期与优先级</summary><div className="quick-add-options">
       <label><span className="sr-only">新增待办项目</span><select aria-label="新增待办项目" value={selectedProject} disabled={disabled} onChange={event => setProject(event.target.value)}>{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label className="quick-add-date"><CalendarOutlined /><span className="sr-only">新增待办日期</span><input aria-label="新增待办日期" type="date" value={date ?? dueDate ?? ''} disabled={disabled} onChange={event => setDate(event.target.value)} /></label>
       <label><span className="sr-only">新增待办优先级</span><select aria-label="新增待办优先级" value={priority} disabled={disabled} onChange={event => setPriority(event.target.value as Priority)}>{Object.entries(priorities).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <button type="submit" className="button primary" disabled={disabled || !title.trim() || !selectedProject}><PlusOutlined />添加</button>
-    </div>
+    </div></details>
     {error && <p className="quick-add-error" role="alert">{error}</p>}
   </form>
 }

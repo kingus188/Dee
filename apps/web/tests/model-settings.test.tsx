@@ -87,7 +87,7 @@ test("目录读取失败仍可修改后台地址，重试后恢复模型选择",
   assert.ok(document.querySelector("#server-model"));
 });
 
-test("未配置模型时保留今日工作台，不显示模型编辑或选择输入", async t => {
+test("未配置模型时从对话开始，保留设置入口且不创建对话", async t => {
   const paths: string[] = [];
   t.mock.method(apiClient, "connect", async () => {});
   t.mock.method(apiClient, "onConnection", (listener: (state: "connected") => void) => { listener("connected"); return () => {}; });
@@ -98,7 +98,7 @@ test("未配置模型时保留今日工作台，不显示模型编辑或选择�
     return otherSettings(path);
   });
   const { dom } = await mount(t, <App />);
-  assert.equal(dom.window.document.getElementById("workspace")!.dataset.view, "home");
+  assert.equal(dom.window.document.getElementById("workspace")!.dataset.view, "chat");
   assert.ok(dom.window.document.querySelector(".today-page"));
   await act(async () => { dom.window.document.querySelector<HTMLAnchorElement>('[aria-label="连接与设置"]')!.click(); });
   assert.match(dom.window.document.querySelector(".settings-status")!.textContent!, /服务器尚未配置模型/);

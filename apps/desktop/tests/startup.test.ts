@@ -10,14 +10,15 @@ import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 const entry = new URL("../dist/main.js", import.meta.url);
 const nativeRequire = createRequire(entry);
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
-type MenuItem = { label?: string; submenu?: MenuItem[]; click?: () => void };
+type MenuItem = { id?: string; label?: string; submenu?: MenuItem[]; click?: () => void };
 
-async function desktop(options: { offline?: boolean; invalidEnvironment?: boolean; brokenPin?: boolean; noSavedConnection?: boolean; environment?: Record<string, string> } = {}) {
+async function desktop(options: { notificationsSupported?: boolean; offline?: boolean; invalidEnvironment?: boolean; brokenPin?: boolean; noSavedConnection?: boolean; environment?: Record<string, string> } = {}) {
   const windows: FakeWindow[] = [];
   const state = { offline: options.offline ?? false, notifications: 0, errors: 0 };
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const saved: { config: { url: string; username?: string }; secret?: string }[] = [];
   let menu: MenuItem[] = [];
+  let reportMailStatus: ((status: unknown) => void) | undefined;
   class FakeWindow extends EventEmitter {
     visible = true;
     minimized = false;
@@ -63,8 +64,9 @@ async function desktop(options: { offline?: boolean; invalidEnvironment?: boolea
     app, BrowserWindow: FakeWindow,
     dialog: { showErrorBox() { state.errors++; } },
     ipcMain: { handle(name: string, handler: (...args: unknown[]) => unknown) { handlers.set(name, handler); } },
-    Menu: { buildFromTemplate: (items: MenuItem[]) => items, setApplicationMenu(items: MenuItem[]) { menu = items; } },
-    Notification: { isSupported: () => false }, session: { fromPartition: () => web }, shell: { openExternal: async () => {} },
+    Menu: { buildFromTemplate: (items: MenuItem[]) => items, setApplicationMenu(items: MenuItem[]) { menu = items; },
+      getApplicationMenu: () => ({ getMenuItemById: (id: string) => menu.flatMap(item => item.submenu ?? []).find(item => item.id === id) }) },
+    Notification: { isSupported: () => options.notificationsSupported ?? true }, session: { fromPartition: () => web }, shell: { openExternal: async () => {} },
   };
   // Run the real entry point without reading any user configuration.
   const source = readFileSync(entry, "utf8").replaceAll("import.meta.url", JSON.stringify(entry.href));
@@ -80,7 +82,7 @@ async function desktop(options: { offline?: boolean; invalidEnvironment?: boolea
         loadConnection: () => options.noSavedConnection ? {} : ({ config: { url: "https://assistant.example", username: "fixture" } }),
         saveConnection: (config: { url: string; username?: string }, secret?: string) => { saved.push({ config, secret }); return { persistedPassword: true }; },
       };
-      if (specifier === "./mail-notifications.js") return { startMailNotifications: () => { state.notifications++; return () => {}; }, showMailNotification() {} };
+      if (specifier === "./mail-notifications.js") return { startMailNotifications: (...args: unknown[]) => { state.notifications++; reportMailStatus = args[4] as (status: unknown) => void; return () => {}; }, showMailNotification() {} };
       if (specifier === "node:fs") return { existsSync: () => Boolean(options.brokenPin), readFileSync: () => "malformed-public-pin" };
       return nativeRequire(specifier);
     },
@@ -89,7 +91,10 @@ async function desktop(options: { offline?: boolean; invalidEnvironment?: boolea
   const main = () => windows.filter(w => !w.destroyed && w.options.title !== "连接小 D").at(-1)!;
   const settings = () => windows.filter(w => !w.destroyed && w.options.title === "连接小 D");
   const openSettings = () => { const item = menu[0]?.submenu?.find(item => item.label === "连接设置…"); assert.ok(item?.click); item.click(); };
-  return { app, windows, main, settings, openSettings, state, handlers, flush, saved };
+  return { app, windows, main, settings, openSettings, state, handlers, flush, saved,
+    mailStatus: () => menu[0]?.submenu?.find(item => item.id === "mail-notification-status")?.label,
+    reportMailStatus: (status: unknown) => reportMailStatus?.(status),
+  };
 }
 
 test("new installations load the API backend directly on port 3000", async () => {
@@ -254,4 +259,31 @@ test("server switch only accepts a trusted top frame and a valid backend root", 
   }
   assert.equal(d.saved.length, 0);
   assert.equal(d.main(), current);
+});
+
+
+test("mail polling status stays in the menu without opening dialogs or replacing the workspace", async () => {
+  const d = await desktop();
+  const current = d.main(), urls = [...current.urls];
+  assert.equal(d.mailStatus(), "邮件提醒：正在连接");
+  d.reportMailStatus({ state: "retrying", reason: "timeout" });
+  assert.equal(d.mailStatus(), "邮件提醒：连接超时，正在自动重试");
+  d.reportMailStatus({ state: "retrying", reason: "authorization" });
+  assert.equal(d.mailStatus(), "邮件提醒：认证失败，请检查连接设置");
+  d.reportMailStatus({ state: "retrying", reason: "unavailable" });
+  assert.equal(d.mailStatus(), "邮件提醒：连接中断，正在自动重试");
+  d.reportMailStatus({ state: "connected" });
+  assert.equal(d.mailStatus(), "邮件提醒：已连接");
+  assert.equal(d.main(), current); assert.deepEqual(current.urls, urls);
+  assert.equal(d.settings().length, 0); assert.equal(d.state.errors, 0);
+});
+
+
+test("unsupported native notifications do not claim shared deliveries and leave Web fallback available", async () => {
+  const d = await desktop({ notificationsSupported: false });
+  assert.equal(d.state.notifications, 0);
+  assert.equal(d.mailStatus(), "邮件提醒：系统通知不可用，请使用网页提醒");
+  assert.ok(d.main().urls.includes("https://assistant.example"));
+  await d.main().loadURL("https://assistant.example");
+  assert.equal(d.state.notifications, 0);
 });

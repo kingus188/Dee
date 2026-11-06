@@ -11,11 +11,11 @@ export function TodayTasks({ resource, onDaylight }: { resource: PageResource<Da
   const summary = resource.data ? selectTodayTasks(resource.data) : null;
   const projects = new Map(resource.data?.projects.map(project => [project.id, project.name]));
   return <section className="today-panel today-panel-tasks" aria-labelledby="today-tasks-title">
-    <div className="today-panel-heading"><div><span className="today-kicker">把注意力放在这里</span><h2 id="today-tasks-title">今日待办</h2></div><Icon name="list-todo" /></div>
+    <div className="today-panel-heading"><div><h2 id="today-tasks-title">今日待办</h2></div><Icon name="list-todo" /></div>
     <ResourceFeedback resource={resource} label="待办" />
     {summary && <>
-      <div className="today-task-totals"><span><strong>{summary.today}</strong> 今日到期</span><span className={summary.overdue > 0 ? "today-overdue" : undefined}><strong>{summary.overdue}</strong> 已逾期</span></div>
-      {summary.due.length === 0 ? <div className="today-empty"><strong>{resource.data!.tasks.length === 0 ? "还没有待办，留一个想法给今天。" : "今天没有到期或逾期待办。"}</strong><p>可以去 Daylight 查看所有项目、安排下一步。</p></div> : <ul className="today-task-list" aria-label="今日到期与逾期待办">
+      {summary.due.length > 0 && <div className="today-task-totals">{summary.today > 0 && <span><strong>{summary.today}</strong> 今日到期</span>}{summary.overdue > 0 && <span className="today-overdue"><strong>{summary.overdue}</strong> 已逾期</span>}</div>}
+      {summary.due.length === 0 ? <div className="today-empty"><strong>今天没有到期或逾期的待办。</strong></div> : <ul className="today-task-list" aria-label="今日到期与逾期待办">
         {summary.due.slice(0, 6).map(task => <li key={task.id}>
           <button type="button" className="today-task-button" onClick={() => onDaylight(task.id)}>
             <span className="today-task-mark" aria-hidden="true"><Icon name={task.status === "review" ? "check" : task.status === "doing" ? "clock-3" : "square"} /></span>
@@ -24,7 +24,7 @@ export function TodayTasks({ resource, onDaylight }: { resource: PageResource<Da
           </button>
         </li>)}
       </ul>}
-      <div className="today-task-footer"><span>进行中 {summary.doing} · 待确认 {summary.review}</span><button type="button" className="today-text-button" onClick={() => onDaylight()}>{summary.due.length > 6 ? `查看全部 ${summary.due.length} 项` : "打开 Daylight"}<Icon name="arrow-up-right" /></button></div>
+      <div className="today-task-footer"><span>{summary.doing > 0 && `进行中 ${summary.doing}`}{summary.doing > 0 && summary.review > 0 && " · "}{summary.review > 0 && `待确认 ${summary.review}`}</span><button type="button" className="today-text-button" onClick={() => onDaylight()}>{summary.due.length > 6 ? `查看全部 ${summary.due.length} 项` : "查看全部待办"}<Icon name="arrow-up-right" /></button></div>
     </>}
   </section>;
 }
@@ -36,7 +36,7 @@ export function TodayProgress({ resource, onActivities, onConversation }: { reso
   const pending = items.filter(item => activityPhase(item) === "pending");
   const visible = [...failed, ...running, ...pending].slice(0, 4);
   return <section className="today-panel today-panel-progress" aria-labelledby="today-progress-title">
-    <div className="today-panel-heading"><div><span className="today-kicker">跨会话的事情，一处看见</span><h2 id="today-progress-title">正在推进</h2></div><Icon name="clock-3" /></div>
+    <div className="today-panel-heading"><div><h2 id="today-progress-title">正在推进</h2></div><Icon name="clock-3" /></div>
     <ResourceFeedback resource={resource} label="任务进展" />
     {resource.data && <>
       <p className="today-progress-summary">{resource.data.truncated ? "已加载记录中：" : ""}<strong>{running.length}</strong> 项执行中 · <strong>{pending.length}</strong> 项待处理</p>
@@ -52,13 +52,13 @@ export function TodayApprovals({ resource, onGroup }: { resource: PageResource<P
   const memory = resource.data?.memory.filter(item => item.status === "pending");
   const skills = resource.data?.skills.filter(item => item.status === "pending");
   return <section className="today-panel today-panel-approvals" aria-labelledby="today-approvals-title">
-    <div className="today-panel-heading"><div><span className="today-kicker">由你决定，才会留下</span><h2 id="today-approvals-title">待你批准</h2></div><Icon name="shield-check" /></div>
+    <div className="today-panel-heading"><div><h2 id="today-approvals-title">待你批准</h2></div><Icon name="shield-check" /></div>
     <ResourceFeedback resource={resource} label="记忆与技能" />
     {memory && skills && <>
       {memory.length === 0 && skills.length === 0 && <p className="today-approval-empty">没有待批准的候选。之后提出的新记忆和技能会在这里等你。</p>}
       <div className="today-approval-links">
-        <button type="button" onClick={() => onGroup("memory")} className="today-approval-link"><Icon name="brain" /><span><strong>长期记忆</strong><small>{memory.length > 0 ? `${memory.length} 条等待批准` : "查看已保存的记忆"}</small></span><b>{memory.length}</b><Icon name="chevron-right" /></button>
-        <button type="button" onClick={() => onGroup("skills")} className="today-approval-link"><Icon name="sparkles" /><span><strong>我的技能</strong><small>{skills.length > 0 ? `${skills.length} 项等待批准` : "查看已有技能"}</small></span><b>{skills.length}</b><Icon name="chevron-right" /></button>
+        {memory.length > 0 && <button type="button" onClick={() => onGroup("memory")} className="today-approval-link"><Icon name="brain" /><span><strong>长期记忆</strong><small>{memory.length > 0 ? `${memory.length} 条等待批准` : "查看已保存的记忆"}</small></span><b>{memory.length}</b><Icon name="chevron-right" /></button>}
+        {skills.length > 0 && <button type="button" onClick={() => onGroup("skills")} className="today-approval-link"><Icon name="sparkles" /><span><strong>我的技能</strong><small>{skills.length > 0 ? `${skills.length} 项等待批准` : "查看已有技能"}</small></span><b>{skills.length}</b><Icon name="chevron-right" /></button>}
       </div>
     </>}
   </section>;
@@ -73,7 +73,7 @@ function mailConnection(status: WorkspaceMail["status"]): string {
 
 export function TodayMail({ resource, onSettings }: { resource: PageResource<WorkspaceMail>; onSettings: () => void }) {
   return <section className="today-panel today-panel-mail" aria-labelledby="today-mail-title">
-    <div className="today-panel-heading"><div><span className="today-kicker">Outlook · 最近 6 封缓存</span><h2 id="today-mail-title">最近邮件</h2></div><button type="button" className="today-icon-button" aria-label="打开邮件设置" onClick={onSettings}><Icon name="settings" /></button></div>
+    <div className="today-panel-heading"><div><h2 id="today-mail-title">最近邮件</h2></div><button type="button" className="today-icon-button" aria-label="打开邮件设置" onClick={onSettings}><Icon name="settings" /></button></div>
     <ResourceFeedback resource={resource} label="邮件" />
     {resource.data && <>
       <div className="today-mail-status"><span className="today-connection-state">{mailConnection(resource.data.status)}</span><span>{resource.data.status.lastSuccessAt ? `上次同步 ${dateTime(resource.data.status.lastSuccessAt)}` : "尚无成功同步记录"}</span></div>

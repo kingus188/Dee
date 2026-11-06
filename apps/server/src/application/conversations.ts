@@ -5,7 +5,7 @@ import { Goals, Schedules, Reminders, BackgroundJobs } from "@assistant/features
 import { WechatState } from "@assistant/channel-wechat";
 import { HttpError } from "../errors.js";
 import type { AppContext } from "./context.js";
-export function createConversations({ harness, root, ctx, redact }: AppContext) {
+export function createConversations({ harness, root, ctx, redact, episodeStore }: AppContext) {
 async function getConversation(id: number) {
 	const conversation = Number.isInteger(id) && id !== root.id ? await harness.conversation(id as ConversationId, ctx) : undefined;
 	if (!conversation) throw new HttpError(404, "会话不存在");
@@ -72,6 +72,9 @@ async function shelveConversation(id: number, action: string) {
 	const wechatState = await harness.snapshot(WechatState, ctx);
 	const bound = Object.values(wechatState?.bindings ?? {}).some((binding) => sameConversation(binding?.conversationId, id));
 	if (bound) throw new HttpError(400, "这是微信通道正在使用的会话，不能归档或删除。");
+	// Write the durable privacy tombstone before any await that can fail or
+	// leave an in-flight summary/notification running. Archive is not deletion.
+	if (action === "remove") episodeStore.revokeSource(`conv:${id}`);
 	if (action !== "restore") await quietConversation(id);
 	return root.commit(async (tx) => {
 		const items = (await tx.doc(Index)).items;

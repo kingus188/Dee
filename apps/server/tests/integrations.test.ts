@@ -10,6 +10,24 @@ import type { TeamsSender } from "../dist/teams-reply-port.js";
 
 const account = { tenantId: "test", clientId: "test", username: "test", password: "not-a-real-password" };
 
+test("paused Teams auto-sync starts no live or archive requests, but an explicit refresh remains available", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-integrations-paused-")), store = openTeamsStore(dir), sender: TeamsSender = {};
+  const original = globalThis.fetch; let requests = 0, close = async () => {};
+  store.triage.saveSettings({ ...store.triage.settings(), enabled: false });
+  globalThis.fetch = async input => {
+    requests++; const url = String(input);
+    if (url.includes("login.microsoftonline.com")) return Response.json({ access_token: "test", expires_in: 3600 });
+    if (url.includes("/me?")) return Response.json({ id: "me" });
+    return Response.json({ value: [] });
+  };
+  try {
+    await writeFile(join(dir, "teams-forward-config.json"), JSON.stringify({ account }));
+    close = startServerIntegrations({ config: readConfig({ TEAMS_CONFIG_DIR: dir }), store, teamsSender: sender });
+    assert.equal(requests, 0);
+    assert.equal((await sender.refresh!()).ok, true); assert.equal(requests, 3);
+  } finally { await close(); globalThis.fetch = original; store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
 test("offline ignores an explicitly configured malformed Teams file without attaching callbacks or making requests", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-integrations-offline-"));
   const store = openTeamsStore(dir);
@@ -73,7 +91,12 @@ test("Teams synchronizes with WeChat disabled and close detaches stale sender ca
       wechat: { enabled: false, sendURL: "http://localhost:1/must-not-send", sendToken: "test", notify: async () => { throw new Error("disabled"); }, undelivered: async () => { throw new Error("disabled"); } } });
     const refresh = sender.refresh!;
     const send = sender.send!;
+    const read = sender.read!;
+    const episodeAccess = sender.canReadEpisodeSource!;
+    assert.ok(read);
     assert.equal((await refresh()).ok, true);
+    await read({ kind: "chats" });
+    assert.equal(await episodeAccess("chat"), true);
     assert.ok(sender.syncStatus!().lastSuccessAt);
     assert.ok(requests.some(url => url.includes("graph.microsoft.com")));
     assert.ok(requests.every(url => !url.includes("localhost")));
@@ -82,6 +105,8 @@ test("Teams synchronizes with WeChat disabled and close detaches stale sender ca
     assert.deepEqual(sender, {});
     assert.equal((await refresh()).ok, false);
     await assert.rejects(send("chat", "text"), /已停止/);
+    await assert.rejects(read({ kind: "chats" }), /已停止/);
+    assert.equal(await episodeAccess("chat"), false);
     assert.equal(requests.length, count);
   } finally { await close(); globalThis.fetch = original; store.close(); await rm(dir, { recursive: true, force: true }); }
 });

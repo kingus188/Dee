@@ -87,7 +87,8 @@ export function createMailService(dir: string, offline: boolean, fetchImpl: type
     } else if (Date.now() >= Math.max(nextSync, retryUntil)) await refresh();
   }
   return {
-    status, refresh, list: store.list, read: store.read, notices: store.notices,
+    claimDelivery: store.claimDelivery, acknowledgeDelivery: store.acknowledgeDelivery,
+    status, refresh, list: store.list, read: store.read, notices: store.notices, deliveryNotices: store.deliveryNotices,
     save(input: Record<string, unknown>) {
       if (typeof input.enabled !== "boolean" || typeof input.tenantId !== "string" || typeof input.clientId !== "string") throw new HttpError(400, "邮件配置格式无效");
       const settings = { enabled: input.enabled, tenantId: input.tenantId.trim(), clientId: input.clientId.trim() };

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { defineDoc, type ConversationId, type EntryId, type Tx, type Cursor } from "@earendil-works/pi-durable";
 
-export type NotificationSource = { kind: "teams"; messageIds: string[] };
-export type NotificationReview = { status: "send"; text?: string } | { status: "cancel"; reason: string };
+export type NotificationSource = { kind: "teams"; messageIds: string[]; sourceRevisions?: { source: string; revision: number }[] };
+export type NotificationReview = { status: "send"; text?: string } | { status: "cancel"; reason: string } | { status: "defer"; until: number };
 export const WechatNotifications = defineDoc<{
   items: { conversationId: ConversationId; requestId: string; source: NotificationSource }[];
 }>({ kind: "app.wechat.notifications", version: 1, scope: "session", initial: () => ({ items: [] }) });
@@ -33,7 +33,8 @@ export async function notificationForAnswer(tx: Tx, conversationId: Conversation
     if (boundary) break;
     cursor = page.next;
   } while (cursor !== undefined);
-  return { kind: "teams", messageIds: [...new Set(sources.flatMap(source => source.messageIds))] };
+  return { kind: "teams", messageIds: [...new Set(sources.flatMap(source => source.messageIds))],
+    ...(sources.every(source => source.sourceRevisions?.length) ? { sourceRevisions: sources.flatMap(source => source.sourceRevisions!) } : {}) };
 }
 
 export async function recoverLegacyTeams(tx: Tx,

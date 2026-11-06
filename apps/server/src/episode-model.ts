@@ -1,9 +1,11 @@
 import type { Models } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
+import { episodeHasSensitiveData } from "./episode-privacy.js";
 
 // 不经会话直接调一次模型，只用于后台整理摘要。
 export function createSummarizer(models: Models, ref: ModelRef) {
   return async (prompt: string) => {
+    if (episodeHasSensitiveData(prompt)) throw new Error("摘要输入含敏感数据，已阻止发送");
     const model = models.getModel(ref.provider, ref.modelId);
     if (!model) throw new Error("摘要模型不可用");
     const reply = await models.completeSimple(model, { systemPrompt: "你是严谨的记忆整理助手，只按要求输出。", messages: [{ role: "user", content: prompt, timestamp: Date.now() }] }, { maxTokens: 1000 });

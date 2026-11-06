@@ -3,6 +3,8 @@ export type TeamsAccount = { tenantId: string; clientId: string; username: strin
 const READ_SCOPE = "https://graph.microsoft.com/Chat.Read offline_access";
 // 发送使用单独的令牌：租户没有授权 ChatMessage.Send 时只影响发送，不影响读取转发。
 export const SEND_SCOPE = "https://graph.microsoft.com/ChatMessage.Send offline_access";
+export const FILES_SCOPE = "https://graph.microsoft.com/Files.Read.All offline_access";
+export const CHANNELS_SCOPE = "https://graph.microsoft.com/Team.ReadBasic.All https://graph.microsoft.com/Channel.ReadBasic.All https://graph.microsoft.com/ChannelMessage.Read.All offline_access";
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string };
 
 // 账号密码（ROPC）登录，之后用 refresh token 续期；token 只在内存。MFA / 条件访问 / 租户禁用 ROPC 时会失败。
@@ -10,6 +12,7 @@ export function createTeamsTokenProvider(account: TeamsAccount, scope = READ_SCO
   let access = "";
   let refresh = "";
   let expiresAt = 0;
+  let pending: Promise<string> | undefined;
 
   async function request(form: Record<string, string>) {
     const response = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(account.tenantId)}/oauth2/v2.0/token`, {
@@ -25,12 +28,14 @@ export function createTeamsTokenProvider(account: TeamsAccount, scope = READ_SCO
     expiresAt = Date.now() + (data.expires_in ?? 3600) * 1000 - 120_000;
   }
 
-  return async function getToken() {
-    if (access && Date.now() < expiresAt) return access;
-    if (refresh) {
-      try { await request({ grant_type: "refresh_token", refresh_token: refresh }); return access; } catch { refresh = ""; }
-    }
-    await request({ grant_type: "password", username: account.username, password: account.password });
-    return access;
+  return function getToken(): Promise<string> {
+    if (access && Date.now() < expiresAt) return Promise.resolve(access);
+    return pending ??= (async () => {
+      if (refresh) {
+        try { await request({ grant_type: "refresh_token", refresh_token: refresh }); return access; } catch { refresh = ""; }
+      }
+      await request({ grant_type: "password", username: account.username, password: account.password });
+      return access;
+    })().finally(() => { pending = undefined; });
   };
 }

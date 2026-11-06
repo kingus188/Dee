@@ -1,0 +1,33 @@
+{
+  "release": "teams-records-20261105-02",
+  "deployed": true,
+  "check": { "passed": true, "workspaces": 7, "modules": 250 },
+  "tests": { "passed": 577, "failed": 0 },
+  "diffCheck": true,
+  "isolatedStagedCommitValidation": { "checkPassed": true, "sourceModules": 249, "npmTestPassed": true, "temporaryDatabaseCleaned": true },
+  "candidateSmoke": { "originalRecords": true, "legacyPreviewTool": true, "legacyPreviewView": true, "webAssetAndStyles": true },
+  "live": {
+    "existingConversationRecovered": true,
+    "legacyQueries": 2,
+    "originalRecords": 100,
+    "associatedMedia": 37,
+    "senderTimeTextAndMediaMatchArchive": true,
+    "archivedImageHttp200": true,
+    "databaseSchemaChanged": false,
+    "storedConversationEntriesRewritten": false,
+    "publicAuthenticationPreserved": true,
+    "protectedContainerIdentitiesPreserved": true,
+    "wechatNetworkVerified": true
+  },
+  "client": {
+    "nativeAppRunning": true,
+    "installedAppPreserved": true,
+    "homepageHttp200": true,
+    "recordsAsset": "/assets/teams-records-4c29204a50c9.js",
+    "recordsAssetHttp200": true,
+    "nativeRequestsObserved": 39,
+    "httpErrorsObserved": 0
+  },
+  "notVerified": ["manualVisualAcceptance", "allAccountHistoryComplete"],
+  "ordinaryFileOriginalsFullyCopied": false
+}

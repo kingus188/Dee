@@ -6,6 +6,7 @@ import type { Cursor, Harness, ToolExecutionApi } from "@earendil-works/pi-durab
 import type { DaylightPort, DaylightProject, DaylightTask } from "@assistant/contracts";
 import { Notes } from "../notes/index.js";
 import { resultText } from "../results.js";
+import { requireUserInstruction } from "../user-instruction.js";
 
 const status = Type.Union([Type.Literal("todo"), Type.Literal("doing"), Type.Literal("review"), Type.Literal("done")]);
 const color = Type.Union([Type.Literal("peach"), Type.Literal("lavender"), Type.Literal("mint"), Type.Literal("sky"), Type.Literal("rose")]);
@@ -25,7 +26,11 @@ const taskChanges = Type.Partial(Type.Object(fields, { additionalProperties: fal
 const projectFields = { name: Type.String({ minLength: 1, maxLength: 80 }), description: Type.String(), color };
 const objectOptions = { additionalProperties: false };
 const json = (value: unknown) => resultText(JSON.stringify(value));
-const once = <T>(port: DaylightPort, api: ToolExecutionApi, action: (port: DaylightPort) => Promise<T>) => port.replayAction(`tool:${api.callId}`, action);
+
+const once = async <T>(port: DaylightPort, api: ToolExecutionApi, context: Context, action: (port: DaylightPort) => Promise<T>) => {
+	await requireUserInstruction(api, context);
+	return port.replayAction(`tool:${api.callId}`, action);
+};
 
 function validatePatch(changes: object, allowed: object) {
 	const keys = Object.keys(changes);
@@ -56,37 +61,37 @@ export function createDaylight(port: DaylightPort) {
 			defineTool({
 				name: "create_task", description: "Create a task in an existing project. Defaults: todo, medium priority, lavender, no due date. Returns the saved task with generated ID.", replay: "safe",
 				parameters: Type.Object({ ...taskChanges.properties, projectId: id, title: fields.title }, objectOptions),
-				execute: async (args, api) => json(await once(port, api, async tx => {
+				execute: async (args, api, context) => json(await once(port, api, context, async tx => {
 					const now = Date.now();
 					const task: DaylightTask = { id: randomUUID(), description: "", status: "todo", priority: "medium", color: "lavender", dueDate: null, tags: [], checklist: [], createdAt: now, position: -now, ...args };
 					await tx.saveTask(task);
 					return tx.getTask(task.id);
 				})),
 			}),
-			defineTool({ name: "update_task", description: "Update only supplied task fields; omitted fields are preserved. Arrays replace their previous contents.", replay: "safe", parameters: Type.Object({ id, changes: taskChanges }, objectOptions), execute: async (args, api) => json(await once(port, api, async tx => { validatePatch(args.changes, fields); return tx.patchTask(args.id, args.changes); })) }),
-			defineTool({ name: "mark_task", description: "Set status to todo, doing, review or done. Individual checklist items stay unchanged.", replay: "safe", parameters: Type.Object({ id, status }, objectOptions), execute: async (args, api) => json(await once(port, api, tx => tx.patchTask(args.id, { status: args.status }))) }),
-			defineTool({ name: "mark_checklist_item", description: "Check or uncheck one checklist item without replacing other items or changing parent status.", replay: "safe", parameters: Type.Object({ id, itemId: Type.String({ minLength: 1, maxLength: 80 }), done: Type.Boolean() }, objectOptions), execute: async (args, api) => json(await once(port, api, async tx => {
+			defineTool({ name: "update_task", description: "Update only supplied task fields; omitted fields are preserved. Arrays replace their previous contents.", replay: "safe", parameters: Type.Object({ id, changes: taskChanges }, objectOptions), execute: async (args, api, context) => json(await once(port, api, context, async tx => { validatePatch(args.changes, fields); return tx.patchTask(args.id, args.changes); })) }),
+			defineTool({ name: "mark_task", description: "Set status to todo, doing, review or done. Individual checklist items stay unchanged.", replay: "safe", parameters: Type.Object({ id, status }, objectOptions), execute: async (args, api, context) => json(await once(port, api, context, tx => tx.patchTask(args.id, { status: args.status }))) }),
+			defineTool({ name: "mark_checklist_item", description: "Check or uncheck one checklist item without replacing other items or changing parent status.", replay: "safe", parameters: Type.Object({ id, itemId: Type.String({ minLength: 1, maxLength: 80 }), done: Type.Boolean() }, objectOptions), execute: async (args, api, context) => json(await once(port, api, context, async tx => {
 				const task = await tx.getTask(args.id);
 				const item = task.checklist.find(item => item.id === args.itemId);
 				if (!item) throw new Error("子任务已不存在。");
 				item.done = args.done;
 				return tx.patchTask(task.id, { checklist: task.checklist });
 			})) }),
-			defineTool({ name: "delete_task", description: "Delete a global Daylight task.", replay: "safe", parameters: Type.Object({ id }, objectOptions), execute: async (args, api) => json(await once(port, api, async tx => { await tx.deleteTask(args.id); return { deleted: true, id: args.id }; })) }),
-			defineTool({ name: "create_project", description: "Create a global Daylight project. Defaults to lavender and empty description.", replay: "safe", parameters: Type.Object({ name: projectFields.name, description: Type.Optional(projectFields.description), color: Type.Optional(color) }, objectOptions), execute: async (args, api) => json(await once(port, api, async tx => {
+			defineTool({ name: "delete_task", description: "Delete a global Daylight task.", replay: "safe", parameters: Type.Object({ id }, objectOptions), execute: async (args, api, context) => json(await once(port, api, context, async tx => { await tx.deleteTask(args.id); return { deleted: true, id: args.id }; })) }),
+			defineTool({ name: "create_project", description: "Create a global Daylight project. Defaults to lavender and empty description.", replay: "safe", parameters: Type.Object({ name: projectFields.name, description: Type.Optional(projectFields.description), color: Type.Optional(color) }, objectOptions), execute: async (args, api, context) => json(await once(port, api, context, async tx => {
 				const project: DaylightProject = { id: randomUUID(), description: "", color: "lavender", ...args };
 				await tx.saveProject(project);
 				return (await tx.snapshot()).projects.find(item => item.id === project.id)!;
 			})) }),
-			defineTool({ name: "update_project", description: "Update supplied project fields only; omitted fields stay unchanged.", replay: "safe", parameters: Type.Object({ id, changes: Type.Partial(Type.Object(projectFields, { additionalProperties: false, minProperties: 1 })) }, objectOptions), execute: async (args, api) => json(await once(port, api, async tx => {
+			defineTool({ name: "update_project", description: "Update supplied project fields only; omitted fields stay unchanged.", replay: "safe", parameters: Type.Object({ id, changes: Type.Partial(Type.Object(projectFields, { additionalProperties: false, minProperties: 1 })) }, objectOptions), execute: async (args, api, context) => json(await once(port, api, context, async tx => {
 				validatePatch(args.changes, projectFields);
 				const current = (await tx.snapshot()).projects.find(project => project.id === args.id);
 				if (!current) throw new Error("项目已不存在。");
 				await tx.saveProject({ ...current, ...args.changes });
 				return (await tx.snapshot()).projects.find(project => project.id === args.id)!;
 			})) }),
-			defineTool({ name: "delete_project", description: "Delete a global Daylight project and all of its tasks.", replay: "safe", parameters: Type.Object({ id }, objectOptions), execute: async (args, api) => json(await once(port, api, async tx => { await tx.deleteProject(args.id); return { deleted: true, id: args.id }; })) }),
-			defineTool({ name: "todo", description: "维护全局 Daylight 待办：add 加到收件箱；done 完成标题匹配的第一条未完成任务。项目、字段和清单操作请用 Daylight 专用工具。", replay: "safe", parameters: Type.Object({ action: Type.Union([Type.Literal("add"), Type.Literal("done")]), text: Type.String() }, objectOptions), execute: async (args, api) => resultText(await once(port, api, async tx => {
+			defineTool({ name: "delete_project", description: "Delete a global Daylight project and all of its tasks.", replay: "safe", parameters: Type.Object({ id }, objectOptions), execute: async (args, api, context) => json(await once(port, api, context, async tx => { await tx.deleteProject(args.id); return { deleted: true, id: args.id }; })) }),
+			defineTool({ name: "todo", description: "维护全局 Daylight 待办：add 加到收件箱；done 完成标题匹配的第一条未完成任务。项目、字段和清单操作请用 Daylight 专用工具。", replay: "safe", parameters: Type.Object({ action: Type.Union([Type.Literal("add"), Type.Literal("done")]), text: Type.String() }, objectOptions), execute: async (args, api, context) => resultText(await once(port, api, context, async tx => {
 				if (args.action === "add") {
 					const now = Date.now(), project = await tx.ensureDefaultProject();
 					await tx.saveTask({ id: randomUUID(), projectId: project.id, title: [...args.text.trim()].slice(0, 160).join(""), description: args.text, status: "todo", priority: "medium", color: "lavender", dueDate: null, tags: [], checklist: [], createdAt: now, position: -now });

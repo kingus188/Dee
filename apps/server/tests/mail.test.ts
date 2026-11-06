@@ -15,7 +15,7 @@ const delta = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/de
 const next = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?$skiptoken=unit";
 const json = (data: unknown, status = 200, headers?: Record<string, string>) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
 const signal = () => new AbortController().signal;
-const raw = (id: string) => ({ id, subject: "季度报价 100%", from: { emailAddress: { name: "张三", address: "zhang@example.test" } }, receivedDateTime: new Date().toISOString(), bodyPreview: "纯文本预览", body: { contentType: "text", content: "完整正文" }, isRead: false, hasAttachments: true });
+const raw = (id: string) => ({ id, subject: "季度报价 100%", from: { emailAddress: { name: "张三", address: "zhang@example.test" } }, receivedDateTime: new Date().toISOString(), importance: "high", bodyPreview: "纯文本预览", body: { contentType: "text", content: "完整正文" }, isRead: false, hasAttachments: true });
 const row = (id: string): MailRecord => ({ id, subject: "季度报价 100%", sender: "张三", address: "zhang@example.test", receivedAt: new Date().toISOString(), preview: "预览", text: "正文", isRead: false, hasAttachments: true });
 async function temp(t: test.TestContext) {
   const dir = await mkdtemp(join(tmpdir(), "pi-mail-"));
@@ -60,9 +60,10 @@ test("Graph 增量同步使用只读 GET、ImmutableId 和纯文本，支持分�
     assert.equal(headers.Authorization, "Bearer fake-access-test"); return queue.shift()!;
   };
   await syncMail(store, async () => tokens.accessToken, signal(), mockFetch);
-  assert.match(urls[0], /%24filter=receivedDateTime/); assert.equal(urls[1], next);
+  assert.match(urls[0], /importance/); assert.match(urls[0], /%24filter=receivedDateTime/); assert.equal(urls[1], next);
   assert.equal(store.notices(0).items.length, 0); assert.equal(store.state().initialComplete, true);
   await syncMail(store, async () => tokens.accessToken, signal(), mockFetch);
+  assert.equal(store.read("a")!.message.importance, "high", "稀疏更新保留结构化重要性");
   assert.equal(store.read("a")!.message.isRead, true); assert.equal(store.read("a")!.text, "完整正文");
   assert.equal(store.read("b"), undefined); assert.equal(store.notices(0).items[0].message.id, "c");
 });
@@ -115,6 +116,33 @@ test("离线服务即使已有启用配置和令牌也不联网；配置即时�
   assert.deepEqual(await mailApi(service, "GET", new URL("http://localhost/api/mail/notices"), {}), { status: 200, data: { latest: 0, items: [] } });
   await service.save({ ...settings, enabled: false }); assert.equal(service.status().enabled, false); assert.equal(service.status().connected, true);
   await service.disconnect(); assert.equal(service.status().connected, false); assert.equal(service.list({ limit: 50 }).length, 0);
+});
+
+test("邮件交付 API 校验租约字段，只改变通知状态且离线不访问邮箱", async t => {
+  const dir = await temp(t), seed = openMailStore(dir);
+  seed.page([], [], delta, true);
+  let requests = 0;
+  const service = createMailService(dir, true, async () => { requests++; throw new Error("不得访问真实邮箱"); });
+  t.after(async () => { seed.close(); await service.close(); });
+  const claim = new URL("http://localhost/api/mail/delivery"), ack = new URL("http://localhost/api/mail/delivery/ack");
+  for (const clientId of [undefined, "", "../client", "x".repeat(129)]) {
+    assert.throws(() => mailApi(service, "POST", claim, { clientId }), /客户端标识无效/);
+  }
+  for (const body of [{ clientId: "web" }, { clientId: "web", id: "ok", token: "../token" }]) {
+    assert.throws(() => mailApi(service, "POST", ack, body), /通知确认无效/);
+  }
+  assert.equal(mailApi(service, "GET", claim, {}), undefined);
+  await mailApi(service, "POST", claim, { clientId: "web" });
+  await mailApi(service, "POST", claim, { clientId: "desktop" });
+  seed.page([row("delivery")], [], delta, true);
+  const batch = service.claimDelivery("web"), lease = batch.delivery!;
+  assert.equal(batch.total, 1);
+  assert.deepEqual(await mailApi(service, "POST", ack, { clientId: "desktop", id: lease.id, token: lease.token }), { status: 200, data: { acknowledged: false } });
+  assert.deepEqual(await mailApi(service, "POST", ack, { clientId: "web", id: lease.id, token: lease.token }), { status: 200, data: { acknowledged: true } });
+  assert.deepEqual(await mailApi(service, "POST", ack, { clientId: "web", id: lease.id, token: lease.token }), { status: 200, data: { acknowledged: true } });
+  assert.equal(service.claimDelivery("desktop").items.length, 0);
+  assert.equal(service.read("delivery")!.message.isRead, false, "展示确认不能标记微软邮件已读");
+  assert.equal(requests, 0);
 });
 
 test("重试窗口阻止查询工具绕过限流，关闭等待在途请求且不写入迟到结果", async t => {

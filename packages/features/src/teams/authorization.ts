@@ -39,6 +39,33 @@ export function explicitlyTargets(text: string, name: string): boolean {
 	return !!(request && sameName(request[1], name) || recipientFirst && sameName(recipientFirst[1], name));
 }
 
-// 自动代回是持续性的对外发送，必须由用户原话开启；模型不能自行启用。
-const AWAY = /(自动(回复|回|答复|回应|应答)|替我回|代我回|帮我回(复)?|自动帮我回)/;
-export const authorizesAwayReply = (text: string) => !text.trim().startsWith("[") && AWAY.test(text);
+// 持续代回与单次回复分开解析。只有完整的命令句才进入待确认流程，关键词本身不授权。
+export type AwayReplyIntent = "enable" | "stop" | "query" | "decline" | "none";
+const AWAY_TOPIC = /自动(?:回复|代回|回|答复|回应|应答)|(?:替我|代我)回/;
+const AWAY_COMMAND = /^(?:(?:请(?:帮我)?|帮我|麻烦(?:帮我)?)\s*(?:(?:开启|启用|设置|打开)\s*)?|(?:开启|启用|设置|打开)\s*)(?:Teams\s*)?自动(?:回复|代回|回|答复|回应|应答)(?:一下)?(?:找我的人|所有找我的人|给找我的人|私聊消息)?$/i;
+const AWAY_CONTEXT = /^(?:我)?(?:今天|明天|这几天|目前|现在|接下来)?(?:要|正在|在)?(?:出差|休假|开会|全天开会|全天会议|忙|不在|离线|外出)(?:中|了|一会儿|半天|[一二两三四五六七八九十\d]+天)?$/;
+const cleanAway = (text: string) => text.trim().replace(/[。.!！\s]+$/, "");
+export function awayReplyIntent(text: string): AwayReplyIntent {
+	const value = cleanAway(text);
+	if (!value || /^[\[<「『“"‘']/.test(value)) return "none";
+	const topic = AWAY_TOPIC.test(value);
+	if (topic && /[?？]|是否|能否|如何|怎么|什么|可不可以|能不能|要不要|有没有|了没有|[吗么呢]$/.test(value)) return "query";
+	const clauses = value.split(/[，,；;。\n]/).map(part => part.trim()).filter(Boolean);
+	const command = clauses.at(-1) ?? "";
+	const context = clauses.slice(0, -1);
+	const returned = /^(?:我)?(?:回来了|出差结束了|休假结束了|会议结束了|开完会了|状态结束了)$/;
+	if (context.every(part => AWAY_CONTEXT.test(part) || returned.test(part)) && (/^(?:请(?:帮我)?|帮我)?(?:停止|关闭|取消|暂停|停掉)(?:Teams\s*)?自动(?:回复|代回|回)(?:了)?$/i.test(command)
+		|| /^(?:请)?(?:不要再?|不用再?|别再?|不再|不需要)自动(?:回复|代回|回)(?:了)?$/.test(command)
+		|| returned.test(command))) return "stop";
+	// 否定开启、否定停止、讨论过去的指令都不能被关键词反转成授权。
+	if (topic && /(?:不要|别|不用|不能|不许|不想|不需要|不允许|没有|没让|并非|不是).*(?:开启|启用|设置|打开|停止|关闭|取消|暂停|自动|替我|代我)/.test(value)) return "decline";
+	if (context.every(part => AWAY_CONTEXT.test(part)) && (AWAY_COMMAND.test(command)
+		|| context.length > 0 && /^(?:请)?(?:替我|代我)回(?:复)?(?:一下)?(?:找我的人)?$/.test(command))) return "enable";
+	return "none";
+}
+// 兼容调用方：此处仅表示明确提出开启请求，不代表已批准正文、范围或有效期。
+export const authorizesAwayReply = (text: string) => awayReplyIntent(text) === "enable";
+export const awayConfirmation = (text: string) => {
+	const match = /^确认开启自动回复\s+草稿\s+(\d+)$/.exec(cleanAway(text));
+	return match && Number.isSafeInteger(Number(match[1])) ? Number(match[1]) : null;
+};

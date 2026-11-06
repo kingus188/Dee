@@ -5,9 +5,11 @@ import { Icon } from "../ui/Icon.js";
 import { PersonalPage } from "./PersonalPage.js";
 import { localSkillError, useLocalSkills } from "./useLocalSkills.js";
 
-type Props = { active: boolean };
-export function LocalSkillsPage({ active }: Props) {
-  const [legacy, setLegacy] = useState(false), [legacyOpened, setLegacyOpened] = useState(false);
+type Props = { active: boolean; remote?: boolean; onRemoteChange?: (remote: boolean) => void };
+export function LocalSkillsPage({ active, remote, onRemoteChange }: Props) {
+  const [legacy, setLegacy] = useState(remote ?? false), [legacyOpened, setLegacyOpened] = useState(remote ?? false);
+  useEffect(() => { if (active && remote !== undefined) { setLegacy(remote); if (remote) setLegacyOpened(true); } }, [active, remote]);
+  function showRemote(next: boolean) { setLegacy(next); if (next) setLegacyOpened(true); onRemoteChange?.(next); }
   const resource = useLocalSkills(active && !legacy);
   const { bridge, snapshot, loading, busy, error, feedback } = resource;
   const [query, setQuery] = useState(""), [source, setSource] = useState("all"), [selected, setSelected] = useState<string>();
@@ -22,7 +24,7 @@ export function LocalSkillsPage({ active }: Props) {
   }, [active, legacy, bridge, selected, snapshot]);
   useEffect(() => { if (detail) heading.current?.focus(); }, [detail]);
   const legacyPage = <section className="workspace-content-page" hidden={!active || !legacy}>
-    <button type="button" className="text-button workspace-back" onClick={() => setLegacy(false)}><Icon name="arrow-left" />返回本机技能</button>
+    <button type="button" className="text-button workspace-back" onClick={() => showRemote(false)}><Icon name="arrow-left" />返回本机技能</button>
     <p className="workspace-local-note">远程小 D 的技能记录</p>
     <PersonalPage kind="skills" active={active && legacy} />
   </section>;
@@ -53,6 +55,6 @@ export function LocalSkillsPage({ active }: Props) {
     </>}
     {snapshot && <details className="workspace-local-roots"><summary>技能目录 · {snapshot.roots.filter(root => root.exists).length} 个可用</summary><ul>{snapshot.roots.map(root => <li key={root.id}><div><strong>{root.label}</strong><span>{root.exists ? "已发现" : "尚未创建"}</span><code>{root.path}</code></div>{root.custom && <button type="button" className="text-button" disabled={busy || loading} onClick={() => void resource.removeDirectory(root.id)}>移除扫描</button>}</li>)}</ul></details>}
     {snapshot?.warnings.length ? <details className="workspace-local-warnings"><summary>扫描提示 · {snapshot.warnings.length}</summary><ul>{snapshot.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details> : null}
-    <div className="workspace-local-legacy"><button type="button" className="text-button" onClick={() => { setLegacyOpened(true); setLegacy(true); }}>查看远程小 D 的技能记录<Icon name="arrow-up-right" /></button></div>
+    <div className="workspace-local-legacy"><button type="button" className="text-button" onClick={() => showRemote(true)}>查看远程小 D 的技能记录<Icon name="arrow-up-right" /></button></div>
   </section></>;
 }

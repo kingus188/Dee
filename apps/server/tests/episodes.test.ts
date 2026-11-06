@@ -61,7 +61,7 @@ test("整理流程：内容太短或对话未安静时不整理；整理后推�
     batch("conv:ok", ago(1)),
     batch("conv:secret-source", ago(1)),
   ];
-  await runEpisodePass({ store, collect, summarize, log: message => logs.push(message) });
+  await runEpisodePass({ store, collect, summarize, allowSource: () => true, log: message => logs.push(message) });
   assert.equal(prompts.length, 2, "只有安静且足够长的两个来源调用了模型");
   assert.equal(store.cursor("conv:ok"), "conv:ok:end");
   assert.equal(store.cursor("conv:busy"), undefined);
@@ -74,10 +74,10 @@ test("摘要模型失败时不推进进度，下一轮可重试", () => withStor
   const text = "报销".repeat(400);
   const collect = async () => [{ source: "conv:x", label: "x", channel: "web", text, chars: text.length, periodStart: ago(1), periodEnd: ago(1), cursor: "end" }];
   const logs: string[] = [];
-  await runEpisodePass({ store, collect, summarize: async () => { throw new Error("模型不可用"); }, log: message => logs.push(message) });
+  await runEpisodePass({ store, collect, allowSource: () => true, summarize: async () => { throw new Error("模型不可用"); }, log: message => logs.push(message) });
   assert.equal(store.cursor("conv:x"), undefined);
   assert.equal(store.all().length, 0);
-  assert.match(logs[0], /模型不可用/);
+  assert.match(logs[0], /model error/);
 }));
 
 test("真实会话：读取新内容、推进进度、整理成摘要并可回想", async () => {
@@ -105,7 +105,7 @@ test("真实会话：读取新内容、推进进度、整理成摘要并可回�
     assert.deepEqual(await conversationBatches(app, source => (source === batch.source ? batch.cursor : undefined)), [], "进度之后没有新内容");
 
     // 模拟对话已安静数小时，让整理流程放行。
-    await runEpisodePass({ store: app.episodeStore, collect: cursorOf => conversationBatches(app, cursorOf), summarize: async () => '{"summary":"张三报销单已提交，等待财务审批","openItems":["跟进审批"]}', log: message => assert.fail(message), now: () => Date.now() + 3 * 3_600_000 });
+    await runEpisodePass({ store: app.episodeStore, collect: cursorOf => conversationBatches(app, cursorOf), allowSource: () => true, summarize: async () => '{"summary":"张三报销单已提交，等待财务审批","openItems":["跟进审批"]}', log: message => assert.fail(message), now: () => Date.now() + 3 * 3_600_000 });
     assert.equal(app.episodeStore.search(["报销"], 5).length, 1, "摘要入库并可按关键词回想");
     assert.equal(app.episodeStore.cursor(batch.source), batch.cursor);
   } finally {

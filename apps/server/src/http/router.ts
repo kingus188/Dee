@@ -13,6 +13,14 @@ export function createRouter(context: AppContext, api = createApi(context)) {
     const url = new URL(req.url!, "http://localhost"), path = url.pathname, method = req.method!;
     if (method !== "GET" && !sameOrigin(req)) throw new HttpError(403, "只接受同源请求");
     if (method === "GET") {
+      const media = path.match(/^\/api\/teams\/media\/([a-f0-9]{64})$/);
+      if (media) {
+        const item = context.teamsStore.archive.media(media[1]);
+        if (!item?.bytes || item.status !== "ready" || !item.mime) throw new HttpError(404, "附件尚未保存或无法读取");
+        res.writeHead(200, { "content-type": item.mime, "cache-control": "private, no-store", "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'", "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(item.name)}` });
+        return res.end(Buffer.from(item.bytes));
+      }
       const stream = path.match(/^\/api\/conversations\/(\d+)\/events$/);
       if (stream) return events(req, res, await api.conversations.getConversation(Number(stream[1])));
       const image = path.match(/^\/api\/conversations\/(\d+)\/images\/(\d+)\/(\d+)$/);

@@ -1,14 +1,21 @@
 import { existsSync, readFileSync } from "node:fs";
+import { TeamsSendRejectedError } from "@assistant/features";
 import { join } from "node:path";
+import type { NotificationSource } from "@assistant/channel-wechat";
 import type { AppConfig } from "./config.js";
 import type { TeamsStore } from "./teams-store.js";
 import type { TeamsSender } from "./teams-reply-port.js";
 import { createGinaTokenProvider } from "./teams-gina.js";
-import { createTeamsTokenProvider, SEND_SCOPE, type TeamsAccount } from "./teams-auth.js";
+import { createTeamsTokenProvider, SEND_SCOPE, FILES_SCOPE, CHANNELS_SCOPE, type TeamsAccount } from "./teams-auth.js";
+import { createTeamsReader } from "./teams-reader.js";
+import { createTeamsArchiveSync } from "./teams-archive-sync.js";
 import { sendTeamsMessage } from "./teams-send.js";
 import { createTeamsSync } from "./teams-sync.js";
 import { startTeamsForward } from "./teams-forward.js";
 import type { ImportantRules } from "./teams-rules.js";
+import { createTeamsEpisodeAccess } from "./teams-episode-access.js";
+import { startTeamsPolling } from "./teams-polling.js";
+import { createTeamsFetch } from "./teams-throttle.js";
 
 type ForwardConfig = { account?: TeamsAccount; ginaHome?: string; important?: ImportantRules };
 
@@ -16,7 +23,8 @@ type WechatIntegration = {
   enabled: boolean;
   sendURL: string;
   sendToken: string;
-  notify?: (wxid: string, text: string, messageId: string) => Promise<void>;
+  notify?: (wxid: string, text: string, messageId: string, sourceRevisions?: NotificationSource["sourceRevisions"]) => Promise<void>;
+  notifyBatch?: (wxid: string, text: string, messageIds: string[], sourceRevisions?: NotificationSource["sourceRevisions"]) => Promise<void>;
   undelivered?: () => Promise<{ text: string; status?: "pending" | "blocked" }[]>;
 };
 
@@ -61,8 +69,11 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   const authAccount = validAccount ? account : undefined;
   const getToken = authAccount ? createTeamsTokenProvider(authAccount) : createGinaTokenProvider(parsed.ginaHome!, env);
   const sendToken = authAccount ? createTeamsTokenProvider(authAccount, SEND_SCOPE) : getToken;
+  const getFilesToken = authAccount ? createTeamsTokenProvider(authAccount, FILES_SCOPE) : getToken;
+  const getChannelsToken = authAccount ? createTeamsTokenProvider(authAccount, CHANNELS_SCOPE) : getToken;
   const controller = new AbortController();
-  const collector = createTeamsSync({ dir, store, getToken, rules: parsed.important, signal: controller.signal });
+  const graphFetch = createTeamsFetch();
+  const collector = createTeamsSync({ dir, store, getToken, rules: parsed.important, signal: controller.signal, fetchImpl: graphFetch });
   let active = true;
   const pending = new Set<Promise<unknown>>();
   function track<T>(operation: Promise<T>) {
@@ -75,42 +86,49 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
     status: collector.status,
   };
   teamsSender.send = async (chatId, text) => {
-    if (!active) throw new Error("Teams 集成已停止");
+    if (!active) throw new TeamsSendRejectedError("Teams 集成已停止，尚未开始发送");
     await track(sendTeamsMessage(sendToken, chatId, text, store, controller.signal));
   };
   teamsSender.refresh = sync.refresh;
   teamsSender.syncStatus = sync.status;
+  const read = createTeamsReader({ getToken, getFilesToken, getChannelsToken, signal: controller.signal, archive: store.archive, fetchImpl: graphFetch });
+  const episodeAccess = createTeamsEpisodeAccess({ getToken, signal: controller.signal, bindAccount: id => store.archive.bindAccount(id), fetchImpl: graphFetch });
+  teamsSender.canReadEpisodeSource = chatId => active ? track(episodeAccess(chatId)) : Promise.resolve(false);
+  const archiveSync = createTeamsArchiveSync(store.archive, read, controller.signal);
+  teamsSender.read = query => {
+    if (!active) return Promise.reject(new Error("Teams 集成已停止"));
+    return track(read(query));
+  };
 
   let stopForward: (() => Promise<void>) | undefined;
   try {
     if (wechat?.enabled) stopForward = startTeamsForward({
       dir, store, getToken, rules: parsed.important, sendURL: wechat.sendURL, sendToken: wechat.sendToken, sync, signal: controller.signal,
-      inject: wechat.notify ? (wxid, text, messageId) => active ? wechat.notify!(wxid, text, messageId) : Promise.reject(new Error("Teams 集成已停止")) : undefined,
+      injectBatch: wechat.notifyBatch ? (wxid, text, messageIds, sourceRevisions) => active ? wechat.notifyBatch!(wxid, text, messageIds, sourceRevisions) : Promise.reject(new Error("Teams 集成已停止")) : undefined,
+      inject: wechat.notify ? (wxid, text, messageId, sourceRevisions) => active ? wechat.notify!(wxid, text, messageId, sourceRevisions) : Promise.reject(new Error("Teams 集成已停止")) : undefined,
       undelivered: wechat.undelivered ? () => active ? wechat.undelivered!() : Promise.resolve([]) : undefined,
       onStuck: (...args) => { if (active) onStuck?.(...args); },
     });
   } catch (error) {
     active = false;
     controller.abort();
-    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus;
+    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus; delete teamsSender.read; delete teamsSender.canReadEpisodeSource;
     throw error;
   }
 
-  let timer: NodeJS.Timeout | undefined;
-  const poll = async () => {
-    try { await sync.refresh(); } catch (error) { if (active) console.error("Teams 同步失败：", error instanceof Error ? error.message : String(error)); }
-    if (active) timer = setTimeout(() => { void poll(); }, 45_000);
-  };
-  if (!stopForward) void poll();
+  const stopSync = !stopForward ? startTeamsPolling({ settings: store.triage.settings, run: sync.refresh,
+    onError: error => { if (active) console.error("Teams 同步失败：", error instanceof Error ? error.message : String(error)); } }) : undefined;
+  const stopArchive = startTeamsPolling({ settings: store.triage.settings, archive: true,
+    run: async () => { await track(archiveSync.refresh()); return { ok: true }; },
+    onError: () => { if (active) console.error("Teams 历史归档未完成，稍后重试"); } });
 
   let closing: Promise<void> | undefined;
   return () => {
     if (closing) return closing;
     active = false;
     controller.abort();
-    clearTimeout(timer);
-    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus;
+    delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus; delete teamsSender.read; delete teamsSender.canReadEpisodeSource;
     const forwarding = stopForward?.();
-    return closing = Promise.allSettled([...pending, forwarding]).then(() => {});
+    return closing = Promise.allSettled([...pending, forwarding, stopSync?.(), stopArchive()]).then(() => {});
   };
 }

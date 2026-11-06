@@ -10,7 +10,7 @@ import { isAppConnection, isAppUrl, isExternalUrl, validateWebUrl } from "./poli
 import { isPinnedCertificate } from "./certificate-trust.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { showMailNotification, startMailNotifications } from "./mail-notifications.js";
+import { showMailNotification, startMailNotifications, type MailNotificationStatus } from "./mail-notifications.js";
 
 app.setName("Pi Durable Assistant");
 const icon = fileURLToPath(new URL("../assets/icon.png", import.meta.url));
@@ -22,6 +22,17 @@ let password: string | undefined;
 let stopNotifications = () => {};
 let initialized = false;
 const desktopPartition = "persist:desktop-web";
+
+function setMailNotificationLabel(label: string) {
+  const item = Menu.getApplicationMenu()?.getMenuItemById("mail-notification-status");
+  if (item) item.label = `邮件提醒：${label}`;
+}
+
+function showMailNotificationStatus(status: MailNotificationStatus) {
+  setMailNotificationLabel(status.state === "connected" ? "已连接" :
+    status.reason === "authorization" ? "认证失败，请检查连接设置" :
+      status.reason === "timeout" ? "连接超时，正在自动重试" : "连接中断，正在自动重试");
+}
 
 function showConnection() {
   if (settings) { settings.show(); settings.focus(); return; }
@@ -41,6 +52,7 @@ function trustedSettings(event: IpcMainInvokeEvent) {
 
 async function connect(initialError?: string) {
   stopNotifications();
+  setMailNotificationLabel("等待服务连接");
   settings?.close();
   if (window) { window.destroy(); window = undefined; }
   const current = new BrowserWindow({ title: "小 D · 你的个人智能助手", width: 1200, height: 820, minWidth: 720, minHeight: 560, icon,
@@ -52,6 +64,7 @@ async function connect(initialError?: string) {
     if (window !== current || current.isDestroyed() || failed) return;
     failed = true;
     stopNotifications();
+    setMailNotificationLabel("等待服务连接");
     void current.loadURL(connectionStatusPage(origin, "服务暂时未连接。请确认网络和服务状态，然后重新连接；已保存的连接配置会继续保留。"))
       .catch(error => console.error("Desktop connection status page failed to load", error));
   };
@@ -69,9 +82,15 @@ async function connect(initialError?: string) {
     if (window !== current || !isAppUrl(current.webContents.getURL().split("#")[0] ?? "", origin)) return;
     failed = false;
     stopNotifications();
+    if (!Notification.isSupported()) {
+      setMailNotificationLabel("系统通知不可用，请使用网页提醒");
+      return;
+    }
+    setMailNotificationLabel("正在连接");
     stopNotifications = startMailNotifications(origin, basicAuth(config.username, password), (title, body) => {
-      if (Notification.isSupported()) showMailNotification(new Notification({ title, body, timeoutType: "default" }));
-    }, (input, init) => session.fromPartition(desktopPartition).fetch(String(input), init));
+      if (!Notification.isSupported()) return false;
+      return showMailNotification(new Notification({ title, body, timeoutType: "default" }));
+    }, (input, init) => session.fromPartition(desktopPartition).fetch(String(input), init), showMailNotificationStatus);
   });
   try {
     await current.loadURL(connectionStatusPage(origin, initialError));
@@ -168,7 +187,8 @@ else {
       getWindow: () => window, getOrigin: () => config.url,
     });
     Menu.setApplicationMenu(Menu.buildFromTemplate([
-      { label: app.name, submenu: [{ label: "连接设置…", click: showConnection }, { type: "separator" }, { role: "quit" }] },
+      { label: app.name, submenu: [{ label: "连接设置…", click: showConnection },
+        { id: "mail-notification-status", label: "邮件提醒：等待服务连接", enabled: false }, { type: "separator" }, { role: "quit" }] },
       { role: "editMenu" }, { role: "viewMenu" },
     ]));
     initialized = true;

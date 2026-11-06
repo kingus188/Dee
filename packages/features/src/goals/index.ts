@@ -8,6 +8,7 @@ import { GoalTask, accountGoalUsage } from "./runner.js";
 import { goalText, normalizeGoal, normalizeGoalCheckpoint } from "./state.js";
 import { normalizeRequestId } from "../tasks/parameters.js";
 import { detach, resultText } from "../results.js";
+import { requireUserInstruction } from "../user-instruction.js";
 
 export { Goals, GoalWorker, GoalTask };
 
@@ -80,7 +81,10 @@ export const goalTools = [
     name: "start_goal", replay: "safe",
     description: "为用户明确委托的多步骤工作启动持久 loop。自动读取资料、整理并交付文本；不具备发送、删除或修改业务数据权限。目标与可检查验收标准必须明确。",
     parameters: Type.Object({ text: Type.String(), criteria: Type.String(), maxRounds: Type.Optional(Type.Integer({ minimum: 1, maximum: 24 })), maxMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 1440 })) }, { additionalProperties: false }),
-    execute: async (args, api, context) => resultText(JSON.stringify(await api.commit(tx => createGoalInTx(tx, api.conversationId, args, "tool:" + api.callId), context))),
+    execute: async (args, api, context) => {
+      await requireUserInstruction(api, context);
+      return resultText(JSON.stringify(await api.commit(tx => createGoalInTx(tx, api.conversationId, args, "tool:" + api.callId), context)));
+    },
   }),
   defineTool({
     name: "list_goals", replay: "safe", description: "读取当前个人空间的委托、版本、进展、依据和阻塞原因，跨会话可用。",
@@ -91,7 +95,10 @@ export const goalTools = [
     name: "control_goal", replay: "safe",
     description: "按用户最新指示补充或调整委托并继续、取消委托，或在用户明确验收后 accept。先 list_goals 获取准确 id/revision；resume 必须带用户补充 input，不扩大只读授权。",
     parameters: Type.Object({ id: Type.String(), revision: Type.Integer(), action: Type.Union([Type.Literal("resume"), Type.Literal("cancel"), Type.Literal("accept")]), input: Type.Optional(Type.String()) }, { additionalProperties: false }),
-    execute: async (args, api, context) => resultText(JSON.stringify(await api.commit(tx => controlGoalInTx(tx, args.id, args.action, args, "tool:" + api.callId), context))),
+    execute: async (args, api, context) => {
+      await requireUserInstruction(api, context);
+      return resultText(JSON.stringify(await api.commit(tx => controlGoalInTx(tx, args.id, args.action, args, "tool:" + api.callId), context)));
+    },
   }),
   goalCheckpoint,
 ];

@@ -4,7 +4,8 @@ import type { ViewEntry, ConversationView as ClientView } from "@assistant/contr
 import { Index } from "@assistant/runtime";
 import { Notes, Reminders, Delegations, BackgroundJobs, Parents, splitUserContent, withQuote } from "@assistant/features";
 import type { AppContext } from "./context.js";
-export function createViews({ harness, ctx, taskGraph, redact }: AppContext) {
+import { enrichTeamsRecordView } from "../teams-records.js";
+export function createViews({ harness, ctx, taskGraph, redact, teamsStore }: AppContext) {
 const contentText = (content: Message["content"] | undefined) =>
 	typeof content === "string" ? content : (content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("");
 
@@ -41,7 +42,8 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
 				toolCallId: message.toolCallId,
 				name: message.toolName,
 				// 去掉 Harness 给错误结果包的 <harness> 标签，前端只显示人话
-				text: contentText(message.content).replace(/<\/?harness>/g, "").replace(/^\s*\[error\]\s*/m, "").trim(),
+        text: enrichTeamsRecordView(teamsStore.archive, message.toolName, contentText(message.content).replace(/<\/?harness>/g, "").replace(/^\s*\[error\]\s*/m, "").trim(),
+          entries.flatMap(e => e.toolCalls ?? []).find(call => call.id === message.toolCallId)?.args, query => teamsStore.list(query)),
 				isError: Boolean(message.isError),
 			});
 		}

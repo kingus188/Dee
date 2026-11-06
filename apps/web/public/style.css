@@ -4,7 +4,7 @@
   --bg-page: #fafaf8; --bg-surface: #fff; --bg-subtle: #f1f1ed; --bg-input: #fff;
   --border: #e8e8e2; --border-focus: #626b58;
   --text-main: #252824; --text-muted: #71766d; --text-light: #777c72;
-  --primary: #2b2f29; --primary-hover: #444b3e; --primary-light: #eff1ea; --primary-border: #b8c0ae;
+  --primary: #50654c; --primary-hover: #3f533b; --primary-light: #eff1ea; --primary-border: #b8c0ae;
   --primary-gradient: var(--primary); --primary-gradient-hover: var(--primary-hover);
   --user-bubble: #eff1ea; --user-text: #252824; --assistant-bubble: #fff; --assistant-text: #252824;
   --tool-bg: #f7f8f4; --tool-border: #e3e6dc;

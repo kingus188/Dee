@@ -14,3 +14,29 @@ test("notification mode filters new events and enqueue failure is not mistaken f
   assert.equal(payload.failed, true); assert.equal(payload.id, "failed");
   await assert.rejects(createNotifier({ url: "http://localhost", mode: "all", kind: "generic" }, async () => { throw new Error("disk unavailable"); })({ id: "retry", type: "schedule", text: "task" }), /disk unavailable/);
 });
+
+
+test("structured urgency and approval bypass errors-only filtering without changing provider payloads", async () => {
+  const events: { id: string; body: string; priority?: string }[] = [];
+  const notify = createNotifier({ url: "http://localhost", mode: "errors", kind: "feishu" }, async event => { events.push(event); });
+  await notify({ id: "urgent", type: "reminder", text: "due now", priority: "urgent" });
+  await notify({ id: "approval", type: "approval", text: "approve action" });
+  await notify({ id: "failed", type: "background", text: "failed action", failed: true });
+  await notify({ id: "normal", type: "background", text: "completed" });
+  assert.deepEqual(events.map(event => event.priority), ["urgent", "approval", "urgent"]);
+  assert.deepEqual(JSON.parse(events[0].body), { msg_type: "text", content: { text: "due now" } });
+  await createNotifier({ url: "http://localhost", mode: "off", kind: "generic" }, async () => { assert.fail("off remains off"); })({ id: "off", type: "approval", text: "approval" });
+});
+
+test("producer cannot downgrade failure or approval and preserves requested reminder and source metadata", async () => {
+  const events: { priority?: string; attentionClass?: string; sources?: unknown[]; body: string }[] = [];
+  const notify = createNotifier({ url: "https://unused.example.test", mode: "all", kind: "feishu" }, async event => { events.push(event); });
+  await notify({ id: "failed", type: "background", text: "failed", failed: true, priority: "normal" });
+  await notify({ id: "approval", type: "approval", text: "approval", priority: "normal" });
+  await notify({ id: "reminder", type: "reminder", text: "remind me", sources: [{ source: "conv:1", revision: 3 }] });
+  await notify({ id: "schedule", type: "schedule", text: "scheduled" });
+  assert.deepEqual(events.map(event => event.priority), ["urgent", "approval", "normal", "normal"]);
+  assert.deepEqual(events.map(event => event.attentionClass), ["normal", "normal", "requested", "requested"]);
+  assert.deepEqual(events[2].sources, [{ source: "conv:1", revision: 3 }]);
+  assert.doesNotMatch(events[2].body, /conv:1|sources|attentionClass/);
+});

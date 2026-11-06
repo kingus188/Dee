@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { TestContext } from "node:test";
 import { act } from "react";
-import type { DaylightSnapshot, PersonalData, WorkspaceActivities, WorkspaceMail } from "@assistant/contracts";
+import type { DaylightSnapshot, PersonalData, WorkspaceActivities, WorkspaceMail, TeamsTriageOverview } from "@assistant/contracts";
 import { App } from "../dist/ui/App.js";
 import { apiClient } from "../dist/api/socket.js";
 import { localDate } from "../dist/daylight/domain/todo.js";
@@ -25,7 +25,9 @@ function resources() {
     status: { enabled: true, connected: true, offline: false, syncing: false, lastSuccessAt: "2026-10-22T06:30:00Z", error: "" },
     messages: [{ id: "mail", subject: "上次成功读取的邮件", sender: "项目通知", address: "project@example.test", receivedAt: "2026-10-22T06:00:00Z", preview: "保留邮件摘要", isRead: false, hasAttachments: false }],
   };
-  return { "/api/daylight": daylight, "/api/personal": personal, "/api/workspace/activities": activities, "/api/workspace/mail": mail };
+  const teams: TeamsTriageOverview = { enabled: true, stale: false, lastSuccessAt: "2026-11-06T08:00:00Z", settings: { enabled: true, timeZone: "Asia/Shanghai", workDays: [1, 2, 3, 4, 5], workStart: "09:00", workEnd: "18:00", workIntervalMinutes: 2, offHoursIntervalMinutes: 15, archiveIntervalMinutes: 30, normalDigestMinutes: 30 }, truncated: false,
+    items: [{ id: "teams-message", revision: 1, chatId: "chat", chatLabel: "项目讨论", senderName: "同事", createdAt: "2026-11-06T07:00:00Z", text: "需要核对的 Teams 原文", attention: "now", reason: "建议核对", uncertainty: "未核对完整上下文", suggestTodo: true, suggestedTitle: "跟进项目讨论" }] };
+  return { "/api/daylight": daylight, "/api/personal": personal, "/api/workspace/activities": activities, "/api/workspace/mail": mail, "/api/teams/triage": teams };
 }
 
 function mockApi(t: TestContext) {
@@ -81,11 +83,12 @@ async function workspace(t: TestContext, hash: string) {
   };
 }
 
-test("App 今日离开后暂停轮询，返回刷新失败仍保留四类成功快照", { timeout: 5000 }, async t => {
+test("App 今日离开后暂停轮询，刷新失败保留四类快照并隐藏 Teams 旧来源", { timeout: 5000 }, async t => {
   const api = mockApi(t), view = await workspace(t, "#today"), { document } = view;
   const paths = Object.keys(api.values), initialRequests = [...api.requests];
   assert.equal(document.querySelector<HTMLElement>(".today-page")!.hidden, false);
   assert.match(document.querySelector(".today-task-list")!.textContent!, /上次成功读取的待办/);
+  assert.match(document.querySelector(".teams-triage-evidence p")!.textContent!, /需要核对的 Teams 原文/);
   for (const path of paths) assert.ok(initialRequests.includes(path));
   await view.poll();
   const polledRequests = [...initialRequests, ...paths];
@@ -108,7 +111,7 @@ test("App 今日离开后暂停轮询，返回刷新失败仍保留四类成功�
   assert.deepEqual(api.requests, hiddenRequests);
 
   for (const path of paths) api.failures.add(path);
-  await act(async () => { document.querySelector<HTMLAnchorElement>('[aria-label="首页"]')!.click(); });
+  await act(async () => { document.querySelector<HTMLAnchorElement>('[aria-label="今日概览"]')!.click(); });
   assert.equal(document.getElementById("workspace")!.dataset.view, "home");
   assert.equal(document.querySelector<HTMLElement>(".today-page")!.hidden, false);
   assert.deepEqual(api.requests.toSorted(), [...hiddenRequests, ...paths].toSorted());
@@ -116,7 +119,9 @@ test("App 今日离开后暂停轮询，返回刷新失败仍保留四类成功�
   assert.match(document.querySelector(".today-progress-list")!.textContent!, /仍待处理的提醒/);
   assert.match(document.querySelector(".today-approval-links")!.textContent!, /1 条等待批准/);
   assert.match(document.querySelector(".today-mail-list")!.textContent!, /上次成功读取的邮件/);
-  const errors = document.querySelectorAll('.today-page [role="alert"]');
+  assert.equal(document.querySelector(".teams-triage-item"), null);
+  assert.match(document.querySelector('.teams-triage [role="alert"]')!.textContent!, /刷新连接中断.*旧建议已隐藏/);
+  const errors = document.querySelectorAll('.today-page [role="alert"]:not(.teams-triage [role="alert"])');
   assert.equal(errors.length, 4);
   for (const error of errors) assert.match(error.textContent!, /刷新连接中断.*保留上次成功读取的内容/);
 });
@@ -148,7 +153,7 @@ test("App 动态筛选进入来源会话后浏览器返回，保留筛选、展�
   assert.equal(dom.window.location.hash, "#activity");
   assert.equal(document.getElementById("workspace")!.dataset.view, "activity");
   assert.equal(document.querySelector<HTMLElement>(".activity-page")!.hidden, false);
-  assert.deepEqual(api.requests.toSorted(), [...initialRequests, "/api/workspace/activities"].toSorted());
+  assert.deepEqual(api.requests.toSorted(), [...initialRequests, "/api/workspace/activities", "/api/personal"].toSorted());
   assert.match(document.querySelector('.activity-filter[aria-pressed="true"]')!.textContent!, /^已结束/);
   assert.equal(document.querySelectorAll(".activity-record-list .activity-record").length, 1);
   assert.match(document.querySelector(".activity-record-list")!.textContent!, /已完成的分析/);

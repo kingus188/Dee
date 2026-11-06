@@ -10,6 +10,7 @@ import { createModelCatalog, openRuntime, Index } from "@assistant/runtime";
 import { WechatChannel, WechatState } from "@assistant/channel-wechat";
 import { openTeamsStore } from "../dist/teams-store.js";
 import { reviewTeamsNotification } from "../dist/teams-notifications.js";
+import { openNotificationOutbox } from "../dist/notification-outbox.js";
 
 const at = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const incoming = (id: string, chatId = id) => ({ id, chatId, chatType: "oneOnOne", senderId: "user", senderName: "测试同事", direction: "in" as const, text: "需要查看的原文", createdAt: at(10), important: true });
@@ -17,6 +18,7 @@ const incoming = (id: string, chatId = id) => ({ id, chatId, chatType: "oneOnOne
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "pi-reminder-"));
   const store = openTeamsStore(dir);
+  const preferences = openNotificationOutbox(dir, { url: "", mode: "off", kind: "generic" });
   const { models, agentModel } = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, fauxAssistantMessage("原来的摘要和建议"));
   const options = { dataDir: dir, models, agentModel, extensions: [], onReport: (error: unknown) => { throw error; } };
   let runtime = await openRuntime(options, context);
@@ -45,14 +47,14 @@ async function fixture() {
   const state = () => runtime.harness.snapshot(WechatState, context);
   const reply = (id: string) => store.record({ ...incoming("out:" + id, id), direction: "out", senderId: "me", createdAt: at(1), important: false });
   return {
-    store, sender, sent, state, settle, deliver, reply,
+    store, sender, sent, state, settle, deliver, reply, preferences: preferences.preferences,
     channel: () => channel,
     calls: () => calls, reviews: () => reviews,
     failSend: (value: boolean) => { fails = value; }, failSync: (value: boolean) => { syncFails = value; },
     block: () => runtime.root.commit(async tx => { for (const item of (await tx.doc(WechatState)).outbox) item.status = "blocked"; }, context),
     due: () => runtime.root.commit(async tx => { for (const item of (await tx.doc(WechatState)).outbox) item.nextAt = 0; }, context),
     restart: async () => { channel.stop(); await runtime.harness.close(context); runtime = await openRuntime(options, context); channel = makeChannel(); channel.stop(); },
-    close: async () => { channel.stop(); await runtime.harness.close(context); store.close(); await rm(dir, { recursive: true, force: true }); },
+    close: async () => { channel.stop(); await runtime.harness.close(context); store.close(); await preferences.close(); await rm(dir, { recursive: true, force: true }); },
   };
 }
 
@@ -129,5 +131,54 @@ test("被微信永久拒收的提醒不会自动重发，但已回复后可以�
     assert.equal((await f.state())!.outbox[0].status, "cancelled"); assert.equal(f.calls(), 0);
     f.store.record({ ...incoming("expired"), createdAt: at(25 * 60) });
     assert.equal((await reviewTeamsNotification(f.store, {}, { kind: "teams", messageIds: ["expired"] })).status, "cancel");
+  } finally { await f.close(); }
+});
+
+
+test("微信持久 outbox 静默延期不消耗尝试，后来的紧急消息不被阻塞且已处理源仍撤销", async () => {
+  const f = await fixture();
+  try {
+    const hour = new Date().getUTCHours();
+    f.preferences.save({ quietHours: { enabled: true, start: `${String(hour).padStart(2, "0")}:00`, end: `${String((hour + 1) % 24).padStart(2, "0")}:00`, timeZone: "UTC" } });
+    f.store.record({ ...incoming("normal"), notificationPriority: "normal" });
+    await f.channel().notify("primary", "wxid_test", "[Teams 新消息] 普通", { kind: "teams", messageIds: ["normal"] });
+    await f.settle();
+    f.store.record({ ...incoming("urgent"), notificationPriority: "urgent" });
+    await f.channel().notify("primary", "wxid_test", "[Teams 新消息] 紧急", { kind: "teams", messageIds: ["urgent"] });
+    await f.settle(); await f.deliver();
+    const records = (await f.state())!.outbox;
+    assert.equal(records[0].status, "pending"); assert.equal(records[0].attempts, 0); assert.ok(records[0].nextAt > Date.now());
+    assert.equal(records[1].status, "sent"); assert.equal(f.calls(), 1);
+    f.reply("normal"); await f.due(); await f.deliver();
+    assert.equal((await f.state())!.outbox[0].status, "cancelled"); assert.equal(f.calls(), 1);
+  } finally { await f.close(); }
+});
+
+test("整体同步成功不能替不可读来源背书；已落库处理事实仍能离线撤销", async () => {
+  const f = await fixture();
+  try {
+    f.store.record(incoming("forbidden", "forbidden-chat"));
+    const source = { kind: "teams" as const, messageIds: ["forbidden"] };
+    const refresh = async () => ({ ok: true, lastSuccessAt: new Date().toISOString(), refreshedChatIds: ["other-chat"] });
+    await assert.rejects(reviewTeamsNotification(f.store, { refresh }, source), /来源聊天本轮未能核对/);
+    const verified = async () => ({ ok: true, lastSuccessAt: new Date().toISOString(), refreshedChatIds: ["forbidden-chat"] });
+    assert.equal((await reviewTeamsNotification(f.store, { refresh: verified }, source)).status, "send");
+    f.store.notifications.cancelSource("forbidden");
+    assert.equal((await reviewTeamsNotification(f.store, { refresh }, source)).status, "cancel");
+  } finally { await f.close(); }
+});
+
+test("生成回复继承完整聊天版本，撤回非提醒上文后重启也不能投递", async () => {
+  const f = await fixture();
+  try {
+    f.store.record({ ...incoming("chat:context", "chat"), createdAt: at(15), important: false, text: "SYNTHETIC_WITHDRAWN_CONTEXT" });
+    f.store.record(incoming("chat:latest", "chat"));
+    const source = { kind: "teams" as const, messageIds: ["chat:latest"], sourceRevisions: [{ source: "teams:chat", revision: f.store.sourceRevision("teams:chat") }] };
+    await f.channel().notify("primary", "wxid_test", "[Teams 新消息] 上文 SYNTHETIC_WITHDRAWN_CONTEXT", source);
+    await f.settle();
+    assert.deepEqual((await f.state())!.outbox[0].source?.sourceRevisions, source.sourceRevisions);
+    f.store.revokeMessage("chat", "chat:context"); await f.restart(); await f.deliver();
+    assert.equal((await f.state())!.outbox[0].status, "cancelled"); assert.equal(f.calls(), 0);
+    assert.equal(f.store.message("chat:latest")?.text, "需要查看的原文", "latest source can remain valid while its context is withdrawn");
   } finally { await f.close(); }
 });
