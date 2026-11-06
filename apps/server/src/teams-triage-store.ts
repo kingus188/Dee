@@ -36,6 +36,8 @@ export function createTeamsTriageStore(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS teams_triage_settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS teams_triage_actions (message_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, state TEXT NOT NULL, until_at INTEGER, task_id TEXT);
     CREATE TABLE IF NOT EXISTS teams_chat_access (chat_id TEXT PRIMARY KEY, available INTEGER NOT NULL);`);
+  if (!(db.prepare("PRAGMA table_info(teams_chat_access)").all() as { name: string }[]).some(column => column.name === "generation")) db.exec("ALTER TABLE teams_chat_access ADD COLUMN generation INTEGER NOT NULL DEFAULT 0");
+  const accessGeneration = (chatId: string) => Number(db.prepare("SELECT generation FROM teams_chat_access WHERE chat_id=?").get(chatId)?.generation ?? 0);
   const settings = (): TeamsSyncSettings => {
     const saved = db.prepare("SELECT value FROM teams_triage_settings WHERE id=1").get();
     return validateTeamsSyncSettings(saved ? JSON.parse(String(saved.value)) : defaultTeamsSyncSettings);
@@ -66,10 +68,16 @@ export function createTeamsTriageStore(db: DatabaseSync) {
     items.sort((a, b) => order[a.attention] - order[b.attention] || b.createdAt.localeCompare(a.createdAt));
     return { items, truncated: rows.length > 100 };
   }
-  const access = (chatId: string, available: boolean) => {
-    const old = db.prepare("SELECT available FROM teams_chat_access WHERE chat_id=?").get(chatId);
+  const access = (chatId: string, available: boolean, expectedGeneration?: number) => {
+    const old = db.prepare("SELECT available,generation FROM teams_chat_access WHERE chat_id=?").get(chatId);
+    if (available && expectedGeneration !== undefined && Number(old?.generation ?? 0) !== expectedGeneration) return false;
     if (!available && old?.available !== 0) sources.invalidate(`teams:${chatId}`);
-    db.prepare("INSERT INTO teams_chat_access(chat_id,available) VALUES (?,?) ON CONFLICT(chat_id) DO UPDATE SET available=excluded.available").run(chatId, available ? 1 : 0);
+    // Every denial fences older in-flight successes, including repeated denials
+    // while the source is already unavailable. Successful reads keep the fence.
+    db.prepare(`INSERT INTO teams_chat_access(chat_id,available,generation) VALUES (?,?,?)
+      ON CONFLICT(chat_id) DO UPDATE SET available=excluded.available,generation=teams_chat_access.generation+?`)
+      .run(chatId, available ? 1 : 0, available ? 0 : 1, available ? 0 : 1);
+    return true;
   };
   return {
     settings,
@@ -87,6 +95,7 @@ export function createTeamsTriageStore(db: DatabaseSync) {
         WHERE teams_triage_actions.state!='created'`).run(id, revision, state, state === "snoozed" ? Date.now() + 2 * 3600_000 : null, taskId ?? null);
     },
     access,
+    accessGeneration,
     reconcileChats(ids: readonly string[]) {
       const visible = new Set(ids);
       for (const row of db.prepare("SELECT DISTINCT chat_id FROM teams_messages").all()) {

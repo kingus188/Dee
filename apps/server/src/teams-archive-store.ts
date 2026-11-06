@@ -5,7 +5,7 @@ import { messageText } from "./teams-message-text.js";
 
 export type ArchivedMessage = {
   id: string; createdDateTime: string; lastModifiedDateTime?: string; deletedDateTime?: string;
-  from?: { user?: { displayName?: string } }; body?: { content?: string; contentType?: string };
+  from?: { user?: { id?: string; displayName?: string }; application?: { displayName?: string } }; webUrl?: string; body?: { content?: string; contentType?: string };
   attachments?: { id?: string; name?: string; contentType?: string; contentUrl?: string }[];
 };
 export type ArchiveMedia = { id: string; name: string; kind: "image" | "file"; status: string; url?: string; previewUrl?: string; error?: string };
@@ -13,10 +13,20 @@ export type ArchivedChat = { id: string; topic?: string; chatType?: string; memb
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 export const mediaId = (chat: string, message: string, source: string) => digest(JSON.stringify([chat, message, source]));
 const textOf = (message: ArchivedMessage) => (message.body?.content ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+const imageSignature = (message: ArchivedMessage) => JSON.stringify((message.body?.content ?? "").match(/<img\b[^>]*>/gi) ?? []);
+export function hostedImageIds(message: ArchivedMessage) {
+  const ids = new Set<string>();
+  for (const match of (message.body?.content ?? "").matchAll(/<img\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/gi)) {
+    const reference = (match[1] ?? match[2] ?? match[3]).match(/\/hostedContents\/([^/?#]+)\/(?:\$value|%24value)(?:[?#]|$)/i);
+    if (reference) { try { ids.add(decodeURIComponent(reference[1])); } catch { /* Unknown references cannot retain old image bytes. */ } }
+  }
+  return [...ids];
+}
 const safeLink = (value?: string) => { try { const u = new URL(value ?? ""); return u.protocol === "https:" && !u.username && !u.password ? u.href : undefined; } catch { return undefined; } };
 
 export function openTeamsArchive(db: DatabaseSync) {
   const sources = createSourceLifecycle(db);
+  const knownAccess = (chat: string) => !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='teams_chat_access'").get() || db.prepare("SELECT available FROM teams_chat_access WHERE chat_id=?").get(chat)?.available !== 0;
   const allowed = (chat: string, id: string) => sources.allowed(`teams:${chat}`, undefined, [`${chat}:${id}`]);
   db.exec(`CREATE TABLE IF NOT EXISTS teams_archive_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS teams_archive_chats (id TEXT PRIMARY KEY, value TEXT NOT NULL, cursor TEXT, complete INTEGER NOT NULL DEFAULT 0,
@@ -38,7 +48,7 @@ export function openTeamsArchive(db: DatabaseSync) {
     ON CONFLICT(chat_id,id) DO UPDATE SET created_at=excluded.created_at,sender=excluded.sender,text=excluded.text,value=excluded.value,saved_at=excluded.saved_at`);
   const insertMedia = db.prepare(`INSERT INTO teams_archive_media(id,chat_id,message_id,source,name,kind,url,status) VALUES (?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET name=excluded.name,url=excluded.url`);
-  const mediaRows = (chatId: string, messageId: string): ArchiveMedia[] => !allowed(chatId, messageId) ? [] : (db.prepare("SELECT id,name,kind,url,status,error FROM teams_archive_media WHERE chat_id=? AND message_id=? ORDER BY id").all(chatId, messageId) as Record<string, string>[])
+  const mediaRows = (chatId: string, messageId: string): ArchiveMedia[] => (!knownAccess(chatId) || !allowed(chatId, messageId)) ? [] : (db.prepare("SELECT id,name,kind,url,status,error FROM teams_archive_media WHERE chat_id=? AND message_id=? ORDER BY id").all(chatId, messageId) as Record<string, string>[])
     .map(r => ({ id: r.id, name: r.name, kind: r.kind as "image" | "file", status: r.status, ...(r.url ? { url: r.url } : {}),
       ...(r.status === "ready" ? { previewUrl: `/api/teams/media/${r.id}` } : {}), ...(r.error ? { error: r.error } : {}) }));
   return {
@@ -66,8 +76,20 @@ export function openTeamsArchive(db: DatabaseSync) {
           // Deletion is monotonic. For ordinary content, reject known older
           // versions and network reads that crossed a source change.
           if (!message.deletedDateTime && (incomingAt < previousAt || (staleSnapshot && !(incomingAt > previousAt)))) continue;
+          const filesChanged = !!previousMessage && JSON.stringify(previousMessage.attachments ?? []) !== JSON.stringify(message.attachments ?? []);
+          const imagesChanged = !!previousMessage && imageSignature(previousMessage) !== imageSignature(message);
+          // Media belongs to the current original, not to the message ID forever.
+          // Clear removed/replaced references and bytes in the same transaction.
+          const fileSources = (message.attachments ?? []).map((file, index) => `attachment:${file.id ?? index}`);
+          // Reconcile on every accepted read, including old databases where the
+          // original was already edited but obsolete media rows survived.
+          const removedFiles = db.prepare(`DELETE FROM teams_archive_media WHERE chat_id=? AND message_id=? AND kind='file'${!filesChanged && fileSources.length ? ` AND source NOT IN (${fileSources.map(() => "?").join(",")})` : ""}`)
+            .run(chatId, message.id, ...(!filesChanged ? fileSources : [])).changes;
+          const imageSources = hostedImageIds(message);
+          const removedImages = db.prepare(`DELETE FROM teams_archive_media WHERE chat_id=? AND message_id=? AND kind='image'${!imagesChanged && imageSources.length ? ` AND source NOT IN (${imageSources.map(() => "?").join(",")})` : ""}`)
+            .run(chatId, message.id, ...(!imagesChanged ? imageSources : [])).changes;
           const cached = hasCache ? db.prepare("SELECT text,source_stale FROM teams_messages WHERE id=?").get(`${chatId}:${message.id}`) : undefined;
-          if (message.deletedDateTime || (previous && previous.text !== textOf(message)) || (cached && !cached.source_stale && cached.text !== messageText(message))) {
+          if (message.deletedDateTime || filesChanged || imagesChanged || removedFiles || removedImages || (previous && previous.text !== textOf(message)) || (cached && !cached.source_stale && cached.text !== messageText(message))) {
             if (message.deletedDateTime) sources.revoke(`teams:${chatId}`, `${chatId}:${message.id}`);
             else sources.invalidate(`teams:${chatId}`);
             if (hasCache) {
@@ -85,11 +107,18 @@ export function openTeamsArchive(db: DatabaseSync) {
         db.exec("COMMIT");
       } catch (error) { db.exec("ROLLBACK"); throw error; }
     },
-    hosted(chatId: string, messageId: string, ids: string[]) {
-      db.prepare("DELETE FROM teams_archive_media WHERE chat_id=? AND message_id=? AND source='__discovery__' AND bytes IS NULL").run(chatId, messageId);
+    hosted(chatId: string, messageId: string, ids: string[], expectedRevision?: number) {
+      if (!sources.allowed(`teams:${chatId}`, expectedRevision, [`${chatId}:${messageId}`])) return;
+      if (expectedRevision !== undefined) {
+        const current = db.prepare("SELECT value FROM teams_archive_messages WHERE chat_id=? AND id=?").get(chatId, messageId);
+        const referenced = current ? new Set(hostedImageIds(JSON.parse(String(current.value)))) : new Set<string>();
+        ids = ids.filter(id => referenced.has(id));
+      }
+      db.prepare(`DELETE FROM teams_archive_media WHERE chat_id=? AND message_id=? AND kind='image'${ids.length ? ` AND source NOT IN (${ids.map(() => "?").join(",")})` : ""}`).run(chatId, messageId, ...ids);
       for (const [index, id] of ids.entries()) insertMedia.run(mediaId(chatId, messageId, id), chatId, messageId, id, `截图 ${index + 1}`, "image", null, "pending");
     },
-    hostedFailure(chatId: string, messageId: string) {
+    hostedFailure(chatId: string, messageId: string, expectedRevision?: number) {
+      if (!sources.allowed(`teams:${chatId}`, expectedRevision, [`${chatId}:${messageId}`])) return;
       const id = mediaId(chatId, messageId, "__discovery__");
       insertMedia.run(id, chatId, messageId, "__discovery__", "截图", "image", null, "failed");
       db.prepare("UPDATE teams_archive_media SET status='failed',attempts=3,error='截图列表读取失败，需检查权限或重新读取原消息' WHERE id=?").run(id);
@@ -107,14 +136,18 @@ export function openTeamsArchive(db: DatabaseSync) {
     },
     media(id: string) {
       const origin = db.prepare("SELECT chat_id,message_id FROM teams_archive_media WHERE id=?").get(id);
-      if (!origin || !allowed(String(origin.chat_id), String(origin.message_id))) return;
+      if (!origin || !knownAccess(String(origin.chat_id)) || !allowed(String(origin.chat_id), String(origin.message_id))) return;
       return db.prepare("SELECT name,mime,bytes,status FROM teams_archive_media WHERE id=?").get(id) as { name: string; mime: string | null; bytes: Uint8Array | null; status: string } | undefined;
     },
-    saveBytes(id: string, mime: string, bytes: Uint8Array) {
+    saveBytes(id: string, mime: string, bytes: Uint8Array, expectedRevision?: number) {
+      const origin = db.prepare("SELECT chat_id,message_id FROM teams_archive_media WHERE id=?").get(id);
+      if (!origin || !sources.allowed(`teams:${String(origin.chat_id)}`, expectedRevision, [`${String(origin.chat_id)}:${String(origin.message_id)}`])) return;
       if (bytes.length > 10 * 1024 * 1024) throw new Error("Teams 附件超过归档大小上限");
       db.prepare("UPDATE teams_archive_media SET mime=?,bytes=?,status='ready',error='',attempts=0,retry_at='' WHERE id=?").run(mime, bytes, id);
     },
-    mediaFailure(id: string, error: string) {
+    mediaFailure(id: string, error: string, expectedRevision?: number) {
+      const origin = db.prepare("SELECT chat_id,message_id FROM teams_archive_media WHERE id=?").get(id);
+      if (!origin || !sources.allowed(`teams:${String(origin.chat_id)}`, expectedRevision, [`${String(origin.chat_id)}:${String(origin.message_id)}`])) return;
       db.prepare("UPDATE teams_archive_media SET status='failed',error=?,attempts=attempts+1,retry_at=? WHERE id=?")
         .run(error, new Date(Date.now() + 5 * 60_000).toISOString(), id);
     },

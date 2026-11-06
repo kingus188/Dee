@@ -12,6 +12,8 @@ import { toolActivities } from "../dist/chat/activities.js";
 import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
 
+const loadedWebView = { conversationId: 7, channel: "web", busy: false, live: {}, inbox: 0, entries: [] } as unknown as ConversationView;
+
 test("React 对话按轮次展示、工具折叠、流式回复且内容经过转义", () => {
   const view = {
     conversationId: 7, busy: true, live: { text: "正在**回复**" }, entries: [
@@ -62,7 +64,7 @@ test("重复发送、中文输入和新草稿受到保护，附件发送后只�
   t.mock.method(apiClient, "request", async (path: string, body?: unknown) => { calls.push({ path, body }); return { submissionId: 1 }; });
   function Harness() {
     const [draft, changeDraft] = useState("今天做什么"); setDraft = changeDraft;
-    return <Composer draft={draft} setDraft={changeDraft} view={null} connect={() => connection} onSent={() => {}} onNewConversation={async () => {}} />;
+    return <Composer draft={draft} setDraft={changeDraft} view={loadedWebView} connect={() => connection} onSent={() => {}} onNewConversation={async () => {}} />;
   }
   const { dom } = await mount(t, <Harness />);
   const input = dom.window.document.querySelector<HTMLInputElement>('input[type="file"]')!;
@@ -101,7 +103,7 @@ test("发送未确认保留草稿，重试相同消息使用同一 requestId", a
   });
   function Harness() {
     const [draft, setDraft] = useState("记住这个约定");
-    return <Composer draft={draft} setDraft={setDraft} view={null} connect={async () => 7} onSent={() => {}} onNewConversation={async () => {}} />;
+    return <Composer draft={draft} setDraft={setDraft} view={loadedWebView} connect={async () => 7} onSent={() => {}} onNewConversation={async () => {}} />;
   }
   const { dom } = await mount(t, <Harness />);
   await act(async () => { (dom.window.document.getElementById("btn-send") as HTMLButtonElement).click(); });

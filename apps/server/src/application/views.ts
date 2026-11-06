@@ -2,6 +2,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import type { ConversationId, ConversationView, InboxState, LiveState, UsageState } from "@earendil-works/pi-durable";
 import type { ViewEntry, ConversationView as ClientView } from "@assistant/contracts";
 import { Index } from "@assistant/runtime";
+import { WechatState } from "@assistant/channel-wechat";
 import { Notes, Reminders, Delegations, BackgroundJobs, Parents, splitUserContent, withQuote } from "@assistant/features";
 import type { AppContext } from "./context.js";
 import { enrichTeamsRecordView } from "../teams-records.js";
@@ -19,18 +20,22 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
         }
 		const message = entry.model?.[0];
 		if (!message) continue;
+		// Preserve recorded message time only; legacy entries must not inherit the current or conversation time.
+		const time = Number.isFinite(message.timestamp) && Number.isFinite(new Date(message.timestamp).getTime())
+			? { timestamp: message.timestamp } : {};
 		if (entry.kind === "pi.user" && message.role === "user") {
 			const split = splitUserContent(message.content);
 			const { attachments } = split;
 			for (const a of attachments) {
 				if (a.kind === "image" && a.index !== undefined) a.url = `/api/conversations/${conversationId}/images/${entry.id}/${a.index}`;
 			}
-			entries.push({ id: entry.id, kind: "user", text: withQuote(split), attachments });
+			entries.push({ id: entry.id, kind: "user", text: withQuote(split), attachments, ...time });
 		} else if (entry.kind === "pi.assistant" && message.role === "assistant") {
 			const parts = Array.isArray(message.content) ? message.content : [];
 			entries.push({
 				id: entry.id,
 				kind: "assistant",
+				...time,
 				text: contentText(parts),
 				toolCalls: parts.filter((p) => p.type === "toolCall").map((p) => ({ id: p.id, name: p.name, args: p.arguments })),
 				error: message.stopReason === "error" ? redact(message.errorMessage || "模型调用失败") : undefined,
@@ -39,6 +44,7 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
 			entries.push({
 				id: entry.id,
 				kind: "tool",
+				...time,
 				toolCallId: message.toolCallId,
 				name: message.toolName,
 				// 去掉 Harness 给错误结果包的 <harness> 标签，前端只显示人话
@@ -53,7 +59,13 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
 	const reminders = (await harness.snapshot(Reminders, conversationId, ctx))?.items ?? [];
 	const subagents = (await harness.snapshot(Delegations, conversationId, ctx))?.items ?? [];
 	const backgroundChildren = (await harness.snapshot(BackgroundJobs, conversationId, ctx))?.items ?? [];
-	const children = (await harness.snapshot(Index, ctx))?.children ?? {};
+	const index = await harness.snapshot(Index, ctx);
+	const children = index?.children ?? {};
+	const wechat = await harness.snapshot(WechatState, ctx);
+	// A binding still forwards assistant replies even if the legacy index lacks its source label.
+	// Expose the source only: never include recipient IDs or credentials in the browser view.
+	const wechatBound = Object.values(wechat?.bindings ?? {}).some(binding => Number(binding.conversationId) === Number(conversationId));
+	const channel = wechatBound ? "wechat" : index?.items?.find(item => Number(item.id) === Number(conversationId))?.channel ?? "web";
 	const v3Children = (await harness.snapshot(Parents, ctx))?.children ?? {};
 	// 本会话和它派出的子会话里还活着的任务
 	const mine = new Set([conversationId, ...subagents.map((a) => a.conversationId),
@@ -72,6 +84,7 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
 		}));
 	return {
 		conversationId,
+		channel,
 		entries,
 		live,
 		busy: Object.keys(live).length > 0,

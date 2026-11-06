@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { Fragment, memo, useState } from "react";
 import type { ConversationView, ViewEntry } from "@assistant/contracts";
 import { renderMarkdown } from "./markdown.js";
 import { extractLiveInfo } from "./live.js";
@@ -11,14 +11,25 @@ import { showToast } from "../ui/toast.js";
 import { Icon } from "../ui/Icon.js";
 import { TeamsMedia } from "./TeamsMedia.js";
 import { TeamsRecords, teamsRecords } from "./TeamsRecords.js";
+import { chatTimestamp } from "./timestamps.js";
 
-export function ResponseCard({ text, streaming = false }: { text: string; streaming?: boolean }) {
+function MessageTime({ timestamp }: { timestamp?: number }) {
+  const value = chatTimestamp(timestamp);
+  return value && <time className="message-time" dateTime={value.iso} title={`${value.fullDate} ${value.time}`}>{value.time}</time>;
+}
+
+function AssistantIdentity({ timestamp }: { timestamp?: number }) {
+  return <div className="assistant-identity"><span className="assistant-avatar" aria-hidden="true"><Icon name="message-circle-more" /></span><strong>Dee</strong><MessageTime timestamp={timestamp} /></div>;
+}
+
+export function ResponseCard({ text, streaming = false, timestamp }: { text: string; streaming?: boolean; timestamp?: number }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
     try { await navigator.clipboard.writeText(text); setCopied(true); }
     catch { showToast("暂时无法复制，请手动选择文字。", "error"); }
   }
   return <div className="assistant-wrapper response-card" data-response-card-variant="response">
+    <AssistantIdentity timestamp={streaming ? undefined : timestamp} />
     <div className="assistant-bubble md" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
     {streaming ? <span className="cursor-blink" aria-label="正在回复" /> : text && <button type="button" className="response-copy" onClick={() => void copy()} aria-label="复制回复"><Icon name="copy" />{copied ? "已复制" : "复制"}</button>}
   </div>;
@@ -32,6 +43,7 @@ function UserMessageBubble({ entry }: { entry: ViewEntry }) {
       <a key={index} href={file.url} target="_blank" rel="noopener noreferrer" className="msg-image-link"><img className="msg-image-thumb" src={file.url} alt={file.name} loading="lazy" /></a> :
       <div key={index} className="msg-file-card"><Icon name="file-text" /><span>{file.name}<small>{formatFileSize(file.size)}</small></span></div>)}</div>}
     {entry.text && <div className="user-bubble"><div className="user-text-body">{entry.text}</div></div>}
+    <MessageTime timestamp={entry.timestamp} />
   </div>;
 }
 
@@ -73,10 +85,10 @@ function TurnCard({ turn, live, busy, onRetry, onSettings }: { turn: ChatTurn; l
         <details className="model-error-details"><summary>查看错误详情</summary><pre>{failure.error}</pre></details>
       </div>
     </div>}
-    {!!responses.length && (records.length ? <details className="teams-records-summary"><summary>助手说明</summary><ResponseCard text={responses.at(-1)!.text} /></details>
-      : <div className="message-row assistant-row"><ResponseCard text={responses.at(-1)!.text} /></div>)}
+    {!!responses.length && (records.length ? <details className="teams-records-summary"><summary>助手说明</summary><ResponseCard text={responses.at(-1)!.text} timestamp={responses.at(-1)!.timestamp} /></details>
+      : <div className="message-row assistant-row"><ResponseCard text={responses.at(-1)!.text} timestamp={responses.at(-1)!.timestamp} /></div>)}
     {info?.text && <div className="message-row assistant-row"><ResponseCard text={info.text} streaming /></div>}
-    {busy && !info?.text && <p className="turn-thinking turn-loading" role="status"><span className="activity-spinner" aria-hidden="true" />{info?.runningTools.length ? "正在执行…" : "思考中…"}</p>}
+    {busy && !info?.text && <div className="message-row assistant-row"><div className="assistant-wrapper response-card"><AssistantIdentity /><p className="turn-thinking turn-loading" role="status"><span className="activity-spinner" aria-hidden="true" />{info?.runningTools.length ? "正在执行…" : "思考中…"}</p></div></div>}
   </section>;
 }
 
@@ -84,5 +96,14 @@ export const ChatThread = memo(function ChatThread({ view, onRetry, onSettings }
   const turns = chatTurns(view?.entries ?? []);
   const busy = !!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length;
   if (!turns.length) return busy ? <div className="message-row assistant-row"><ResponseCard text="思考中…" streaming /></div> : <div className="chat-welcome"><Icon name="message-circle-more" /><h1>有什么想交给我？</h1><p>我可以帮你思考、整理、规划和执行日常事务。</p></div>;
-  return <>{turns.map((turn, index) => <TurnCard key={turn.id} turn={turn} live={index === turns.length - 1 ? view?.live : undefined} busy={index === turns.length - 1 && busy} onRetry={index === turns.length - 1 ? onRetry : undefined} onSettings={onSettings} />)}</>;
+  let previousDay: string | undefined;
+  return <>{turns.map((turn, index) => {
+    const timestamp = chatTimestamp(turn.user.timestamp ?? turn.entries.find(entry => entry.timestamp !== undefined)?.timestamp);
+    const showDay = timestamp && timestamp.day !== previousDay;
+    if (timestamp) previousDay = timestamp.day;
+    return <Fragment key={turn.id}>
+      {showDay && <div className="chat-day-separator"><time dateTime={timestamp.day} title={timestamp.fullDate}>{timestamp.dayLabel}</time></div>}
+      <TurnCard turn={turn} live={index === turns.length - 1 ? view?.live : undefined} busy={index === turns.length - 1 && busy} onRetry={index === turns.length - 1 ? onRetry : undefined} onSettings={onSettings} />
+    </Fragment>;
+  })}</>;
 });

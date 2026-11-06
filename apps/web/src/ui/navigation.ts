@@ -1,7 +1,7 @@
 import type { CardGroup } from "../chat/cards.js";
 
-export type WorkspacePage = "home" | "chat" | "daylight" | "activity" | "data" | "reports" | "settings";
-export type WorkspaceRoute = { page: WorkspacePage; group: CardGroup | null; conversationId?: number; taskId?: string; skillSource?: "remote" };
+export type WorkspacePage = "home" | "chat" | "teams" | "daylight" | "activity" | "data" | "reports" | "settings";
+export type WorkspaceRoute = { page: WorkspacePage; group: CardGroup | null; conversationId?: number; chatId?: string; taskId?: string; skillSource?: "remote" };
 const groups: Record<string, CardGroup> = { memory: "memory", skills: "skills", notes: "notes", schedules: "tasks" };
 
 export function readWorkspaceRoute(hash: string): WorkspaceRoute {
@@ -14,6 +14,15 @@ export function readWorkspaceRoute(hash: string): WorkspaceRoute {
       if (taskId.trim() && taskId.length <= 256 && !/[\u0000-\u001f\u007f]/u.test(taskId)) return { page: "daylight", group: null, taskId };
     } catch { /* Malformed task links fall back to the task workspace. */ }
   }
+  if (name === "teams") {
+    if (rawId && extra === undefined) {
+      try {
+        const chatId = decodeURIComponent(rawId);
+        if (chatId.trim() && chatId.length <= 2048 && !/[\u0000-\u001f\u007f]/u.test(chatId)) return { page: "teams", group: null, chatId };
+      } catch { /* Malformed Teams links fall back to the conversation list. */ }
+    }
+    return { page: "teams", group: null };
+  }
   const id = rawId && /^\d+$/.test(rawId) ? Number(rawId) : undefined;
   const conversationId = id !== undefined && Number.isSafeInteger(id) && id > 0 ? id : undefined;
   if (Object.hasOwn(groups, name)) return { page: "data", group: groups[name], conversationId };
@@ -25,6 +34,7 @@ export function readWorkspaceRoute(hash: string): WorkspaceRoute {
 export function workspaceHash(route: WorkspaceRoute): string {
   if (route.page === "data" && route.group === "skills" && route.skillSource === "remote") return "#skills/remote";
   const name = route.page === "data" ? route.group === "tasks" ? "schedules" : route.group ?? "memory" : route.page === "home" ? "today" : route.page === "daylight" ? "tasks" : route.page;
+  if (route.page === "teams" && route.chatId) return `#teams/${encodeURIComponent(route.chatId)}`;
   if (route.page === "daylight" && route.taskId) return `#tasks/${encodeURIComponent(route.taskId)}`;
   return `#${name}${route.conversationId && (route.page === "chat" || (route.page === "data" && ["tasks", "notes"].includes(route.group ?? ""))) ? `/${route.conversationId}` : ""}`;
 }

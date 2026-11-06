@@ -9,50 +9,74 @@ import { Icon } from "../ui/Icon.js";
 import { commandSuggestions, parseCommand, slashCommands } from "./commands.js";
 import { CommandMenu } from "./CommandMenu.js";
 
-export function Composer({ draft, setDraft, view, connect, onSent, onNewConversation }: {
+export function Composer({ draft, setDraft, view, connect, onSent, onNewConversation, conversationPending = false }: {
   draft: string; setDraft: (text: string) => void; view: ConversationView | null;
   connect: () => Promise<number>; onSent: () => void; onNewConversation: () => Promise<void>;
+  conversationPending?: boolean;
 }) {
-  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [sending, setSending] = useState(false);
-  const [processing, setProcessing] = useState(false);
+  const [, refreshFiles] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [help, setHelp] = useState(false), [menuDismissed, dismissMenu] = useState(false), [selected, setSelected] = useState(0);
   const textarea = useRef<HTMLTextAreaElement>(null), fileInput = useRef<HTMLInputElement>(null);
-  const files = useRef<PendingAttachment[]>([]), draftRef = useRef(draft);
-  const composing = useRef(false), sendingRef = useRef(false), processingRef = useRef(false);
+  const pickerOwner = useRef<number | undefined>(undefined);
+  const fileDrafts = useRef(new Map<number, PendingAttachment[]>()), draftRef = useRef(draft);
+  const composing = useRef(false), sendingRef = useRef(false), processingOwners = useRef(new Set<number>());
+  const context = useRef({ view, conversationPending });
+  context.current = { view, conversationPending };
   const mounted = useRef(true);
-  const retry = useRef<{ payload: string; requestId: string } | null>(null);
+  const retries = useRef(new Map<number, { payload: string; requestId: string }>());
+  const sourcePending = conversationPending || !view;
+  const owner = sourcePending ? null : view.conversationId;
+  const attachments = owner === null ? [] : fileDrafts.current.get(owner) ?? [];
+  const processing = owner !== null && processingOwners.current.has(owner);
   draftRef.current = draft;
   useEffect(() => { const input = textarea.current!; input.style.height = "auto"; input.style.height = input.scrollHeight + "px"; setSelected(0); dismissMenu(false); }, [draft]);
-  useEffect(() => () => { mounted.current = false; for (const file of files.current) if (file.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(file.previewUrl); }, []);
-  function updateFiles(next: PendingAttachment[]) { files.current = next; setAttachments(next); }
-  function remove(file: PendingAttachment) {
-    if (file.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(file.previewUrl);
-    updateFiles(files.current.filter(item => item !== file));
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      for (const files of fileDrafts.current.values()) for (const file of files) if (file.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(file.previewUrl);
+    };
+  }, []);
+  function updateFiles(conversationId: number, next: PendingAttachment[]) {
+    if (next.length) fileDrafts.current.set(conversationId, next);
+    else fileDrafts.current.delete(conversationId);
+    if (mounted.current) refreshFiles(value => value + 1);
   }
-  async function addFiles(list: FileList | File[]) {
-    if (processingRef.current) return;
-    processingRef.current = true; setProcessing(true);
+  function remove(conversationId: number, file: PendingAttachment) {
+    const files = fileDrafts.current.get(conversationId) ?? [];
+    if (!files.includes(file)) return;
+    if (file.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(file.previewUrl);
+    updateFiles(conversationId, files.filter(item => item !== file));
+  }
+  async function addFiles(list: FileList | File[], attachmentOwner = owner) {
+    // Capture the displayed destination before parsing. A late result belongs to this
+    // draft even if another conversation is selected while the file is being read.
+    if (attachmentOwner === null) { showToast("正在读取会话来源，请稍后再添加附件", "warning"); return; }
+    if (processingOwners.current.has(attachmentOwner)) return;
+    processingOwners.current.add(attachmentOwner); refreshFiles(value => value + 1);
     try {
       for (const file of Array.from(list)) {
-        if (files.current.length >= 5) { showToast("一次最多上传 5 个附件", "warning"); break; }
+        if ((fileDrafts.current.get(attachmentOwner)?.length ?? 0) >= 5) { showToast("一次最多上传 5 个附件", "warning"); break; }
         const result = await processAttachmentFile(file);
         if (!mounted.current) {
           if (!("error" in result) && result.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(result.previewUrl);
           return;
         }
         if ("error" in result) { showToast(result.error, "warning"); continue; }
-        if (files.current.reduce((sum, item) => sum + item.size, 0) + result.size > 10 * 1024 * 1024) {
+        const files = fileDrafts.current.get(attachmentOwner) ?? [];
+        if (files.reduce((sum, item) => sum + item.size, 0) + result.size > 10 * 1024 * 1024) {
           if (result.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(result.previewUrl);
           showToast("附件总大小不能超过 10MB", "warning"); continue;
         }
-        updateFiles([...files.current, result]);
+        updateFiles(attachmentOwner, [...files, result]);
       }
     } catch (error) { showToast(error instanceof Error ? error.message : "文件处理失败", "error"); }
-    finally { processingRef.current = false; if (mounted.current) setProcessing(false); }
+    finally { processingOwners.current.delete(attachmentOwner); if (mounted.current) refreshFiles(value => value + 1); }
   }
   const busy = !!view?.busy || !!Object.keys(view?.live ?? {}).length || !!view?.inbox;
+  const wechat = !conversationPending && view?.channel === "wechat";
   const suggestions = help && !draft.trim() ? slashCommands : commandSuggestions(draft);
   const menuVisible = !menuDismissed && suggestions.length > 0;
   const selectedIndex = Math.min(selected, suggestions.length - 1);
@@ -63,8 +87,8 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
   async function submit(commandText?: string) {
     const original = draftRef.current;
     const text = commandText ?? (menuVisible && original.trim() ? `/${suggestions[selectedIndex].name}` : original.trim());
-    const sentFiles = [...files.current];
-    if (sendingRef.current || processingRef.current || (!text && !sentFiles.length)) return;
+    const sentFiles = owner === null ? [] : [...(fileDrafts.current.get(owner) ?? [])];
+    if (sendingRef.current || (owner !== null && processingOwners.current.has(owner)) || (!text && !sentFiles.length)) return;
     const command = parseCommand(text);
     sendingRef.current = true; setSending(true);
     try {
@@ -75,33 +99,46 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
         if (sentFiles.length) throw new Error("请先发送或移除附件，再执行快捷指令");
         if (busy && !definition.duringReply) throw new Error("小 D 正在回复，请先用 /stop 停止，再新建对话");
         if (command.name === "new") {
-          await onNewConversation(); retry.current = null; setHelp(false);
+          await onNewConversation(); setHelp(false);
           showToast("已开启新对话，旧记录仍保留");
         } else if (command.name === "help") setHelp(true);
         else await stopReply();
       } else {
+        // Deep links and navigation must finish loading their source before any send.
+        if (sourcePending || owner === null) throw new Error("正在读取会话来源，请稍后再发送");
         const body = { text, mode: "steer" as const, attachments: sentFiles.map(({ name, mimeType, data }) => ({ name, mimeType, data })) };
         const payload = JSON.stringify(body);
-        if (retry.current?.payload !== payload) retry.current = { payload, requestId: generateUuid() };
-        await sendMessage(await connect(), { ...body, requestId: retry.current.requestId });
-        retry.current = null; onSent(); setHelp(false);
-        for (const file of sentFiles) remove(file);
+        let retry = retries.current.get(owner);
+        if (retry?.payload !== payload) { retry = { payload, requestId: generateUuid() }; retries.current.set(owner, retry); }
+        const conversationId = await connect();
+        if (context.current.conversationPending || owner !== conversationId
+          || !context.current.view || context.current.view.conversationId !== conversationId
+          || (context.current.view?.channel === "wechat" && !wechat)) {
+          throw new Error("会话来源已变化，请核对当前会话后重新发送");
+        }
+        await sendMessage(conversationId, { ...body, requestId: retry.requestId });
+        retries.current.delete(owner);
+        if (!context.current.conversationPending && context.current.view?.conversationId === owner) { onSent(); setHelp(false); }
+        for (const file of sentFiles) remove(owner, file);
       }
-      if (draftRef.current === original) setDraft("");
+      if (draftRef.current === original && (command || (!context.current.conversationPending && context.current.view?.conversationId === owner))) setDraft("");
     } catch (error) { showToast((command ? "指令未完成：" : "发送未确认：") + (error instanceof Error ? error.message : String(error)), "error"); }
     finally { sendingRef.current = false; if (mounted.current) setSending(false); }
   }
   return <div className="input-box-wrapper" data-dragging={dragging} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) dismissMenu(true); }} onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); void addFiles(event.dataTransfer.files); }}>
+    {wechat && <div className="wechat-conversation-notice" id="wechat-conversation-notice" role="note"><Icon name="message-circle" /><p><strong>微信里的 Dee</strong><span>这是你与 Dee 的微信会话，不是微信收件箱。在此发送消息后，Dee 的回复可能同步到此会话绑定的微信接收方。</span></p></div>}
+    {sourcePending && <p className="conversation-source-pending" role="status">正在读取会话来源…</p>}
+    {processing && <p role="status">正在处理本对话的附件…</p>}
     {menuVisible && <CommandMenu commands={suggestions} selected={selectedIndex} busy={busy} help={help && !draft.trim()} onSelect={command => { void submit(`/${command.name}`); textarea.current?.focus(); }} onClose={() => { dismissMenu(true); textarea.current?.focus(); }} />}
     {dragging && <p role="status">松开以添加图片、PDF、DOCX 或文本文件</p>}
     {!!attachments.length && <div className="attachments-preview">{attachments.map((file, i) => <div className="pending-chip" key={i}>
       {file.previewUrl && <img className="pending-thumb" src={file.previewUrl} alt={file.name} />}
       <div className="pending-meta"><span className="pending-name">{file.name}</span><span className="pending-size">{formatFileSize(file.size)}</span></div>
-      <button type="button" className="btn-remove-pending" aria-label={`移除 ${file.name}`} onClick={() => remove(file)}>×</button>
+      <button type="button" className="btn-remove-pending" aria-label={`移除 ${file.name}`} onClick={() => { if (owner !== null) remove(owner, file); }}>×</button>
     </div>)}</div>}
     <div className="composer-main">
-      <button type="button" className="icon-button attach-button" disabled={processing} aria-label="添加附件（图片或文件）" title="添加附件（图片或文件）" onClick={() => { fileInput.current!.value = ""; fileInput.current!.click(); }}><Icon name="paperclip" /></button>
-      <textarea ref={textarea} className="chat-textarea" id="chat-textarea" aria-label="给小 D 发消息" role="combobox" aria-autocomplete="list" aria-expanded={menuVisible} aria-controls={menuVisible ? "composer-commands" : undefined} aria-activedescendant={menuVisible ? `command-${suggestions[selectedIndex].name}` : undefined} placeholder="随心输入，告诉我你的想法或需要…" rows={1} value={draft} onChange={event => setDraft(event.target.value)}
+      <button type="button" className="icon-button attach-button" disabled={processing || sourcePending} aria-label="添加附件（图片或文件）" title="添加附件（图片或文件）" onClick={() => { pickerOwner.current = owner ?? undefined; fileInput.current!.value = ""; fileInput.current!.click(); }}><Icon name="paperclip" /></button>
+      <textarea ref={textarea} className="chat-textarea" id="chat-textarea" aria-label={wechat ? "给微信里的 Dee 发消息" : "给小 D 发消息"} aria-describedby={wechat ? "wechat-conversation-notice" : undefined} role="combobox" aria-autocomplete="list" aria-expanded={menuVisible} aria-controls={menuVisible ? "composer-commands" : undefined} aria-activedescendant={menuVisible ? `command-${suggestions[selectedIndex].name}` : undefined} placeholder={wechat ? "继续与微信里的 Dee 对话…" : "随心输入，告诉我你的想法或需要…"} rows={1} value={draft} onChange={event => setDraft(event.target.value)}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
       onKeyDown={event => {
         if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -115,10 +152,10 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
       }}
       onPaste={event => { if (event.clipboardData.files.length) { event.preventDefault(); void addFiles(event.clipboardData.files); } }} />
       <div className="composer-actions">{busy && <button type="button" className="btn-abort" id="btn-abort" style={{ display: "inline-flex" }} onClick={() => { void stopReply().catch(() => showToast("暂时没能停止回复，请重试。", "error")); }}>停止</button>}
-        <button type="button" className="btn-send" id="btn-send" aria-label={sending ? "正在发送" : "发送消息"} aria-busy={sending} disabled={sending || processing || (!draft.trim() && !attachments.length)} onClick={() => void submit()}><Icon name="send" /></button>
+        <button type="button" className="btn-send" id="btn-send" aria-label={sending ? "正在发送" : wechat ? "发送给微信里的 Dee，回复可能同步到微信" : "发送消息"} aria-describedby={wechat ? "wechat-conversation-notice" : undefined} aria-busy={sending} disabled={sending || processing || sourcePending || (!draft.trim() && !attachments.length)} onClick={() => void submit()}><Icon name="send" /></button>
       </div>
     </div>
-    <input ref={fileInput} type="file" multiple className="file-input-hidden" accept="image/png,image/jpeg,image/webp,image/gif,text/*,.md,.json,.ts,.tsx,.py,.yaml,.yml,.csv,.log,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.docx" onChange={event => { if (event.target.files) void addFiles(event.target.files); }} />
+    <input ref={fileInput} type="file" multiple className="file-input-hidden" accept="image/png,image/jpeg,image/webp,image/gif,text/*,.md,.json,.ts,.tsx,.py,.yaml,.yml,.csv,.log,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.docx" onChange={event => { const selectedOwner = pickerOwner.current ?? owner; pickerOwner.current = undefined; if (event.target.files) void addFiles(event.target.files, selectedOwner); }} />
     {!!view?.inbox && <span className="inbox-badge" role="status">收到，马上接着说</span>}
   </div>;
 }

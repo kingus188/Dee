@@ -18,17 +18,20 @@ export function createTeamsReader({ getToken, getFilesToken = getToken, getChann
 }): TeamsReadPort {
 	const graph = createTeamsGraph(fetchImpl, signal);
 	const media = archive ? createTeamsMedia({ archive, graph, getToken, fetchImpl, signal }) : undefined;
-	let bound = false;
+	let bound = false, currentUserId: string | undefined;
 	async function bind(token: string) {
 		if (!archive || bound) return;
 		const me = await graph<{ id: string }>(token, graphPageUrl("/me?$select=id"));
 		if (!me.id) throw new Error("Teams 登录身份无效");
-		archive.bindAccount(me.id); bound = true;
+		archive.bindAccount(me.id); currentUserId = me.id; bound = true;
 	}
-	async function save(chatId: string, messages: ArchivedMessage[], token: string, revision?: number) {
+	async function save(chatId: string, messages: ArchivedMessage[], token: string, revision?: number, downloadMedia = true) {
 		if (!archive || !media) return undefined;
 		await bind(token);
 		archive.save(chatId, messages, revision);
+		// Browser pages must not wait for every screenshot discovery/download. The
+		// background archive sync keeps filling media through the existing throttle.
+		if (!downloadMedia) return messages.flatMap(m => archive.mediaRows(chatId, m.id));
 		const accepted = messages.flatMap(message => { const current = archive.message(chatId, message.id); return current ? [current] : []; });
 		await media.discover(chatId, accepted, token);
 		await media.download();
@@ -63,7 +66,7 @@ export function createTeamsReader({ getToken, getFilesToken = getToken, getChann
 				const token = await getToken(); await bind(token);
 				const result = await page("/me/chats?$expand=members&$top=50", query.cursor, token);
 				archive?.chats(result.data.items as ArchivedChat[]);
-				return result;
+				return { ...result, data: { ...result.data, currentUserId } };
 			}
 			case "channels": {
 				const path = query.teamId ? `/teams/${segment(query.teamId)}/allChannels` : "/me/teamwork/associatedTeams";
@@ -81,14 +84,14 @@ export function createTeamsReader({ getToken, getFilesToken = getToken, getChann
 				if (query.messageId && !query.replies) {
 					if (query.cursor) throw new Error("读取指定消息不接受分页");
 					let data = await graph<ArchivedMessage>(token, graphPageUrl(path));
-          const savedMedia = chat ? await save(query.chatId!, [data], token, revision) : undefined;
+          const savedMedia = chat ? await save(query.chatId!, [data], token, revision, query.downloadMedia) : undefined;
           if (chat && archive) data = currentMessage(query.chatId!, data);
           return { data, media: savedMedia, records: chat && archive ? teamsRecords(archive, [{ ...data, chatId: query.chatId! }]) : undefined };
 				}
 				const result = await page(path + (chat ? `?$top=50&$orderby=${query.archiveSync ? "lastModifiedDateTime" : "createdDateTime"} desc` : "?$top=50"), query.cursor, token);
-        const savedMedia = chat ? await save(query.chatId!, result.data.items as ArchivedMessage[], token, revision) : undefined;
+        const savedMedia = chat ? await save(query.chatId!, result.data.items as ArchivedMessage[], token, revision, query.downloadMedia) : undefined;
         if (chat && archive) result.data.items = (result.data.items as ArchivedMessage[]).map(message => currentMessage(query.chatId!, message));
-        return { ...result, media: savedMedia, records: chat && archive ? teamsRecords(archive, (result.data.items as ArchivedMessage[]).map(m => ({ ...m, chatId: query.chatId! }))) : undefined };
+        return { ...result, data: { ...result.data, currentUserId }, media: savedMedia, records: chat && archive ? teamsRecords(archive, (result.data.items as ArchivedMessage[]).map(m => ({ ...m, chatId: query.chatId! }))) : undefined };
 			}
 			case "files": {
 				const text = query.query.trim(), offset = query.offset ?? 0;

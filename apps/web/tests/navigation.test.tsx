@@ -84,3 +84,17 @@ test("具体待办固定链接保留不透明编号，编码异常和非待办�
   assert.equal(readWorkspaceRoute("#activity/task-id").taskId, undefined);
   assert.equal(workspaceHash({ ...route, page: "home" }), "#today");
 });
+
+test("Teams 固定链接使用独立的不透明编号，异常链接仅返回会话列表", () => {
+  const chatId = "19:group/产品 #讨论@thread.v2";
+  const route = { page: "teams", group: null, chatId } as const;
+  assert.equal(workspaceHash(route), "#teams/19%3Agroup%2F%E4%BA%A7%E5%93%81%20%23%E8%AE%A8%E8%AE%BA%40thread.v2");
+  assert.deepEqual(readWorkspaceRoute(workspaceHash(route)), route);
+  assert.deepEqual(readWorkspaceRoute("#teams"), { page: "teams", group: null });
+  for (const hash of ["#teams/%E0%A4%A", "#teams/%00", "#teams/one/extra", "#teams/%20", `#teams/${"a".repeat(2049)}`]) {
+    assert.deepEqual(readWorkspaceRoute(hash), { page: "teams", group: null });
+  }
+  assert.equal(readWorkspaceRoute("#teams/12").conversationId, undefined, "Teams 编号不能订阅助手会话");
+  assert.equal(workspaceHash({ ...route, page: "chat" }), "#chat");
+  assert.equal(workspaceHash({ ...route, page: "teams", conversationId: 12 }), workspaceHash(route));
+});

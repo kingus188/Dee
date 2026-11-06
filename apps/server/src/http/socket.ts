@@ -42,7 +42,7 @@ export function attachWebSocket(server: Server, context: AppContext, api: Return
         const text = data.toString();
         const input = JSON.parse(text);
         if (binary || !input || input.type !== "request" || typeof input.id !== "string" || !input.id || input.id.length > 100 ||
-          !["GET", "POST"].includes(input.method) || typeof input.path !== "string" || !input.path.startsWith("/api/") || input.path.length > 4000 ||
+          !["GET", "POST"].includes(input.method) || typeof input.path !== "string" || !input.path.startsWith("/api/") || input.path.length > (input.method === "GET" && /^\/api\/teams\/conversations(?:\/messages)?\?/.test(input.path) ? 64_000 : 4000) ||
           (input.body !== undefined && (!input.body || typeof input.body !== "object" || Array.isArray(input.body)))) throw new HttpError(400, "请求格式不合法");
         request = input;
         if (pending.has(input.id)) throw new HttpError(409, "请求正在处理");

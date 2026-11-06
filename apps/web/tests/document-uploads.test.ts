@@ -105,7 +105,7 @@ test("the real Composer picker and drag hint advertise PDF and DOCX alongside ex
   for (const [key, value] of Object.entries(values)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   const root = createRoot(dom.window.document.getElementById("root")!);
   try {
-    await act(async () => { root.render(createElement(Composer, { draft: "", setDraft() {}, view: null, connect: async () => 1, onSent() {}, onNewConversation: async () => {} })); });
+    await act(async () => { root.render(createElement(Composer, { draft: "", setDraft() {}, view: { conversationId: 1, channel: "web", entries: [], live: {}, busy: false, inbox: 0, notes: { todos: [], memos: [] }, usage: null, tasks: [], reminders: [], subagents: [], parentId: null }, connect: async () => 1, onSent() {}, onNewConversation: async () => {} })); });
     const accept = dom.window.document.querySelector<HTMLInputElement>('input[type="file"]')!.accept.split(",");
     for (const value of [".pdf", ".docx", PDF, DOCX, "image/png", "image/jpeg", "image/webp", "image/gif", "text/*", ".md"]) assert.ok(accept.includes(value), `file picker missing ${value}`);
     await act(async () => { dom.window.document.querySelector(".input-box-wrapper")!.dispatchEvent(new dom.window.Event("dragover", { bubbles: true, cancelable: true })); });
