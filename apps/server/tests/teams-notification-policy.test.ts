@@ -142,3 +142,16 @@ test("deleted or edited source text is excluded from later notification history 
   });
   assert.equal(calls, 1);
 });
+
+test("frozen prompts bind older chat context and cancel before model injection after its withdrawal", async t => {
+  const f = await fixture(t);
+  f.store.record({ ...item("chat:context", "urgent"), chatId: "chat", createdAt: new Date(start - 180_000).toISOString(), important: false, text: "SYNTHETIC_WITHDRAWN_CONTEXT" });
+  f.store.record({ ...item("chat:latest", "urgent"), chatId: "chat" });
+  const batch = f.store.notifications.create(true, () => ({ prompt: "SYNTHETIC_WITHDRAWN_CONTEXT", text: "private context" }))!;
+  assert.equal(batch.sourceRevisions[0].revision, 0);
+  f.store.revokeMessage("chat", "chat:context"); f.restart();
+  assert.deepEqual(f.store.notifications.ready(), []);
+  assert.equal(f.store.notifications.claim(batch.id), false);
+  await f.run(async () => { assert.fail("withdrawn context must never be resubmitted to the model"); });
+  assert.equal((await reviewTeamsNotification(f.store, f.sender, { kind: "teams", messageIds: batch.messageIds, sourceRevisions: batch.sourceRevisions })).status, "cancel");
+});

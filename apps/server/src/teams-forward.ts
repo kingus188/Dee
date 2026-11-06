@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, readFileSync, renameSync, statSync } from "
 import { join } from "node:path";
 
 import { TeamsSendRejectedError } from "@assistant/features";
+import type { NotificationSource } from "@assistant/channel-wechat";
 import type { TeamsStore } from "./teams-store.js";
 import type { ImportantRules } from "./teams-rules.js";
 import { sendTeamsMessage } from "./teams-send.js";
@@ -14,9 +15,9 @@ const POLL_MS = 45_000;
 export type TeamsForwardOptions = {
   dir: string; store: TeamsStore; getToken: () => Promise<string>; rules?: ImportantRules; sendURL: string; sendToken: string; signal?: AbortSignal;
   // 提供后，命中的消息还会作为入站消息交给微信会话里的 agent，生成摘要和建议回复。
-  inject?: (wxid: string, prompt: string, messageId: string) => Promise<void>;
+  inject?: (wxid: string, prompt: string, messageId: string, sourceRevisions?: NotificationSource["sourceRevisions"]) => Promise<void>;
   // Batch-aware hosts preserve every source ID through durable injection and review.
-  injectBatch?: (wxid: string, prompt: string, messageIds: string[]) => Promise<void>;
+  injectBatch?: (wxid: string, prompt: string, messageIds: string[], sourceRevisions?: NotificationSource["sourceRevisions"]) => Promise<void>;
   sync?: ReturnType<typeof createTeamsSync>;
   // 待发消息发不出去（如微信令牌过期）时，每次故障只提醒一次。
   onStuck?: (pending: number, reason: string, preview: string) => void;
@@ -164,7 +165,7 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
       if (!batch) return;
       if (!store.notifications.claim(batch.id)) continue;
       try {
-        const review = await reviewTeamsNotification(store, { refresh: collector.refresh }, { kind: "teams", messageIds: batch.messageIds });
+        const review = await reviewTeamsNotification(store, { refresh: collector.refresh }, { kind: "teams", messageIds: batch.messageIds, sourceRevisions: batch.sourceRevisions });
         if (stopped) return;
         if (review.status === "cancel") { store.notifications.finish(batch.id, true); continue; }
         if (review.status === "defer") { store.notifications.defer(batch.id, Math.min(review.until, Date.now() + 60_000)); continue; }
@@ -172,8 +173,8 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
         // Rebuild model input too, not just final delivery. Keep original IDs so
         // an uncertain earlier submission still deduplicates across retries.
         const prompt = review.text === undefined ? batch.prompt : reviewedPrompt(review.text);
-        if (injectBatch) await injectBatch(wxid(), prompt, batch.messageIds);
-        else if (inject) await inject(wxid(), prompt, batch.messageIds[0]);
+        if (injectBatch) await injectBatch(wxid(), prompt, batch.messageIds, batch.sourceRevisions);
+        else if (inject) await inject(wxid(), prompt, batch.messageIds[0], batch.sourceRevisions);
         else await send(review.text ?? batch.text, batch.id);
         if (stopped) return;
         store.notifications.finish(batch.id);

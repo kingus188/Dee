@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TeamsStore } from "./teams-store.js";
+import { messageText } from "./teams-message-text.js";
 import { isImportant, type ImportantRules } from "./teams-rules.js";
 
 export const GRAPH = "https://graph.microsoft.com/v1.0";
@@ -19,13 +20,7 @@ class UnsafePaging extends Error {}
 const OVERLAP_MS = 5 * 60_000;
 const RECOVERY_MS = 24 * 60 * 60_000;
 
-export function messageText(message: GraphMessage) {
-  const body = message.body?.content ?? "";
-  const text = (message.body?.contentType === "html" ? body.replace(/<[^>]*>/g, " ") : body)
-    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/\s+/g, " ").trim().slice(0, 2000);
-  return [text, /<img\b/i.test(body) ? "[截图]" : "", ...(message.attachments ?? []).map(file => `[附件：${file.name || "未命名附件"}]`)].filter(Boolean).join(" ");
-}
+export { messageText } from "./teams-message-text.js";
 
 // 查询、提醒投递和定时轮询共用同一个采集器；并发刷新合并，不在刷新中产生通知。
 export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch, signal }: {
@@ -93,13 +88,11 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
       const sender = message.from?.user;
       const time = Date.parse(message.createdDateTime);
       if (message.deletedDateTime) {
-        store.notifications.cancelSource(`${chat.id}:${message.id}`);
+        store.revokeMessage(chat.id, `${chat.id}:${message.id}`);
       } else if (message.messageType === "message" && sender?.id) {
         const text = messageText(message), mine = sender.id === meId;
-        const id = `${chat.id}:${message.id}`, previous = store.message?.(id);
-        // The local chat archive is append-only. If a remote source was edited,
-        // conservatively cancel its delayed notice rather than leak stale text.
-        if (!mine && previous && previous.text !== text) store.notifications.cancelSource(id);
+        const id = `${chat.id}:${message.id}`;
+        // record atomically fences derived content and replaces edited text.
         store.record({ id, chatId: chat.id, chatType: chat.chatType, chatTopic: chat.topic ?? undefined,
           senderId: sender.id, senderName: sender.displayName ?? "未知", direction: mine ? "out" : "in", text,
           notificationPriority: message.importance === "normal" ? "normal" : message.importance === "high" || message.importance === "urgent" ? "urgent" : undefined,

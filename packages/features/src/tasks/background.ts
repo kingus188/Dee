@@ -70,7 +70,7 @@ export function createBackground(notifyEvent: NotifyEvent, getExtension: () => E
         const parent = await runtime.conversation(runtime.conversationId, context);
         await parent!.submit({ type: "input", content: "[后台任务结果] " + task.input.text + "\n" + checkpoint.summary, requestId: "background-report:" + task.input.jobId, whenBusy: "followUp",
           entry: { kind: "app.background-report", data: { jobId: task.input.jobId } } }, context);
-        await notifyEvent({ id: "background:" + task.input.jobId, type: "background", text: (checkpoint.failed ? "后台任务失败：" : "后台任务完成：") + task.input.text + "\n" + checkpoint.summary, failed: checkpoint.failed });
+        await notifyEvent({ sources: [{ source: `conv:${runtime.conversationId}` }], id: "background:" + task.input.jobId, type: "background", text: (checkpoint.failed ? "后台任务失败：" : "后台任务完成：") + task.input.text + "\n" + checkpoint.summary, failed: checkpoint.failed });
         await runtime.commit(async tx => {
           const item = (await tx.doc(BackgroundJobs, runtime.conversationId)).items.find(it => it.id === task.input.jobId);
           if (item && item.status !== "cancelled") { item.status = checkpoint.failed ? "failed" : "done"; item.result = checkpoint.summary; item.finishedAt = Date.now(); }

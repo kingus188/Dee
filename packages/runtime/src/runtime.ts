@@ -7,7 +7,7 @@ import { AgentDoc, configure, Harness, createRegistry } from "@earendil-works/pi
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { Meta } from "./documents.js";
 
-export type RuntimeOptions = { dataDir: string; models: Models; agentModel: ModelRef; extensions: readonly Extension[]; onReport: (error: unknown) => void; resume?: boolean };
+export type RuntimeOptions = { dataDir: string; models: Models; agentModel: ModelRef; extensions: readonly Extension[]; onReport: (error: unknown) => void; resume?: boolean; beforeResume?: (runtime: Runtime) => Promise<void> };
 export async function openRuntime(options: RuntimeOptions, context: Context): Promise<Runtime> {
   await mkdir(options.dataDir, { recursive: true });
   const registry = createRegistry();
@@ -38,6 +38,7 @@ export async function openRuntime(options: RuntimeOptions, context: Context): Pr
         cursor = page.next;
       } while (cursor !== undefined);
     }
+    await options.beforeResume?.({ harness, root, agentModel: options.agentModel });
     if (options.resume !== false) harness.resume();
     return { harness, root, agentModel: options.agentModel };
   } catch (error) {

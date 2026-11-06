@@ -14,6 +14,7 @@ import { createMailService } from "../dist/mail-service.js";
 import { createApi } from "../dist/application/api.js";
 import { readConfig } from "../dist/config.js";
 import { openMailStore } from "../dist/mail-store.js";
+import { openEpisodeStore } from "../dist/episode-store.js";
 
 async function fixture(t: test.TestContext) {
   const dir = await mkdtemp(join(tmpdir(), "pi-workspace-"));
@@ -21,10 +22,11 @@ async function fixture(t: test.TestContext) {
   const tasks = createTaskCenter(async () => {});
   const runtime = await openRuntime({ dataDir: dir, models: createModels(), agentModel: { provider: "workspace-local", modelId: "missing" }, extensions: [tasks.extension], onReport: () => {} }, ctx);
   const mail = createMailService(dir, true, async () => { assert.fail("workspace must not access the network"); });
-  // These routes use only Runtime/tasks/mail/config. Other application services are deliberately absent.
-  const app = { ...runtime, config, ctx, tasks, mail, modelConfigured: true, redact: String };
+  // Include the local source ledger used by conversation removal; other unrelated services are absent.
+  const episodeStore = openEpisodeStore(dir);
+  const app = { ...runtime, config, ctx, tasks, mail, episodeStore, modelConfigured: true, redact: String };
   t.after(async () => {
-    await app.harness.close(ctx); await mail.close();
+    await app.harness.close(ctx); await mail.close(); episodeStore.close();
     await rm(dir, { recursive: true, force: true });
   });
   const api = createApi(app as unknown as AppContext);
@@ -160,4 +162,23 @@ test("首页邮件只读真实缓存最近六封，保留错误且严格白名�
   assert.doesNotMatch(JSON.stringify(result), /not-for-home|完整正文/);
   t.mock.method(app.mail, "list", () => { throw new Error("cache unavailable"); });
   await assert.rejects(call("/api/workspace/mail"), /cache unavailable/);
+});
+
+test("归档保留历史摘要，删除先撤回来源且恢复列表不会复活已撤回内容", async t => {
+  const { app, api } = await fixture(t);
+  const created = await api.dispatch("POST", new URL("/api/conversations/direct", "http://localhost"));
+  const { id } = created.data as { id: ConversationId };
+  const source = `conv:${id}`;
+  app.episodeStore.add({ source, label: "conversation", channel: "web", periodStart: new Date().toISOString(), periodEnd: new Date().toISOString(), summary: "归档测试事实", openItems: ["待跟进"] });
+  await api.dispatch("POST", new URL(`/api/conversations/${id}/archive`, "http://localhost"));
+  assert.equal(app.episodeStore.search(["事实"], 5).length, 1);
+  assert.equal(app.episodeStore.sourceAllowed(source), true);
+  await api.dispatch("POST", new URL(`/api/conversations/${id}/restore`, "http://localhost"));
+  await api.dispatch("POST", new URL(`/api/conversations/${id}/remove`, "http://localhost"));
+  assert.equal(app.episodeStore.sourceAllowed(source), false);
+  assert.deepEqual(app.episodeStore.search(["事实"], 5), []);
+  assert.deepEqual(app.episodeStore.openItems(30, 10), []);
+  // An accidental/replayed index insertion cannot clear a privacy tombstone.
+  await app.root.commit(async tx => { (await tx.doc(Index)).items.push({ id, title: "Restored index", createdAt: new Date().toISOString() }); }, app.ctx);
+  assert.equal(app.episodeStore.sourceAllowed(source), false);
 });

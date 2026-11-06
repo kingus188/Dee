@@ -77,7 +77,7 @@ export function createSchedules(notifyEvent: NotifyEvent, onSettled: (run: Execu
          }, context);
          if (completed) await deliverExecution(completed, onSettled, runtime.signal, work => runtime.commit(async tx => { await work(tx); return undefined; }, context));
         const failed = settled.type !== "input" || settled.status !== "done";
-        await notifyEvent({ id: runId(task.input) + ":result", type: "schedule", text: (failed ? "计划任务失败：" : "计划任务完成：") + task.input.text, failed });
+        await notifyEvent({ sources: [{ source: `conv:${runtime.conversationId}` }], id: runId(task.input) + ":result", type: "schedule", text: (failed ? "计划任务失败：" : "计划任务完成：") + task.input.text, failed });
         await runtime.commit(() => finish(), context);
       },
     },

@@ -31,7 +31,7 @@ test("通知按服务端筛选读取，不将最近100条当作历史总量，�
   assert.match(document.querySelector(".notification-error-preview")!.textContent!, /HTTP 503/);
   assert.match(document.querySelector(".notification-channel")!.textContent!, /Webhook 通知.*错误、紧急与审批事件.*已启用/);
   assert.match(document.querySelector(".notification-policy")!.textContent!, /数量不代表全部历史/);
-  assert.deepEqual([...document.querySelectorAll(".notification-filters button")].map(button => button.textContent), ["全部", "待发送", "已送达", "失败"]);
+  assert.deepEqual([...document.querySelectorAll(".notification-filters button")].map(button => button.textContent), ["全部", "待发送", "已送达", "失败", "已撤销"]);
   await act(async () => { filterButton(document, "全部").click(); });
   assert.deepEqual(paths, ["/api/notifications?status=failed", "/api/notifications"]);
   assert.equal(document.querySelectorAll(".notification-record").length, 3);
@@ -146,4 +146,29 @@ test("邮件轻提示只展示元数据，15秒领取且仅写投递状态，不
   assert.ok(document.querySelector('[aria-label="关闭新邮件提醒"]'));
   await act(async () => { t.mock.timers.tick(5000); });
   assert.equal(document.querySelector(".mail-notice"), null);
+});
+
+test("待发通知解释普通预算和审批分级，来源已撤销不能人工重试", async t => {
+  t.mock.method(apiClient, "request", async () => ({ ...overview, items: [
+    { ...record, id: "normal", status: "pending", attempts: 0, lastError: null, delivery: { priority: "normal", category: "normal", reason: "hourly_budget" } },
+    { ...record, id: "approval", status: "pending", attempts: 0, lastError: null, delivery: { priority: "approval", category: "normal", reason: "ready" } },
+    { ...record, id: "cancelled", status: "cancelled", lastError: "Source revoked or changed" },
+  ] }));
+  const { dom } = await mount(t, <NotificationSettings />), document = dom.window.document;
+  assert.match(document.querySelector(".notification-results")!.textContent!, /普通通知.*预算已用完/);
+  assert.match(document.querySelector(".notification-results")!.textContent!, /审批.*已满足当前投递策略/);
+  assert.match(document.querySelector('[data-status="cancelled"]')!.textContent!, /来源不可用，停止后续投递/);
+  assert.match(document.querySelector('[data-status="cancelled"]')!.textContent!, /之前的投递可能已送达/);
+  assert.equal(document.querySelector(".notification-retry"), null);
+});
+
+test("撤回发生在在途投递之后，成功回执显示已送达而不声称外部消息被撤回", async t => {
+  t.mock.method(apiClient, "request", async () => ({ ...overview, items: [
+    { ...record, status: "sent", attempts: 1, lastError: "Source revoked or changed; delivery succeeded after cancellation" },
+  ] }));
+  const { dom } = await mount(t, <NotificationSettings />), document = dom.window.document;
+  assert.match(document.querySelector('[data-status="sent"]')!.textContent!, /通知已送达/);
+  assert.match(document.querySelector('[data-status="sent"]')!.textContent!, /本次已确认送达，无法收回外部消息/);
+  assert.equal(document.querySelector('[data-status="cancelled"]'), null);
+  assert.equal(document.querySelector(".notification-retry"), null);
 });

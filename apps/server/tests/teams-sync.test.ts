@@ -212,7 +212,8 @@ test("提醒送前刷新继续回扫五分钟窗口以前的有效来源，保�
     assert.equal((await sync.refresh()).ok, true);
     assert.equal(store.message("chat:source")?.repliedAt, replyAt);
     assert.equal(store.message("chat:urgent")?.notificationPriority, "urgent");
-    assert.ok(store.message("chat:removed")?.notificationCancelledAt);
+    assert.equal(store.message("chat:removed"), undefined, "撤回的正文不再通过缓存读取");
+    assert.equal(store.sourceAllowed("teams:chat", undefined, ["chat:removed"]), false);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 

@@ -7,12 +7,17 @@ import { notificationDeliveryAt } from "./notification-policy.js";
 // 投递前和每次重试都验证原始消息。校验失败则留在队列，不能把缓存当成最新状态发送。
 export async function reviewTeamsNotification(store: TeamsStore, sender: TeamsSender, source: NotificationSource): Promise<NotificationReview> {
   if (!source.messageIds.length) throw new Error("Teams 提醒缺少来源");
+  const current = () => source.sourceRevisions?.length
+    ? source.sourceRevisions.every(ref => store.sourceAllowed(ref.source, ref.revision))
+    : source.messageIds.every(id => { const message = store.message(id); return !message || store.sourceRevision(`teams:${message.chatId}`) === 0; });
+  if (!current()) return { status: "cancel", reason: "提醒引用的聊天上下文已撤回或改变" };
   const unresolved = () => source.messageIds.map(id => store.message(id))
     .filter(row => row && row.direction === "in" && !row.repliedAt && !row.notificationCancelledAt && Date.now() - Date.parse(row.createdAt) < 86400_000);
   // 已落库的回复与过期事实不依赖网络；服务未接好采集器也可以撤销。
   if (!unresolved().length) return { status: "cancel", reason: "来源消息已回复、删除、超过 24 小时提醒窗口或已移出保留范围" };
   const refreshed = await sender.refresh?.();
   if (!refreshed?.ok) throw new Error("Teams 同步不可用，暂缓自动提醒");
+  if (!current()) return { status: "cancel", reason: "刷新后提醒引用的聊天上下文已撤回或改变" };
   const active = unresolved();
   if (!active.length) return { status: "cancel", reason: "刷新后来源消息均已回复或过期" };
   // A successful overall sync can skip forbidden or removed chats. Only the

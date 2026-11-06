@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { NotificationOverview, NotificationPreferences, NotificationQuietHours, NotificationStatus, WebhookDigestPreferences } from "@assistant/contracts";
+import type { NotificationDeliveryReason, NotificationOverview, NotificationPreferences, NotificationQuietHours, NotificationStatus, WebhookAttentionPreferences, WebhookDigestPreferences } from "@assistant/contracts";
 import { request } from "../api/request.js";
 import { Icon } from "../ui/Icon.js";
 
@@ -7,18 +7,26 @@ type Filter = NotificationStatus | "all";
 const filters: { value: Filter; label: string }[] = [
   { value: "all", label: "全部" }, { value: "pending", label: "待发送" },
   { value: "sent", label: "已送达" }, { value: "failed", label: "失败" },
+  { value: "cancelled", label: "已撤销" },
 ];
-const statusLabels: Record<NotificationStatus, string> = { pending: "待发送", sent: "已送达", failed: "失败" };
+const statusLabels: Record<NotificationStatus, string> = { pending: "待发送", sent: "已送达", failed: "失败", cancelled: "已撤销" };
 const statusContent: Record<NotificationStatus, { title: string; icon: string }> = {
   pending: { title: "等待投递", icon: "clock-3" },
   sent: { title: "通知已送达", icon: "check" },
   failed: { title: "投递失败", icon: "circle-alert" },
+  cancelled: { title: "来源不可用，停止后续投递", icon: "circle-x" },
 };
+const deliveryReasons: Record<NotificationDeliveryReason, string> = {
+  ready: "已满足当前投递策略", quiet_hours: "等待免打扰结束", cooldown: "等待普通通知冷却结束",
+  hourly_budget: "过去一小时普通通知预算已用完，稍后继续", retry_backoff: "等待网络重试或投递租约", digest_window: "等待摘要窗口结束",
+};
+const defaultAttention: WebhookAttentionPreferences = { enabled: false, maxPerHour: 6, cooldownSeconds: 300 };
 const formatTime = (value: number) => new Date(value).toLocaleString("zh-CN");
 
 function QuietHoursSettings() {
   const [draft, setDraft] = useState<NotificationQuietHours | null>(null);
   const [digest, setDigest] = useState<WebhookDigestPreferences>({ enabled: false, windowSeconds: 60 });
+  const [attention, setAttention] = useState<WebhookAttentionPreferences>({ ...defaultAttention });
   const [pending, setPending] = useState(false), [error, setError] = useState(""), [feedback, setFeedback] = useState("");
   const busy = useRef(false), live = useRef(true);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
@@ -28,7 +36,7 @@ function QuietHoursSettings() {
     try {
       const data = await request<NotificationPreferences>("/api/notifications/preferences");
       if (!data?.quietHours || typeof data.quietHours.enabled !== "boolean" || ![data.quietHours.start, data.quietHours.end, data.quietHours.timeZone].every(value => typeof value === "string")) throw new Error("偏好响应无效");
-      if (live.current) { setDraft(data.quietHours); setDigest(data.webhookDigest ?? { enabled: false, windowSeconds: 60 }); }
+      if (live.current) { setDraft(data.quietHours); setDigest(data.webhookDigest ?? { enabled: false, windowSeconds: 60 }); setAttention(data.webhookAttention ?? { ...defaultAttention }); }
     } catch { if (live.current) setError("免打扰设置读取失败，请重新读取后再保存。"); }
     finally { busy.current = false; if (live.current) setPending(false); }
   }
@@ -36,15 +44,15 @@ function QuietHoursSettings() {
     if (busy.current || !draft) return;
     busy.current = true; setPending(true); setError(""); setFeedback("");
     try {
-      const data = await request<NotificationPreferences>("/api/notifications/preferences", { quietHours: draft, webhookDigest: digest });
+      const data = await request<NotificationPreferences>("/api/notifications/preferences", { quietHours: draft, webhookDigest: digest, webhookAttention: attention });
       if (!data?.quietHours || typeof data.quietHours.enabled !== "boolean") throw new Error("偏好响应无效");
-      if (live.current) { setDraft(data.quietHours); setDigest(data.webhookDigest ?? digest); setFeedback("已保存，新的通知偏好已生效。"); }
-    } catch { if (live.current) setError("免打扰设置保存失败，请核对时间与 IANA 时区后重试，当前草稿仍保留。"); }
+      if (live.current) { setDraft(data.quietHours); setDigest(data.webhookDigest ?? digest); setAttention(data.webhookAttention ?? attention); setFeedback("已保存，新的通知偏好已生效。"); }
+    } catch { if (live.current) setError("通知偏好保存失败，请核对时间、IANA 时区与通知预算后重试，当前草稿仍保留。"); }
     finally { busy.current = false; if (live.current) setPending(false); }
   }
   function change(patch: Partial<NotificationQuietHours>) { setDraft(previous => previous ? { ...previous, ...patch } : previous); setFeedback(""); }
   return <details className="notification-policy" data-notification-preferences onToggle={event => { if (event.currentTarget.open && !draft) void load(); }}>
-    <summary><Icon name="moon" />免打扰与 Webhook 摘要<Icon name="chevron-right" /></summary>
+    <summary><Icon name="moon" />免打扰与 Webhook 节奏<Icon name="chevron-right" /></summary>
     <p className="settings-field-hint">免打扰期间，通知中心继续保留全部内容；普通 Webhook 延后投递，失败、明确紧急和审批事件不受此限制。Outlook 普通新邮件按 1 分钟窗口合并，并在免打扰结束后提示一次摘要；重要邮件可立即触发一次合并摘要；缺少重要性字段的旧邮件也保守即时提示。已同步为已读或移出的邮件不再补发。Teams 普通自动提醒也按 1 分钟窗口合并并遵守此时段；已回复、删除或过期来源会撤销。升级后的 Web 与桌面共用邮件展示租约，正常情况下只提示一端；展示确认丢失后恢复可能重复。起止时刻按所填时区计算，开始包含、结束排除，支持跨午夜。</p>
     {!draft ? <><p role={error ? "alert" : "status"}>{error || "正在读取免打扰设置…"}</p>{error && <button className="header-button" type="button" disabled={pending} onClick={() => void load()}>重新读取</button>}</> : <form aria-label="免打扰设置" aria-busy={pending} onSubmit={event => { event.preventDefault(); void save(); }}>
       <fieldset disabled={pending}>
@@ -56,10 +64,14 @@ function QuietHoursSettings() {
         <label htmlFor="digest-enabled"><input id="digest-enabled" type="checkbox" checked={digest.enabled} onChange={event => { setDigest(previous => ({ ...previous, enabled: event.target.checked })); setFeedback(""); }} /> 合并普通 Webhook 通知（默认关闭）</label>
         <label htmlFor="digest-window">摘要窗口（秒）</label><input id="digest-window" type="number" min={10} max={3600} step={1} required value={digest.windowSeconds} onChange={event => { setDigest(previous => ({ ...previous, windowSeconds: Number(event.target.value) })); setFeedback(""); }} />
         <p className="settings-field-hint">仅在接收端支持摘要协议后启用。普通事件按固定时间窗口合并；失败、明确紧急和审批单独优先投递。已创建的摘要在关闭设置后仍按原 ID 和正文重试，不拆分重发。入队不代表送达。</p>
+        <label htmlFor="attention-enabled"><input id="attention-enabled" type="checkbox" checked={attention.enabled} onChange={event => { setAttention(previous => ({ ...previous, enabled: event.target.checked })); setFeedback(""); }} /> 减少普通 Webhook 打扰（默认关闭）</label>
+        <label htmlFor="attention-budget">每滚动小时普通通知预算</label><input id="attention-budget" type="number" min={1} max={60} step={1} required value={attention.maxPerHour} onChange={event => { setAttention(previous => ({ ...previous, maxPerHour: Number(event.target.value) })); setFeedback(""); }} />
+        <label htmlFor="attention-cooldown">普通通知间隔（秒）</label><input id="attention-cooldown" type="number" min={0} max={3600} step={1} required value={attention.cooldownSeconds} onChange={event => { setAttention(previous => ({ ...previous, cooldownSeconds: Number(event.target.value) })); setFeedback(""); }} />
+        <p className="settings-field-hint">超出预算只延后，不删除；关闭后立即按原策略继续。每个摘要计一次，网络重试不重复占用。失败、明确紧急、审批、定时提醒和周期计划不受新增预算限制；提醒与计划仍遵守原有免打扰和摘要设置。此设置只控制 Webhook／飞书，不改变 Outlook 或 Teams 自动提醒。</p>
       </fieldset>
       {error && <p className="settings-error" role="alert">{error}</p>}
       <p className="settings-feedback" role="status" aria-live="polite">{feedback}</p>
-      <div className="settings-actions"><button className="header-button" type="button" disabled={pending} onClick={() => void load()}>重新读取</button><button className="settings-save" type="submit" disabled={pending}>{pending ? "正在保存…" : "保存免打扰"}</button></div>
+      <div className="settings-actions"><button className="header-button" type="button" disabled={pending} onClick={() => void load()}>重新读取</button><button className="settings-save" type="submit" disabled={pending}>{pending ? "正在保存…" : "保存通知偏好"}</button></div>
     </form>}
   </details>;
 }
@@ -144,6 +156,9 @@ export function NotificationSettings() {
             <div className="notification-record-heading"><strong>{statusContent[item.status].title}</strong><span>已尝试 {item.attempts} 次</span></div>
             <p className="notification-record-time">{item.status === "pending" ? <>下次投递 <time dateTime={new Date(item.nextAt).toISOString()}>{formatTime(item.nextAt)}</time></> : item.finishedAt === null ? "尚未完成" : <>完成于 <time dateTime={new Date(item.finishedAt).toISOString()}>{formatTime(item.finishedAt)}</time></>}</p>
             {item.lastError && <p className="notification-record-error notification-error-preview">{item.lastError}</p>}
+            {item.status === "cancelled" && item.attempts > 0 && <p className="notification-delivery-reason">已停止后续尝试；之前的投递可能已送达，不能从外部收回。</p>}
+            {item.status === "sent" && item.lastError?.includes("delivery succeeded after cancellation") && <p className="notification-delivery-reason">投递开始后来源才被撤回，本次已确认送达，无法收回外部消息。</p>}
+            {item.delivery && <p className="notification-delivery-reason">{item.delivery.priority === "approval" ? "审批" : item.delivery.priority === "urgent" ? "失败或明确紧急" : item.delivery.category === "requested" ? "定时提醒或周期计划" : item.delivery.category === "unclassified" ? "旧通知（保留原投递节奏）" : "普通通知"} · {deliveryReasons[item.delivery.reason]}</p>}
             <details className="notification-record-details">
               <summary>投递详情<Icon name="chevron-right" /></summary>
               <dl>
@@ -151,7 +166,7 @@ export function NotificationSettings() {
                 <div><dt>事件 ID</dt><dd><code>{item.id}</code></dd></div>
                 <div><dt>创建时间</dt><dd>{formatTime(item.createdAt)}</dd></div>
                 {item.status === "pending" ? <div><dt>下次投递</dt><dd>{formatTime(item.nextAt)}</dd></div> : <div><dt>完成时间</dt><dd>{item.finishedAt === null ? "尚未完成" : formatTime(item.finishedAt)}</dd></div>}
-                {item.lastError && <div><dt>投递错误</dt><dd className="notification-record-error">{item.lastError}</dd></div>}
+                {item.lastError && <div><dt>{item.status === "sent" || item.status === "cancelled" ? "投递说明" : "投递错误"}</dt><dd className="notification-record-error">{item.lastError}</dd></div>}
               </dl>
             </details>
           </div>
