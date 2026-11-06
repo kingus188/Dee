@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import type { NotificationOverview } from "@assistant/contracts";
 import { readConfig } from "../dist/config.js";
@@ -34,6 +35,15 @@ async function fixture() {
     config, received, rejected,
     open(notifications = config.notifications, now = Date.now) {
       const queue = openNotificationOutbox(dir, notifications, fetch, now); queues.push(queue); return queue;
+    },
+    persistedNextAt(id: string) {
+      const db = new DatabaseSync(join(dir, "agent.sqlite"), { readOnly: true });
+      try {
+        const rows = db.prepare("SELECT next_at FROM notification_outbox WHERE id = ?").all(id);
+        assert.equal(rows.length, 1);
+        assert.equal(typeof rows[0].next_at, "number");
+        return Number(rows[0].next_at);
+      } finally { db.close(); }
     },
     async start(overrides: Partial<typeof config> = {}) {
       const service = await startServer({ ...config, ...overrides }, "127.0.0.1"); services.push(service); return service;
@@ -115,7 +125,12 @@ test("HTTP notifications redact payloads, filter before limiting, and isolate ta
     for (const result of [all, failed, sent, pending]) {
       assert.deepEqual(Object.keys(result).sort(), ["enabled", "items", "kind", "mode"]);
       for (const item of result.items) {
-        assert.deepEqual(Object.keys(item).sort(), ["attempts", "createdAt", "finishedAt", "id", "lastError", "nextAt", "status"]);
+        const keys = ["attempts", "createdAt", "finishedAt", "id", "lastError", "nextAt", "status"];
+        if (item.status === "pending") {
+          keys.push("delivery");
+          assert.deepEqual(item.delivery, { priority: "normal", category: "normal", reason: "ready" });
+        }
+        assert.deepEqual(Object.keys(item).sort(), keys.sort());
       }
       assert.doesNotMatch(JSON.stringify(result), /private|127\.0\.0\.1|private-test-token|"body"|"url"|"target"/);
     }
@@ -160,11 +175,13 @@ test("HTTP notifications remain readable but reject retries when off, unconfigur
     const f = await fixture();
     try {
       const notifications = mode === "no-url" ? { ...f.config.notifications, url: "" } : f.config.notifications;
-      const queue = f.open(notifications);
+      const queuedAt = Date.now() - 60000;
+      const queue = f.open(notifications, mode === "no-url" ? () => queuedAt : Date.now);
       f.rejected.add("disabled-event");
       await queue.enqueue({ id: "disabled-event", body: '{"text":"must not resend"}' });
       if (mode !== "no-url") await queue.flush();
       await queue.close();
+      const storedNextAt = f.persistedNextAt("disabled-event");
       const count = f.received.length;
       const service = await f.start(mode === "offline" ? { offline: true }
         : { notifications: { ...notifications, mode: mode === "off" ? "off" : "all" } });
@@ -174,7 +191,24 @@ test("HTTP notifications remain readable but reject retries when off, unconfigur
       assert.equal(result.items[0].id, "disabled-event", mode);
       assert.equal(result.items[0].status, mode === "no-url" ? "pending" : "failed", mode);
       assert.equal((await retry(service.origin, { id: "disabled-event" })).status, 409, mode);
-      assert.deepEqual((await overview(service.origin)).items, result.items, mode);
+      const beforeRead = Date.now();
+      const after = await overview(service.origin);
+      const afterRead = Date.now();
+      if (mode === "no-url") {
+        assert.equal(after.items.length, 1);
+        const { nextAt: beforeNextAt, ...beforeItem } = result.items[0];
+        const { nextAt: afterNextAt, ...afterItem } = after.items[0];
+        // Pending nextAt explains the current effective delivery time, not a persisted mutation.
+        assert.equal(storedNextAt, queuedAt);
+        assert.ok(beforeNextAt > storedNextAt);
+        assert.ok(afterNextAt >= beforeNextAt);
+        assert.ok(afterNextAt >= beforeRead && afterNextAt <= afterRead);
+        assert.deepEqual(afterItem, beforeItem, mode);
+        assert.equal(afterItem.attempts, 0);
+        assert.equal(afterItem.finishedAt, null);
+        assert.deepEqual(afterItem.delivery, { priority: "normal", category: "normal", reason: "ready" });
+      } else assert.deepEqual(after.items, result.items, mode);
+      assert.equal(f.persistedNextAt("disabled-event"), storedNextAt, `${mode}: HTTP reads and rejected retries must not change stored next_at`);
       assert.equal(f.received.length, count, mode);
     } finally { await f.close(); }
   }

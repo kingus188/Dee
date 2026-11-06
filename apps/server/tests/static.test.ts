@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ async function fixture(t: TestContext, password = "") {
   for (const folder of ["assets", "vendor/katex/fonts", "ui", "tests"]) await mkdir(join(dist, folder), { recursive: true });
   for (const [name, contents] of Object.entries({
     "index.html": "<!doctype html><title>小 D</title>", "app.js": "console.log('bundle')", "style.css": "body{}",
+    "teams-conversations.css": ".teams-conversations{}", "private.css": "private stylesheet",
     "assets/icons.svg": "<svg></svg>", "assets/app-ABCDEFGH.js": "import './chunk-12345678.js'", "assets/chunk-12345678.js": "export const ready = true", "assets/orb-reference.png": "image", "vendor/katex/katex.min.css": "@font-face{}",
     "vendor/katex/fonts/KaTeX_Main-Regular.woff2": "font", "ui/App.js": "private module", "tests/example.test.js": "private test",
     "assets/example.test.js": "private test", "assets/private.json": "private configuration", ".hidden": "hidden",
@@ -61,9 +62,43 @@ test("versioned browser entry and lazy chunks can be cached, while HTML stays re
   await page.text();
 });
 
+test("built index and every referenced stylesheet and script are served over HTTP", async t => {
+  // Use the production dist path, not a fixture that can drift from the build's asset list.
+  const server = createServer(async (req, res) => {
+    if (!await serveWebStatic(req, res)) { res.writeHead(404); res.end(); }
+  });
+  t.after(async () => {
+    await new Promise<void>((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); });
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const origin = `http://127.0.0.1:${address.port}`;
+  const page = await fetch(origin);
+  assert.equal(page.status, 200);
+  const html = await page.text();
+  const dist = new URL("../../web/dist/", import.meta.url);
+  assert.equal(html, await readFile(new URL("index.html", dist), "utf8"));
+  const assets = [...new Set([...html.matchAll(/\b(?:src|href)=["'](\/[^"']+\.(?:css|js))["']/g)].map(match => match[1]!))];
+  assert.ok(assets.includes("/teams-conversations.css"));
+  assert.ok(assets.some(path => /^\/assets\/app-[A-Z0-9]{8}\.js$/.test(path)));
+  for (const path of assets) {
+    const expected = await readFile(new URL(path.slice(1), dist));
+    assert.ok(expected.length > 0, path);
+    const mime = path.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8";
+    for (const method of ["GET", "HEAD"]) {
+      const response = await fetch(origin + path, { method });
+      assert.equal(response.status, 200, `${method} ${path}`);
+      assert.equal(response.headers.get("content-type"), mime, path);
+      assert.equal(response.headers.get("content-length"), String(expected.length), path);
+      assert.equal(response.headers.get("x-content-type-options"), "nosniff", path);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), method === "HEAD" ? Buffer.alloc(0) : expected, path);
+    }
+  }
+});
+
 test("API origin serves only the built public frontend, including HEAD", async t => {
   const { origin } = await fixture(t);
-  for (const [path, mime] of [["/", "text/html"], ["/index.html", "text/html"], ["/app.js", "text/javascript"], ["/style.css", "text/css"], ["/assets/icons.svg", "image/svg+xml"], ["/vendor/katex/katex.min.css", "text/css"], ["/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2"]]) {
+  for (const [path, mime] of [["/", "text/html"], ["/index.html", "text/html"], ["/app.js", "text/javascript"], ["/style.css", "text/css"], ["/teams-conversations.css", "text/css"], ["/assets/icons.svg", "image/svg+xml"], ["/vendor/katex/katex.min.css", "text/css"], ["/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2"]]) {
     const response = await fetch(origin + path);
     assert.equal(response.status, 200, path); assert.ok(response.headers.get("content-type")!.startsWith(mime!), mime);
     assert.equal(response.headers.get("x-content-type-options"), "nosniff");
@@ -77,9 +112,9 @@ test("API origin serves only the built public frontend, including HEAD", async t
 
 test("private modules, tests, maps, hidden files and traversal never become public", async t => {
   const { get } = await fixture(t);
-  for (const path of ["/missing", "/missing.js", "/ui/App.js", "/tests/example.test.js", "/assets/example.test.js", "/assets/private.json", "/.hidden", "/assets/.hidden.svg", "/app.js.map", "/assets/icons.svg.map", "/assets/../index.html", "/assets/%2e%2e/index.html", "/%2e/index.html", "/assets%5coutside.svg", "/assets/%00.png", "/%zz", "//index.html"]) {
+  for (const path of ["/missing", "/missing.js", "/private.css", "/ui/App.js", "/tests/example.test.js", "/assets/example.test.js", "/assets/private.json", "/.hidden", "/assets/.hidden.svg", "/app.js.map", "/assets/icons.svg.map", "/assets/../index.html", "/assets/%2e%2e/index.html", "/%2e/index.html", "/assets%5coutside.svg", "/assets/%00.png", "/%zz", "//index.html"]) {
     const response = await get(path); assert.equal(response.status, 404, path);
-    assert.doesNotMatch(response.body, /private module|private test|configuration|outside/);
+    assert.doesNotMatch(response.body, /private module|private test|private stylesheet|configuration|outside/);
   }
 });
 
@@ -96,7 +131,7 @@ test("missing frontend returns 404 without falling back to source or an SPA rout
 
 test("static GET/HEAD retain Basic login and reserve API and channel routes", async t => {
   const { origin, get } = await fixture(t, "static-fixture-password");
-  for (const path of ["/", "/app.js", "/assets/icons.svg"]) {
+  for (const path of ["/", "/app.js", "/teams-conversations.css", "/assets/icons.svg"]) {
     assert.equal((await fetch(origin + path)).status, 401);
     const response = await fetch(origin + path, { headers: { authorization: "Basic " + Buffer.from("demo:static-fixture-password").toString("base64") } });
     assert.equal(response.status, 200);
