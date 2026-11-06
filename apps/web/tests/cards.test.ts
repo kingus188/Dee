@@ -37,6 +37,22 @@ test("任务卡操作绑定原会话，结束的任务不再提供取消或继�
 
 });
 
+test("个人委托卡展示验收依据并为确认和取消携带当前版本", () => {
+  const data: Management = { schedules: [], reminders: [], background: [], goals: [{
+    id: "goal-1", conversationId: 8, text: "整理资料", criteria: "结论附来源", status: "review", revision: 2,
+    round: 3, maxRounds: 12, usedTokens: 100, workers: [], createdAt: 1, updatedAt: 2, deadlineAt: 1000, wakeAt: null,
+    summary: "已交付", updates: [], history: [{ action: "complete", summary: "排期已核对", evidence: ["project.md:12"], round: 3, at: 2 }],
+  }] };
+  const card = managementCards(data, "8")[0];
+  assert.equal(card.status, "待验收");
+  assert.match(card.details!, /project.md:12/);
+  assert.deepEqual(card.actions?.[0], { label: "确认完成", kind: "request", path: "/api/goals/goal-1/accept", body: { revision: 2 } });
+  const groups = cardGroupsForTurn([{ id: 1, kind: "user", text: "交给你" }, { id: 2, kind: "assistant", text: "", toolCalls: [{ id: "g", name: "start_goal", args: {} }] }]);
+  assert.ok(groups.has("tasks"));
+  data.goals![0].status = "cancelled";
+  assert.deepEqual(managementCards(data, "8")[0].actions, []);
+});
+
 test("记忆和技能只有待确认项提供批准动作，默认只显示候选与本次操作结果", () => {
   const data: PersonalData = { ...emptyPersonal, memory: [
     { id: "pending", text: "简洁回答", status: "pending", source: "agent", createdAt: 1, decidedAt: null },

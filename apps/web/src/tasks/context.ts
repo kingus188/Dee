@@ -4,7 +4,7 @@ import type { ViewEntry } from "../types.js";
 export function cardGroupsForTurn(entries: ViewEntry[]) {
   const tools: Record<string, CardGroup> = {
     todo: "notes", memo: "notes", remind_me: "tasks", schedule_task: "tasks", delegate_background: "tasks",
-    propose_memory: "memory", propose_skill: "skills",
+    propose_memory: "memory", propose_skill: "skills", start_goal: "tasks", list_goals: "tasks", control_goal: "tasks",
   };
   const lastUser = entries.findLastIndex(entry => entry.kind === "user");
   const groups = new Set<CardGroup>();

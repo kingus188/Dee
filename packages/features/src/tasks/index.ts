@@ -6,6 +6,8 @@ import { createSchedules } from "./schedules.js";
 import { createBackground } from "./background.js";
 import { createReminders } from "./reminders.js";
 import { requireUserInstruction } from "../user-instruction.js";
+import { GoalTask, goalTools, goalHooks, goalSection } from "../goals/index.js";
+export { Goals, GoalWorker, GoalTask, createGoalInTx, controlGoalInTx } from "../goals/index.js";
 import type { NotifyEvent } from "./notifications.js";
 export * from "./documents.js";
 export * from "./parameters.js";
@@ -23,8 +25,11 @@ export function createTaskCenter(notifyEvent: NotifyEvent, onSettled: (run: Exec
  const { BackgroundTask, backgroundInTx } = background;
 const V3: Extension = defineExtension({
   name: "v3-task-center",
-  tasks: [ScheduleTask, BackgroundTask],
+  tasks: [ScheduleTask, BackgroundTask, GoalTask],
+  hooks: goalHooks,
+  sections: [goalSection],
   tools: [
+    ...goalTools,
     defineTool({
       name: "schedule_task", replay: "safe",
       description: "按分钟延迟或日历规则执行任务。calendar 使用 IANA 时区与 HH:mm；weekly.weekdays 为 1～7（周一为1）。两种时间方式只能选一种。可用 daylightTaskId 关联已有待办，运行记录会保留结果。",

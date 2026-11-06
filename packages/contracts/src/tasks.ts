@@ -20,7 +20,7 @@ export type BackgroundJob = {
   conversationId: number | null; createdAt: number; result: string | null; taskId?: number; finishedAt?: number; daylightTaskId?: string;
 };
 export type Reminder = { id: number; text: string; at: number; status: "scheduled" | "cancelled" | "fired" };
-export type Management = { schedules: Schedule[]; background: BackgroundJob[]; reminders: Reminder[]; executions?: ExecutionRun[] };
+export type Management = { schedules: Schedule[]; background: BackgroundJob[]; reminders: Reminder[]; executions?: ExecutionRun[]; goals?: import("./goals.js").Goal[] };
 export type ScheduleRequest = { text: string; minutesFromNow?: number; everyMinutes?: number; calendar?: CalendarRule; requestId?: string; daylightTaskId?: string };
 export type BackgroundRequest = { text: string; requestId?: string; daylightTaskId?: string };
 // revision 必须匹配当前计划；编辑先暂停、停止旧 job 再替换，失败时保留暂停状态。

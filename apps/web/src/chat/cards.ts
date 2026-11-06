@@ -1,6 +1,6 @@
 export type CardGroup = "tasks" | "memory" | "skills" | "notes";
 export type CardAction =
-  | { label: string; kind: "request"; path: string }
+  | { label: string; kind: "request"; path: string; body?: { revision: number } }
   | { label: string; kind: "edit"; path: string; text: string }
   | { label: string; kind: "prompt"; text: string }
   | { label: string; kind: "link"; href: string; download?: boolean }

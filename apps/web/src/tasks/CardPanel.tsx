@@ -69,7 +69,7 @@ export function CardPanel({ view, onPrompt }: {
     if (action.kind === "edit" && (!text || text === action.text)) return;
     inFlight.current.add(card.key); setPending(new Set(inFlight.current)); setKept(old => new Set([...old, card.key])); setFeedback("正在处理…");
     try {
-      await request(action.path, text === undefined ? {} : { text });
+      await request(action.path, action.kind === "request" ? action.body ?? {} : { text });
       if (owner === currentOwner.current) { setFeedback("操作已完成。"); await refresh(); }
     } catch {
       if (owner === currentOwner.current) { setFeedback("操作未能确认，请核对最新状态后再操作。"); await refresh(); }
