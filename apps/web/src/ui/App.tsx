@@ -37,7 +37,49 @@ export function App() {
   const dataDescription = group === "skills" && route.skillSource === "remote" ? "查看和批准远程小 D 的技能记录。" : group ? groupDescriptions[group] : "";
   const { view, connection, info, recoveredUntil, connectDirectChat, newConversation, openConversation } = useConversation(route.conversationId);
   const [reportsOpened, setReportsOpened] = useState(page === "reports"), [daylightOpened, setDaylightOpened] = useState(page === "daylight");
-  const [draft, setDraft] = useState(""), [historyOpen, setHistoryOpen] = useState(false), [routeError, setRouteError] = useState("");
+  const [draft, setDraft] = useState(""), [routeError, setRouteError] = useState("");
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.("(max-width: 900px)").matches ?? false);
+  const [historyExpanded, setHistoryExpanded] = useState(() => {
+    try { return (window.localStorage.getItem("dee.history.collapsed") ?? window.localStorage.getItem("dee.sidebar.collapsed")) !== "true"; }
+    catch { return true; }
+  });
+  const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
+  const [historyRevision, refreshHistory] = useState(0);
+  const historyOpen = narrow ? mobileHistoryOpen : historyExpanded;
+  function setHistoryOpen(open: boolean) {
+    if (narrow) setMobileHistoryOpen(open);
+    else {
+      setHistoryExpanded(open);
+      try { window.localStorage.setItem("dee.history.collapsed", String(!open)); }
+      catch { /* The history panel still works without browser storage. */ }
+    }
+  }
+  function closeHistory() { setHistoryOpen(false); historyToggle.current?.focus(); }
+  function toggleHistory() {
+    setHistoryOpen(!historyOpen);
+    if (!historyOpen) requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".history-search input")?.focus());
+  }
+  useEffect(() => {
+    const media = window.matchMedia?.("(max-width: 900px)");
+    if (!media) return;
+    const resize = () => { setNarrow(media.matches); setMobileHistoryOpen(false); };
+    media.addEventListener("change", resize);
+    return () => media.removeEventListener("change", resize);
+  }, []);
+  useEffect(() => {
+    if (!narrow || !historyOpen || page !== "chat") return;
+    const closeOrTrap = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); closeHistory(); return; }
+      if (event.key !== "Tab") return;
+      const controls = [...document.querySelectorAll<HTMLElement>(".conversation-sidebar a[href], .conversation-sidebar button:not(:disabled), .conversation-sidebar input")].filter(element => !element.closest("[hidden]"));
+      const first = controls[0], last = controls.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && (document.activeElement === first || !document.querySelector(".conversation-sidebar")?.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", closeOrTrap);
+    return () => document.removeEventListener("keydown", closeOrTrap);
+  }, [narrow, historyOpen, page]);
   const [, tick] = useState(0);
   const historyToggle = useRef<HTMLButtonElement>(null);
   const scroll = useRef<HTMLElement>(null), autoScroll = useRef(true), help = useRef<HTMLDialogElement>(null), service = useRef<HTMLDetailsElement>(null);
@@ -46,7 +88,7 @@ export function App() {
   const settingsOrigin = useRef<WorkspaceRoute>({ page: "home", group: null });
   function navigate(next: WorkspaceRoute, replace = false) {
     if (next.page === "settings" && page !== "settings") settingsOrigin.current = route;
-    setRoute(next); setRouteError("");
+    setRoute(next); setRouteError(""); setMobileHistoryOpen(false);
     const hash = workspaceHash(next);
     if (window.location.hash !== hash) window.history[replace ? "replaceState" : "pushState"](null, "", hash);
   }
@@ -85,10 +127,11 @@ export function App() {
   const mascot = mascotStatus({ currentViewData: view, isDisconnected: connection !== "connected", isRecovered: recoveredUntil > Date.now(), recoveredUntil });
   function prompt(text: string) { setDraft(text); navigate({ page: "chat", group: null, conversationId: view?.conversationId }); setTimeout(() => document.getElementById("chat-textarea")?.focus(), 0); }
   function openGroup(next: CardGroup) { navigate({ page: "data", group: next, ...(next === "skills" ? { skillSource: "remote" as const } : {}), ...(["tasks", "notes"].includes(next) && view ? { conversationId: view.conversationId } : {}) }); }
-  function openChat(id: number) { setHistoryOpen(false); autoScroll.current = true; navigate({ page: "chat", group: null, conversationId: id }); }
+  function openChat(id: number) { setMobileHistoryOpen(false); autoScroll.current = true; navigate({ page: "chat", group: null, conversationId: id }); if (narrow) requestAnimationFrame(() => document.getElementById("chat-textarea")?.focus()); }
   async function startChat() {
-    const nextId = await newConversation(); autoScroll.current = true; setHistoryOpen(false);
+    const nextId = await newConversation(); autoScroll.current = true; setMobileHistoryOpen(false);
     navigate({ page: "chat", group: null, conversationId: nextId });
+    requestAnimationFrame(() => document.getElementById("chat-textarea")?.focus());
   }
   const settings = () => navigate({ page: "settings", group: null });
   const emptyChat = !view?.busy && !view?.inbox && !Object.keys(view?.live ?? {}).length && chatTurns(view?.entries ?? []).length === 0;
@@ -100,8 +143,13 @@ export function App() {
     <MailNotifications />
     {connection !== "connected" && <div id="reconnect-banner" className="reconnect-banner" style={{ display: "flex" }} role="status"><div className="reconnect-spinner" /><span>{connection === "connecting" ? "正在连接小 D…" : "与服务器断开，正在重连…"}</span></div>}
     <div className="app-layout" id="mascot-card" data-state={mascot.state}>
-      <WorkspaceNavigation route={route} onNavigate={navigate} onHelp={() => help.current?.showModal()} />
-      <main className="chat-column" id="workspace" data-view={page} data-empty-chat={emptyChat} tabIndex={-1}>
+      <WorkspaceNavigation inert={page === "chat" && narrow && historyOpen} route={route} onNavigate={navigate} onHelp={() => help.current?.showModal()} />
+      {page === "chat" && narrow && historyOpen && <button className="history-backdrop" aria-label="关闭历史对话遮罩" onClick={closeHistory} />}
+      <div className="conversation-sidebar" hidden={page !== "chat"} data-expanded={historyOpen} role={narrow && historyOpen ? "dialog" : undefined} aria-modal={narrow && historyOpen ? true : undefined} aria-label="历史对话侧栏">
+        <ConversationHistory refreshKey={historyRevision} active={page === "chat" && historyOpen} autoFocus={false} currentId={view?.conversationId ?? route.conversationId ?? null} onOpen={openChat} onClose={closeHistory} onNew={() => { void startChat().catch(error => showToast(error.message, "error")); }} newDisabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} />
+        <button ref={historyToggle} className="sidebar-toggle" type="button" aria-label={historyOpen ? "收起历史对话" : "展开历史对话"} title={historyOpen ? "收起历史对话" : "展开历史对话"} aria-expanded={historyOpen} aria-controls="conversation-history" onClick={toggleHistory}><Icon name={historyOpen ? "chevron-left" : "chevron-right"} /></button>
+      </div>
+      <main inert={page === "chat" && narrow && historyOpen} className="chat-column" id="workspace" data-view={page} data-empty-chat={emptyChat} tabIndex={-1}>
         {page !== "chat" && page !== "daylight" && !(page === "data" && group === "notes") && <header className="workspace-header management-header"><div className="workspace-location"><strong>{page === "data" && group ? dataLabel : pageLabels[page]}</strong></div>{headerActions}</header>}
         {routeError && <p className="workspace-route-error" role="alert">{routeError}<a href="#activity" onClick={event => { event.preventDefault(); navigate({ page: "activity", group: null }); }}>返回动态</a></p>}
         <TodayPage active={page === "home"} onPrompt={prompt} onGroup={openGroup} onDaylight={taskId => navigate({ page: "daylight", group: null, taskId })} onActivities={() => navigate({ page: "activity", group: null })} onSettings={settings} onConversation={openChat} />
@@ -109,14 +157,13 @@ export function App() {
         {page === "settings" && <ModelSettings onBack={() => navigate(settingsOrigin.current)} />}
         {reportsOpened && <div className="page-load-host" hidden={page !== "reports"}><PageLoad><DailyReports active={page === "reports"} /></PageLoad></div>}
         {daylightOpened && <div className="page-load-host" hidden={page !== "daylight"}><PageLoad><DaylightPage active={page === "daylight"} taskId={route.taskId} headerActions={page === "daylight" ? headerActions : null} /></PageLoad></div>}
-        {page === "chat" && <div className="conversation-toolbar"><div className="conversation-actions"><button ref={historyToggle} className="icon-button conversation-history-button" type="button" aria-label="历史对话" title="历史对话" aria-expanded={historyOpen} aria-controls="conversation-history" onClick={() => setHistoryOpen(value => !value)}><Icon name="history" /><span>历史对话</span></button><span className="conversation-action-divider" aria-hidden="true" /><button className="icon-button conversation-new-button" type="button" aria-label="新对话" title="新对话" disabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} onClick={() => { void startChat().catch(error => showToast(error.message, "error")); }}><Icon name="plus" /><span>新对话</span></button>{headerActions}</div></div>}
-        {page === "chat" && <ConversationHistory active={historyOpen} currentId={view?.conversationId ?? null} onOpen={openChat} onClose={() => { setHistoryOpen(false); historyToggle.current?.focus(); }} />}
+        {page === "chat" && <div className="conversation-toolbar">{!historyOpen && <button className="icon-button conversation-new-button" type="button" aria-label="新对话" title="新对话" disabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} onClick={() => { void startChat().catch(error => showToast(error.message, "error")); }}><Icon name="plus" /><span>新对话</span></button>}{headerActions}</div>}
         <section ref={scroll} hidden={page !== "chat" && page !== "data"} className={page === "data" ? group === "notes" ? "data-panel data-panel-notes" : "data-panel" : "messages-container"} id="messages-container" aria-label={page === "data" && group ? dataLabel : "与小 D 的对话"} onScroll={() => { if (page !== "chat") return; const el = scroll.current!; autoScroll.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
           {page === "data" ? <header className="data-panel-heading"><div><h1>{dataLabel}</h1><p>{dataDescription}</p></div>{group === "tasks" && <button className="text-button" type="button" onClick={() => navigate({ page: "activity", group: null })}>全部动态<Icon name="arrow-up-right" /></button>}</header> : <div id="message-history" aria-live="polite"><ChatThread view={view} onRetry={draft.trim() ? undefined : prompt} onSettings={settings} /></div>}
           <div hidden={page !== "chat"}><CardPanel view={view} onPrompt={prompt} /></div>
           <WorkspaceData skillSource={route.skillSource} onSkillSourceChange={remote => navigate({ page: "data", group: "skills", ...(remote ? { skillSource: "remote" as const } : {}) })} group={page === "data" ? group : null} owner={route.conversationId ?? view?.conversationId ?? null} connect={connectDirectChat} headerActions={page === "data" && group === "notes" ? headerActions : null} />
         </section>
-        <footer className="input-container" hidden={page !== "chat"}><Composer draft={draft} setDraft={setDraft} view={view} connect={connectDirectChat} onSent={() => { autoScroll.current = true; navigate({ page: "chat", group: null, conversationId: view?.conversationId }); }} onNewConversation={startChat} /><div className="composer-footer">{info?.configured === false ? <button className="text-button" type="button" onClick={settings}>配置模型后开始对话</button> : <span className="keyboard-hint">Enter 发送 · Shift + Enter 换行</span>}</div></footer>
+        <footer className="input-container" hidden={page !== "chat"}><Composer draft={draft} setDraft={setDraft} view={view} connect={connectDirectChat} onSent={() => { refreshHistory(value => value + 1); autoScroll.current = true; navigate({ page: "chat", group: null, conversationId: view?.conversationId }); }} onNewConversation={startChat} /><div className="composer-footer">{info?.configured === false ? <button className="text-button" type="button" onClick={settings}>配置模型后开始对话</button> : <span className="keyboard-hint">Enter 发送 · Shift + Enter 换行</span>}</div></footer>
       </main>
     </div>
     <dialog ref={help} className="help-dialog" aria-labelledby="help-title"><form method="dialog"><button className="icon-button close-help" aria-label="关闭使用指南"><Icon name="x" /></button></form><div className="help-mark"><Icon name="sparkles" /></div><h2 id="help-title">你好，我是小 D</h2><p>一起整理今天，也把交代的事情继续做完。</p><ul><li>对话、待办与通知在主导航；「更多」中可查看今日概览、个人内容与设置。</li><li>在对话中发送文字、图片或文件，用「历史对话」接着上次聊。</li><li>本机技能按目录浏览和导入；记忆和笔记先查看，新增或编辑时再填写内容。远程小 D 提议的内容经你批准后生效。</li><li>输入 / 使用快捷指令，/new 新建、/help 查看说明、/stop 停止回复。</li></ul><p className="help-note">后台任务由独立服务端运行。关闭网页或桌面客户端后，服务端保持在线即可继续执行。</p></dialog>

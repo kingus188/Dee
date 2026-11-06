@@ -101,7 +101,7 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
     </div>)}</div>}
     <div className="composer-main">
       <button type="button" className="icon-button attach-button" disabled={processing} aria-label="添加附件（图片或文件）" title="添加附件（图片或文件）" onClick={() => { fileInput.current!.value = ""; fileInput.current!.click(); }}><Icon name="paperclip" /></button>
-      <textarea ref={textarea} className="chat-textarea" id="chat-textarea" aria-label="给小 D 发消息" role="combobox" aria-autocomplete="list" aria-expanded={menuVisible} aria-controls={menuVisible ? "composer-commands" : undefined} aria-activedescendant={menuVisible ? `command-${suggestions[selectedIndex].name}` : undefined} placeholder="发消息，或交代一件事…" rows={1} value={draft} onChange={event => setDraft(event.target.value)}
+      <textarea ref={textarea} className="chat-textarea" id="chat-textarea" aria-label="给小 D 发消息" role="combobox" aria-autocomplete="list" aria-expanded={menuVisible} aria-controls={menuVisible ? "composer-commands" : undefined} aria-activedescendant={menuVisible ? `command-${suggestions[selectedIndex].name}` : undefined} placeholder="随心输入，告诉我你的想法或需要…" rows={1} value={draft} onChange={event => setDraft(event.target.value)}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
       onKeyDown={event => {
         if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return;

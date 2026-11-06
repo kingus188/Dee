@@ -16,19 +16,8 @@ const personal = [
   { page: "data", group: "tasks", label: "任务与提醒", icon: "list-todo" },
 ] as const;
 
-export function WorkspaceNavigation({ route, onNavigate, onHelp }: { route: WorkspaceRoute; onNavigate: (route: WorkspaceRoute) => void; onHelp: () => void }) {
+export function WorkspaceNavigation({ route, onNavigate, onHelp, inert = false }: { inert?: boolean; route: WorkspaceRoute; onNavigate: (route: WorkspaceRoute) => void; onHelp: () => void }) {
   const [more, setMore] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => {
-    try { return window.localStorage.getItem("dee.sidebar.collapsed") === "true"; }
-    catch { return false; }
-  });
-  function toggleSidebar() {
-    setMore(false);
-    const next = !collapsed;
-    setCollapsed(next);
-    try { window.localStorage.setItem("dee.sidebar.collapsed", String(next)); }
-    catch { /* The navigation remains usable when browser storage is unavailable. */ }
-  }
   const panel = useRef<HTMLElement>(null), toggle = useRef<HTMLButtonElement>(null);
   useEffect(() => { setMore(false); }, [route]);
   useEffect(() => {
@@ -46,9 +35,7 @@ export function WorkspaceNavigation({ route, onNavigate, onHelp }: { route: Work
     }}><Icon name={icon} /><span>{label}</span>{active && <span className="workspace-nav-current" aria-hidden="true" />}</a>;
   }
   const secondaryActive = !primary.some(item => item.page === route.page);
-  return <aside className="sidebar" data-collapsed={collapsed} aria-label="主导航">
-    <a className="workspace-brand" href="#chat" onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); onNavigate({ page: "chat", group: null }); }} aria-label="与小 D 对话" title="Dee · 与小 D 对话"><span className="workspace-brand-full">Dee</span><span className="workspace-brand-short" aria-hidden="true">D</span><span className="workspace-brand-leaf" aria-hidden="true" /></a>
-    <button className="sidebar-toggle" type="button" aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"} title={collapsed ? "展开侧边栏" : "收起侧边栏"} aria-expanded={!collapsed} aria-controls="workspace-primary-nav" onClick={toggleSidebar}>{collapsed ? <Icon name="chevron-right" /> : <Icon name="chevron-left" />}</button>
+  return <aside className="sidebar" aria-label="主导航" inert={inert}>
     <nav id="workspace-primary-nav" className="workspace-primary-nav" aria-label="个人工作空间">{primary.map(item => link({ page: item.page, group: null }, item.label, item.icon, item.aria))}<button ref={toggle} className="workspace-more-button" type="button" aria-label="更多菜单" title="更多" data-tooltip="更多" aria-expanded={more} data-active={secondaryActive} aria-controls="workspace-personal-nav" onClick={() => setMore(value => !value)}><Icon name="more-horizontal" /><span>更多</span></button></nav>
     <section ref={panel} id="workspace-personal-nav" className="workspace-personal-nav" data-open={more} hidden={!more} aria-label="个人内容与设置"><nav aria-label="个人内容">{link({ page: "home", group: null }, "今日", "calendar-days", "今日概览")}{personal.map(item => link({ page: item.page, group: item.group }, item.label, item.icon))}</nav><div className="workspace-nav-footer">{link({ page: "settings", group: null }, "连接与设置", "settings")}<button className="workspace-nav-link" type="button" onClick={() => { setMore(false); toggle.current?.focus(); onHelp(); }}><Icon name="circle-help" /><span>使用指南</span></button></div></section>
   </aside>;

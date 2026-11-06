@@ -1,11 +1,11 @@
 /* Shared chat tokens. The workspace shell lives in workspace.css. */
 :root {
   color-scheme: light;
-  --bg-page: #f4f5f7; --bg-surface: #fcfcfd; --bg-subtle: #eff0f3; --bg-input: #fcfcfd;
-  --shell-gradient: linear-gradient(105deg, #eceef1 0%, #f4f5f7 32%, #fafafb 100%); --shell-divider: #cdd1d8;
+  --bg-page: #f0f1f4; --bg-history: #f6f7f9; --bg-surface: #fcfcfd; --bg-subtle: #eff0f3; --bg-input: #fcfcfd;
+  --shell-gradient: #fafafb; --shell-divider: #dfe2e8;
   --border: #dfe2e7; --border-focus: #6484bc;
   --text-main: #242b37; --text-muted: #6d7481; --text-light: #77808d;
-  --primary: #4c70b4; --primary-hover: #3d609f; --primary-light: #e4eaf5; --primary-border: #b4c4df;
+  --primary: #3b6898; --primary-hover: #315b88; --primary-light: #e0e7f1; --primary-border: #b4c4df;
   --primary-gradient: var(--primary); --primary-gradient-hover: var(--primary-hover);
   --user-bubble: #e9edf5; --user-text: #242b37; --assistant-bubble: #fcfcfd; --assistant-text: #242b37;
   --tool-bg: #f3f4f7; --tool-border: #dfe3eb;
@@ -19,7 +19,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --bg-page: #1b1e24; --bg-surface: #23272e; --bg-subtle: #2b3039; --bg-input: #282d36;
+    --bg-page: #1b1e24; --bg-history: #20242b; --bg-surface: #23272e; --bg-subtle: #2b3039; --bg-input: #282d36;
     --shell-gradient: linear-gradient(105deg, #1b1e24 0%, #20242b 40%, #252932 100%); --shell-divider: #3d4450;
     --border: #3a414d; --border-focus: #a3bae5; --text-main: #e5e9f0; --text-muted: #a6afbe; --text-light: #b4becd;
     --primary: #a3bfee; --primary-hover: #c1d3f4; --primary-light: #303d54; --primary-border: #647da5;
