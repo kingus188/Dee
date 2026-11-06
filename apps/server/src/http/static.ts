@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const webDist = fileURLToPath(new URL("../../../web/dist/", import.meta.url));
 // tsc also emits source modules and declarations into dist; only ship the browser entry and public resources.
 const publicFiles = new Set([
-  "index.html", "app.js", "style.css", "tasks.css", "workspace.css", "chat.css", "daily-reports.css", "daylight.css",
+  "index.html", "app.js", "style.css", "tasks.css", "workspace.css", "chat.css", "teams-conversations.css", "daily-reports.css", "daylight.css",
   "task-workspace.css", "today.css", "inbox.css", "notifications.css", "notes.css", "editor.css",
   "assets/lucide-LICENSE", "vendor/katex/LICENSE",
 ]);
