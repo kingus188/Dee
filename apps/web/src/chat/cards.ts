@@ -1,3 +1,5 @@
+import type { DaylightTask } from "@assistant/contracts";
+
 export type CardGroup = "tasks" | "memory" | "skills" | "notes";
 export type CardAction =
   | { label: string; kind: "request"; path: string; body?: { revision: number } }
@@ -14,5 +16,6 @@ export type ConversationCard = {
   tone?: "pending" | "done" | "error";
   meta?: string;
   details?: string;
+  daylight?: { task: DaylightTask; project?: string };
   actions?: CardAction[];
 };
