@@ -3,6 +3,7 @@ import type { ConversationId, Extension } from "@earendil-works/pi-durable";
 import { Type } from "@earendil-works/pi-ai";
 import { Index } from "@assistant/runtime";
 import { resultText as text } from "../results.js";
+import { requireUserInstruction } from "../user-instruction.js";
 export type Delegation = { conversationId: ConversationId; task: string; status: "running" | "done" };
 
 export const Delegations = defineDoc<{ items: Delegation[] }>({
@@ -24,6 +25,7 @@ export const Delegate: Extension = defineExtension({
 			parameters: Type.Object({ task: Type.String({ description: "交给子 Agent 的完整任务说明" }) }),
 			replay: "safe",
 			execute: async (args, api, callContext) => {
+				await requireUserInstruction(api, callContext);
 				const childId = await api.commit(async (tx) => {
 					// 重放时找回已经建过的子会话，不会重复建
 					const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];

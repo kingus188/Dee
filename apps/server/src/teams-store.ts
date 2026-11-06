@@ -6,10 +6,12 @@ import { createSourceLifecycle } from "./source-lifecycle.js";
 import { openTeamsArchive } from "./teams-archive-store.js";
 import { teamsRecords } from "./teams-records.js";
 import { createTeamsNotificationBatches, type TeamsNotice } from "./teams-notification-batches.js";
+import { createTeamsTriageStore } from "./teams-triage-store.js";
 
 export type TeamsMessage = {
   id: string; chatId: string; chatType: string; senderId: string; senderName: string;
   direction: "in" | "out"; text: string; createdAt: string; important: boolean; chatTopic?: string; notificationPriority?: "normal" | "urgent" | "approval";
+  addressedToMe?: boolean; sourceUrl?: string;
 };
 const RETENTION_DAYS = 90;
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -62,6 +64,7 @@ export function openTeamsStore(dataDir: string) {
     // 旧库没有群名列：一次性补上，历史行保持为空。
     if (!(db.prepare("PRAGMA table_info(teams_messages)").all() as { name: string }[]).some(column => column.name === "chat_topic")) db.exec("ALTER TABLE teams_messages ADD COLUMN chat_topic TEXT");
     for (const column of ["notification_priority", "notification_note", "notification_cancelled_at"]) if (!(db.prepare("PRAGMA table_info(teams_messages)").all() as { name: string }[]).some(item => item.name === column)) db.exec(`ALTER TABLE teams_messages ADD COLUMN ${column} TEXT`);
+    for (const column of ["addressed_to_me", "source_url"]) if (!(db.prepare("PRAGMA table_info(teams_messages)").all() as { name: string }[]).some(item => item.name === column)) db.exec(`ALTER TABLE teams_messages ADD COLUMN ${column} ${column === "addressed_to_me" ? "INTEGER NOT NULL DEFAULT 0" : "TEXT"}`);
     if (!(db.prepare("PRAGMA table_info(teams_messages)").all() as { name: string }[]).some(column => column.name === "source_stale")) db.exec("ALTER TABLE teams_messages ADD COLUMN source_stale INTEGER NOT NULL DEFAULT 0");
     db.exec(`CREATE TEMP VIEW visible_teams_messages AS SELECT m.* FROM teams_messages m
       WHERE m.source_stale=0 AND NOT EXISTS (SELECT 1 FROM source_message_revocations r WHERE r.source='teams:'||m.chat_id AND r.message_id=m.id)
@@ -101,10 +104,13 @@ export function openTeamsStore(dataDir: string) {
   });
 
   let notifications: ReturnType<typeof createTeamsNotificationBatches<ReturnType<typeof row>>>;
-  try { notifications = createTeamsNotificationBatches(db, row); } catch (error) { db.close(); throw error; }
+  let triage: ReturnType<typeof createTeamsTriageStore>;
+  try { triage = createTeamsTriageStore(db); } catch (error) { db.close(); throw error; }
+  try { notifications = createTeamsNotificationBatches(db, row, () => triage.settings().normalDigestMinutes * 60_000); } catch (error) { db.close(); throw error; }
   return {
     archive,
     notifications,
+    triage,
     sourceRevision: sources.revision,
     sourceAllowed: sources.allowed,
     revokeMessage(chatId: string, messageId: string) {
@@ -148,6 +154,8 @@ export function openTeamsStore(dataDir: string) {
         const inserted = insert.run(message.id, message.chatId, message.chatType, message.senderId, message.senderName, message.direction, message.text, message.createdAt, message.important ? 1 : 0, message.chatTopic ?? null);
         if (!inserted.changes) db.prepare("UPDATE teams_messages SET text=?,source_stale=0 WHERE id=?").run(message.text, message.id);
         if (message.notificationPriority) db.prepare("UPDATE teams_messages SET notification_priority = ? WHERE id = ?").run(message.notificationPriority, message.id);
+        if (message.addressedToMe !== undefined) db.prepare("UPDATE teams_messages SET addressed_to_me=? WHERE id=?").run(message.addressedToMe ? 1 : 0, message.id);
+        if (message.sourceUrl !== undefined) db.prepare("UPDATE teams_messages SET source_url=? WHERE id=?").run(message.sourceUrl, message.id);
         // 回执丢失后同步到的首条同正文消息可能是自动代回。保守保留待办，
         // 不据此认定发送成功或解除未知锁定；真实回执到达后改用确切 ID。
         let candidate = false;

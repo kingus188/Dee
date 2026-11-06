@@ -12,7 +12,7 @@ test("提醒注入失败不回退重复发送；非文本消息也绑定来源�
     await mkdir(join(directory, "state/primary"), { recursive: true });
     await writeFile(join(directory, "state/primary/context_tokens.json"), JSON.stringify({ wxid_test: "test" }));
     const store = openTeamsStore(directory);
-    const incoming = { id: "chat:in", chatId: "chat", chatType: "oneOnOne", senderId: "peer", senderName: "同事", direction: "in" as const, text: mode === "empty" ? "" : "请求", important: true, createdAt: new Date(Date.now() - 60_000).toISOString() };
+    const incoming = { id: "chat:in", chatId: "chat", chatType: "oneOnOne", senderId: "peer", senderName: "同事", direction: "in" as const, text: mode === "empty" ? "" : "请求", important: true, createdAt: new Date(Date.now() - 31 * 60_000).toISOString() };
     store.record(incoming);
     let injections = 0, sends = 0, stop = () => {};
     const originalFetch = globalThis.fetch;
@@ -41,7 +41,7 @@ test("工作状态自动代回：只回私聊、每人一次，通知里带上�
   await mkdir(join(directory, "state/primary"), { recursive: true });
   await writeFile(join(directory, "state/primary/context_tokens.json"), JSON.stringify({ wxid_test: "test" }));
   const store = openTeamsStore(directory);
-  const base = { senderId: "peer", direction: "in" as const, important: true, createdAt: new Date(Date.now() - 60_000).toISOString() };
+  const base = { senderId: "peer", direction: "in" as const, important: true, createdAt: new Date(Date.now() - 31 * 60_000).toISOString() };
   store.record({ ...base, id: "dm:1", chatId: "dm", chatType: "oneOnOne", senderName: "同事", text: "方案什么时候给我" });
   store.record({ ...base, id: "dm:2", chatId: "dm", chatType: "oneOnOne", senderName: "同事", text: "急" });
   store.record({ ...base, id: "g:1", chatId: "g", chatType: "group", chatTopic: "项目群", senderName: "同事", text: "群里问一句" });
@@ -99,7 +99,7 @@ test("自动代回网络结果未知只发送一次，重启换状态也不会�
   await mkdir(join(directory, "state/primary"), { recursive: true });
   await writeFile(join(directory, "state/primary/context_tokens.json"), JSON.stringify({ wxid_test: "test" }));
   let store = openTeamsStore(directory);
-  const base = { chatId: "dm", chatType: "oneOnOne", senderId: "peer", senderName: "同事", direction: "in" as const, important: true, createdAt: new Date(Date.now() - 60_000).toISOString() };
+  const base = { chatId: "dm", chatType: "oneOnOne", senderId: "peer", senderName: "同事", direction: "in" as const, important: true, createdAt: new Date(Date.now() - 31 * 60_000).toISOString() };
   store.record({ ...base, id: "dm:1", text: "方案呢" });
   store.record({ ...base, id: "dm:2", text: "在吗" });
   store.setAway({ status: "开会中", reply: "稍后回你", until: new Date(Date.now() + 3_600_000).toISOString() });
@@ -140,7 +140,7 @@ test("自动代回等待令牌期间来源被处理、撤销、推送或过期�
     await mkdir(join(directory, "state/primary"), { recursive: true });
     await writeFile(join(directory, "state/primary/context_tokens.json"), '{"wxid_test":"synthetic"}');
     const store = openTeamsStore(directory);
-    const source = { id: "dm:in", chatId: "dm", chatType: "oneOnOne", senderId: "peer", senderName: "Peer", direction: "in" as const, text: "pending", important: true, createdAt: new Date(Date.now() - 60_000).toISOString() };
+    const source = { id: "dm:in", chatId: "dm", chatType: "oneOnOne", senderId: "peer", senderName: "Peer", direction: "in" as const, text: "pending", important: true, createdAt: new Date(Date.now() - 31 * 60_000).toISOString() };
     store.record(source);
     store.setAway({ status: "busy", reply: "later", until: new Date(Date.now() + 48 * 3_600_000).toISOString() });
     const version = store.away()!.version;
@@ -173,7 +173,7 @@ test("自动代回处理前一条期间后续快照来源被删除，入口重�
   await mkdir(join(directory, "state/primary"), { recursive: true });
   await writeFile(join(directory, "state/primary/context_tokens.json"), '{"wxid_test":"synthetic"}');
   const store = openTeamsStore(directory);
-  const source = (id: string) => ({ id, chatId: id, chatType: "oneOnOne", senderId: "peer", senderName: "Peer", direction: "in" as const, text: id, important: true, createdAt: new Date(Date.now() - 60_000).toISOString() });
+  const source = (id: string) => ({ id, chatId: id, chatType: "oneOnOne", senderId: "peer", senderName: "Peer", direction: "in" as const, text: id, important: true, createdAt: new Date(Date.now() - 31 * 60_000).toISOString() });
   store.record(source("a")); store.record(source("b"));
   store.setAway({ status: "busy", reply: "later", until: new Date(Date.now() + 3_600_000).toISOString() });
   let calls = 0, posts = 0, complete!: () => void;

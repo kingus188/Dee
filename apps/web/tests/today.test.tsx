@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { act } from "react";
 import type { ReactNode } from "react";
 import type { TestContext } from "node:test";
-import type { DaylightSnapshot, DaylightTask, PersonalData, WorkspaceActivity, WorkspaceActivities, WorkspaceMail } from "@assistant/contracts";
+import type { DaylightSnapshot, DaylightTask, PersonalData, WorkspaceActivity, WorkspaceActivities, WorkspaceMail, TeamsTriageOverview } from "@assistant/contracts";
 import { TodayPage } from "../dist/today/TodayPage.js";
 import type { TodayPageProps } from "../dist/today/TodayPage.js";
 import { ActivityPage } from "../dist/today/ActivityPage.js";
@@ -23,7 +23,8 @@ function fixtures() {
   const personal: PersonalData = { memory: [], skills: [], knowledge: { enabled: false, allow: [] } };
   const activities: WorkspaceActivities = { items: [], total: 0, truncated: false };
   const mail: WorkspaceMail = { status: { enabled: true, connected: true, offline: false, syncing: false, lastSuccessAt: "2026-10-22T06:30:00Z", error: "" }, messages: [] };
-  return { daylight, personal, activities, mail };
+  const teams: TeamsTriageOverview = { enabled: false, stale: true, lastSuccessAt: null, settings: { enabled: true, timeZone: "Asia/Shanghai", workDays: [1, 2, 3, 4, 5], workStart: "09:00", workEnd: "18:00", workIntervalMinutes: 2, offHoursIntervalMinutes: 15, archiveIntervalMinutes: 30, normalDigestMinutes: 30 }, items: [], truncated: false };
+  return { daylight, personal, activities, mail, teams };
 }
 function mockResources(t: TestContext, values: ReturnType<typeof fixtures>) {
   t.mock.method(apiClient, "request", async (path: string) => {
@@ -31,6 +32,7 @@ function mockResources(t: TestContext, values: ReturnType<typeof fixtures>) {
     if (path === "/api/personal") return values.personal;
     if (path === "/api/workspace/activities") return values.activities;
     if (path === "/api/workspace/mail") return values.mail;
+    if (path === "/api/teams/triage") return values.teams;
     throw new Error(`Unexpected request: ${path}`);
   });
 }
@@ -88,6 +90,7 @@ test("局部请求失败和不完整响应显示错误，不误报整个工作�
     if (path === "/api/personal") return {};
     if (path === "/api/workspace/activities") return values.activities;
     if (path === "/api/workspace/mail") return values.mail;
+    if (path === "/api/teams/triage") return values.teams;
     throw new Error(`Unexpected request: ${path}`);
   });
   const { dom } = await mountVisible(t, active => <TodayPage {...todayProps()} active={active} />);
