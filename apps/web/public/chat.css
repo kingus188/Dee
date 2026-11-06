@@ -115,6 +115,13 @@
 .model-error-details summary { cursor: pointer; padding: 8px 0; min-height: 36px; }
 .model-error-details pre { margin: 0; padding: 12px; border-radius: 8px; background: var(--chat-background); white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: 180px; font-size: 12px; }
 
+.wechat-conversation-notice { display: flex; align-items: flex-start; gap: 9px; margin: 0 2px 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--chat-soft); color: var(--text-main); font-size: 12px; line-height: 1.6; }
+.wechat-conversation-notice > .icon { flex: 0 0 16px; width: 16px; height: 16px; margin-top: 2px; color: var(--text-muted); }
+.wechat-conversation-notice p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.wechat-conversation-notice strong { display: block; font-weight: 600; }
+.wechat-conversation-notice span { display: block; color: var(--text-muted); }
+.conversation-source-pending { margin: 0 4px 8px; color: var(--text-muted); font-size: 12px; }
+
 /* Reference home: quiet welcome, open space, and a bottom-anchored composer. */
 #workspace[data-view="chat"] .input-container { max-width: 1120px; padding: 16px 26px max(42px, env(safe-area-inset-bottom)); }
 #workspace[data-view="chat"] .composer-main { flex-direction: row; align-items: flex-end; gap: 20px; }

@@ -262,7 +262,7 @@ test("窄屏历史为模态侧栏，隔离背景、循环 Tab、Escape 与选择
 });
 
 test("单行输入区保持附件、输入、发送的可访问顺序", async t => {
-  const { dom } = await mount(t, <Composer draft="" setDraft={() => {}} view={null} connect={async () => 1} onSent={() => {}} onNewConversation={async () => {}} />);
+  const { dom } = await mount(t, <Composer draft="" setDraft={() => {}} view={{ conversationId: 1, channel: "web", entries: [], live: {}, busy: false, inbox: 0, notes: { todos: [], memos: [] }, usage: null, tasks: [], reminders: [], subagents: [], parentId: null }} connect={async () => 1} onSent={() => {}} onNewConversation={async () => {}} />);
   const doc = dom.window.document, main = doc.querySelector(".composer-main")!;
   assert.equal(main.children[0].getAttribute("aria-label"), "添加附件（图片或文件）");
   assert.equal(main.children[1].id, "chat-textarea");

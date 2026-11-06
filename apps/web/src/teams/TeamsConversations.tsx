@@ -18,41 +18,54 @@ type Props = { active: boolean; chatId?: string; onSelectChat: (id: string) => v
 
 export function TeamsConversations({ active, chatId, onSelectChat, onAssistant, onDaylight, onSettings, onListOpenChange }: Props) {
   const chats = useTeamsPages("/api/teams/conversations", active, isTeamsConversationList, mergeChats);
-  const [query, setQuery] = useState(""), [mobileList, setMobileList] = useState(false);
-  const toggle = useRef<HTMLButtonElement>(null), sidebar = useRef<HTMLElement>(null);
+  const [query, setQuery] = useState(""), [listOpen, setListOpen] = useState(false), [compact, setCompact] = useState(true);
+  const workspace = useRef<HTMLElement>(null), sidebar = useRef<HTMLElement>(null), detail = useRef<HTMLElement>(null), detailHeading = useRef<HTMLHeadingElement>(null);
+  const focusTarget = useRef<"list" | "detail" | null>(null);
+  const showList = !compact || !chatId || listOpen;
+  const showDetail = !compact || !!chatId && !listOpen;
   const shown = chats.data?.items.filter(item => `${item.title} ${item.preview ?? ""}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) ?? [];
   const selected = chats.data?.items.find(item => item.id === chatId);
-  useEffect(() => { setMobileList(false); }, [active, chatId]);
-  useEffect(() => { onListOpenChange?.(active && mobileList); return () => onListOpenChange?.(false); }, [active, mobileList, onListOpenChange]);
+  useEffect(() => { setListOpen(false); }, [active, chatId]);
+  // The list is a screen in this reader, not a modal over the rest of Dee.
+  useEffect(() => { onListOpenChange?.(false); }, [onListOpenChange]);
+  useLayoutEffect(() => {
+    const element = workspace.current;
+    if (!active || !element) return;
+    const resize = (width: number) => { if (width > 0) setCompact(width < 720); };
+    const measure = () => resize(element.getBoundingClientRect().width);
+    measure();
+    if (window.ResizeObserver) {
+      const observer = new window.ResizeObserver(entries => { for (const entry of entries) resize(entry.contentRect.width); });
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [active]);
+  useLayoutEffect(() => {
+    if (!active) return;
+    if ((focusTarget.current === "list" && showList) || (!showDetail && detail.current?.contains(document.activeElement))) sidebar.current?.querySelector<HTMLInputElement>("input")?.focus();
+    else if ((focusTarget.current === "detail" && showDetail) || (!showList && sidebar.current?.contains(document.activeElement))) detailHeading.current?.focus();
+    focusTarget.current = null;
+  }, [active, chatId, listOpen, compact, showList, showDetail]);
   useEffect(() => {
-    const media = window.matchMedia?.("(max-width: 760px)");
-    const resize = () => { if (!media?.matches) setMobileList(false); };
-    media?.addEventListener("change", resize); return () => media?.removeEventListener("change", resize);
-  }, []);
-  useEffect(() => {
-    if (!mobileList) return;
-    sidebar.current?.querySelector<HTMLInputElement>("input")?.focus();
+    if (!active || !compact || !listOpen || !chatId) return;
     const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); setMobileList(false); toggle.current?.focus(); }
-      if (event.key !== "Tab") return;
-      const controls = [...(sidebar.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input, select, a[href]') ?? [])];
-      const first = controls[0], last = controls.at(-1);
-      if (event.shiftKey && (document.activeElement === first || !sidebar.current?.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      if (event.key !== "Escape" || event.defaultPrevented || !sidebar.current?.contains(document.activeElement)) return;
+      event.preventDefault(); focusTarget.current = "detail"; setListOpen(false);
     };
     document.addEventListener("keydown", close); return () => document.removeEventListener("keydown", close);
-  }, [mobileList]);
-  return <section className="teams-workspace" hidden={!active} aria-label="Teams 会话" data-list-open={mobileList}>
-    {mobileList && <button className="teams-list-backdrop" type="button" aria-label="关闭 Teams 会话列表" onClick={() => { setMobileList(false); toggle.current?.focus(); }} />}
-    <aside ref={sidebar} className="teams-conversation-sidebar" aria-label="Teams 会话列表" role={mobileList ? "dialog" : undefined} aria-modal={mobileList ? true : undefined}>
-      <div className="teams-sidebar-heading"><strong>Dee</strong><button type="button" className="icon-button teams-mobile-close" aria-label="关闭会话列表" onClick={() => { setMobileList(false); toggle.current?.focus(); }}><Icon name="x" /></button></div>
+  }, [active, compact, listOpen, chatId]);
+  return <section ref={workspace} className="teams-workspace" hidden={!active} aria-label="Teams 会话" data-compact={compact} data-list-open={showList}>
+    <aside ref={sidebar} className="teams-conversation-sidebar" hidden={!showList} aria-label="Teams 会话列表">
+      <div className="teams-sidebar-heading"><div><strong>会话</strong><span>在线读取 Teams</span></div>{compact && chatId && listOpen && <button type="button" className="icon-button teams-mobile-close" aria-label="返回当前 Teams 会话" onClick={() => { focusTarget.current = "detail"; setListOpen(false); }}><Icon name="arrow-right" /></button>}</div>
       <ConversationSource source="teams" onAssistant={onAssistant} onTeams={() => {}} />
       <label className="teams-conversation-search"><Icon name="search" /><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索对话" aria-label="搜索已加载的 Teams 对话" /></label>
       {chats.error && <div className="teams-view-feedback" role="alert"><strong>会话读取失败</strong><p>{chats.error}</p><button className="text-button" type="button" onClick={chats.refresh}>重新读取</button></div>}
       {chats.loading && !chats.data && <p className="teams-view-feedback" role="status">正在读取会话…</p>}
       {chats.data && !chats.data.available && <div className="teams-view-feedback"><strong>Teams 尚未连接</strong><p>需要已登录且有聊天读取权限的 Teams 账号。</p><button className="text-button" type="button" onClick={onSettings}>查看连接与设置</button></div>}
       {chats.data?.available && <>
-        <ul className="teams-conversation-list">{shown.map(item => <li key={item.id}><button type="button" className="teams-conversation-choice" aria-current={item.id === chatId ? "true" : undefined} onClick={() => { setMobileList(false); onSelectChat(item.id); }}>
+        <ul className="teams-conversation-list">{shown.map(item => <li key={item.id}><button type="button" className="teams-conversation-choice" aria-current={item.id === chatId ? "true" : undefined} onClick={() => { focusTarget.current = "detail"; setListOpen(false); onSelectChat(item.id); if (item.id === chatId && !listOpen) detailHeading.current?.focus(); }}>
           <span className="teams-avatar">{item.kind === "oneOnOne" ? item.title.slice(0, 1) : <Icon name="users" />}</span>
           <span className="teams-conversation-meta"><span className="teams-conversation-name">{item.title}</span><span className="teams-conversation-preview">{item.preview || kindLabel[item.kind]}</span></span>
           {item.updatedAt && <time title={`会话更新于 ${new Date(item.updatedAt).toLocaleString("zh-CN")}`} dateTime={item.updatedAt}>{new Date(item.updatedAt).toLocaleDateString() === new Date().toLocaleDateString() ? time(item.updatedAt) : new Date(item.updatedAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })}</time>}
@@ -62,14 +75,14 @@ export function TeamsConversations({ active, chatId, onSelectChat, onAssistant, 
         <div className="teams-list-footer"><span>仅搜索已加载的会话</span><button type="button" className="icon-button" aria-label="刷新 Teams 会话列表" disabled={chats.loading} onClick={chats.refresh}><Icon name="rotate-ccw" /></button></div>
       </>}
     </aside>
-    <section className="teams-conversation-detail" inert={mobileList} aria-label={selected?.title || "Teams 聊天记录"}>
-      <header className="teams-conversation-header"><button ref={toggle} type="button" className="icon-button teams-mobile-toggle" aria-label="打开 Teams 会话列表" aria-expanded={mobileList} onClick={() => setMobileList(true)}><Icon name="panel-left" /></button><div><h1>{selected?.title || (chatId ? "Teams 会话" : "Teams")}</h1><span className="teams-conversation-provider"><span className="teams-provider-mark" aria-hidden="true">T</span>Teams</span></div>{teamsSourceUrl(selected?.sourceUrl) && <a className="teams-header-source" href={teamsSourceUrl(selected?.sourceUrl)} target="_blank" rel="noopener noreferrer"><Icon name="external-link" />查看原消息</a>}</header>
-      {chats.data?.available && chatId ? <TeamsMessageThread key={chatId} active={active} chatId={chatId} onDaylight={onDaylight} /> : <div className="teams-view-empty"><Icon name="messages-square" /><h2>{chats.error ? "暂时无法读取 Teams" : chats.data?.available ? "选择一个会话" : chats.loading ? "正在连接 Teams" : "连接后查看 Teams 消息"}</h2><p>{chats.error ? "请重新读取会话，旧消息已隐藏。" : "按发送人和时间查看原消息，不会自动回复或创建待办。"}</p></div>}
+    <section ref={detail} className="teams-conversation-detail" hidden={!showDetail} aria-label={selected?.title || "Teams 聊天记录"}>
+      <header className="teams-conversation-header">{compact && <button type="button" className="icon-button teams-mobile-toggle" aria-label="返回 Teams 会话列表" onClick={() => { focusTarget.current = "list"; setListOpen(true); }}><Icon name="chevron-left" /></button>}<div><h1 ref={detailHeading} tabIndex={-1} title={selected?.title}>{selected?.title || (chatId ? "Teams 会话" : "Teams")}</h1><span className="teams-conversation-provider"><span className="teams-provider-mark" aria-hidden="true">T</span>Teams</span></div>{teamsSourceUrl(selected?.sourceUrl) && <a className="teams-header-source" aria-label="在 Teams 查看原消息" title="在 Teams 查看原消息" href={teamsSourceUrl(selected?.sourceUrl)} target="_blank" rel="noopener noreferrer"><Icon name="external-link" /><span>原消息</span></a>}</header>
+      {chats.data?.available && chatId ? <TeamsMessageThread key={chatId} active={active} visible={showDetail} chatId={chatId} onDaylight={onDaylight} /> : <div className="teams-view-empty"><Icon name="messages-square" /><h2>{chats.error ? "暂时无法读取 Teams" : chats.data?.available ? "选择一个会话" : chats.loading ? "正在连接 Teams" : "连接后查看 Teams 消息"}</h2><p>{chats.error ? "请重新读取会话，旧消息已隐藏。" : "按发送人和时间查看原消息，不会自动回复或创建待办。"}</p></div>}
     </section>
   </section>;
 }
 
-function TeamsMessageThread({ active, chatId, onDaylight }: { active: boolean; chatId: string; onDaylight: (id?: string) => void }) {
+function TeamsMessageThread({ active, visible, chatId, onDaylight }: { active: boolean; visible: boolean; chatId: string; onDaylight: (id?: string) => void }) {
   const validate = useCallback((value: unknown): value is TeamsConversationMessages => isTeamsConversationMessages(value) && value.chatId === chatId, [chatId]);
   const messages = useTeamsPages(`/api/teams/conversations/messages?chatId=${encodeURIComponent(chatId)}`, active, validate, mergePages);
   const [confirmation, setConfirmation] = useState<TeamsTriageItem | null>(null), [pending, setPending] = useState("");
@@ -80,10 +93,10 @@ function TeamsMessageThread({ active, chatId, onDaylight }: { active: boolean; c
   useEffect(() => { generation.current++; return () => { generation.current++; }; }, [active]);
   const items = (messages.data?.chatId === chatId ? messages.data.items : []).map(sanitizeTeamsMessage);
   useLayoutEffect(() => {
-    if (!scroll.current || !items.length) return;
+    if (!visible || !scroll.current || !items.length) return;
     if (previousHeight.current !== null) { scroll.current.scrollTop += scroll.current.scrollHeight - previousHeight.current; previousHeight.current = null; }
     else if (firstScroll.current) { scroll.current.scrollTop = scroll.current.scrollHeight; firstScroll.current = false; }
-  }, [messages.data]);
+  }, [messages.data, visible]);
   async function act(item: TeamsTriageItem, action: TeamsTriageAction["action"]) {
     if (!active || busy.current) return;
     const epoch = generation.current, key = sourceKey(item);

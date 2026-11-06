@@ -112,7 +112,7 @@ test("移动端来源切换与浏览器返回会关闭模态历史并解除背�
   assert.equal(view.dom.window.localStorage.getItem("dee.history.collapsed"), null);
 });
 
-test("反复切换来源保留各自会话，Teams 抽屉同时隔离主导航", async t => {
+test("反复切换来源保留各自会话，Teams 列表是非模态导航", async t => {
   const view = await harness(t);
   Object.defineProperty(view.dom.window, "matchMedia", { configurable: true, value: (media: string) => ({ matches: true, media, addEventListener() {}, removeEventListener() {} }) });
   view.dom.window.history.replaceState(null, "", "#chat/12");
@@ -129,7 +129,8 @@ test("反复切换来源保留各自会话，Teams 抽屉同时隔离主导航",
   const rail = view.doc.querySelector<HTMLElement>(".app-layout > .sidebar")!;
   const toggle = view.doc.querySelector<HTMLButtonElement>(".teams-mobile-toggle")!;
   await act(async () => { toggle.click(); });
-  assert.equal(rail.hasAttribute("inert"), true);
+  assert.equal(rail.hasAttribute("inert"), false, "紧凑会话列表不应隔离 Dee 主导航");
+  assert.equal(view.doc.querySelector(".teams-conversation-sidebar")?.getAttribute("role"), null);
   await act(async () => { view.doc.dispatchEvent(new view.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   assert.equal(rail.hasAttribute("inert"), false);
   await act(async () => { source.value = "assistant"; source.dispatchEvent(new view.dom.window.Event("change", { bubbles: true })); });

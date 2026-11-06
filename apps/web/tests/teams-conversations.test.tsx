@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { act } from "react";
+import { act, useState } from "react";
 import type { TeamsConversationList, TeamsConversationMessage, TeamsConversationMessages, TeamsTriageItem } from "@assistant/contracts";
 import { TeamsConversations } from "../dist/teams/TeamsConversations.js";
 import { isTeamsConversationList, isTeamsConversationMessages, mergeTeamsMessages } from "../dist/teams/conversation-data.js";
@@ -140,4 +140,105 @@ test("A source rejection supersedes an in-flight older page and immediately remo
   assert.doesNotMatch(doc.body.textContent!, /已撤回敏感正文/);
   assert.equal(doc.querySelector(".teams-message-suggestion"), null);
   assert.equal(reads, 2, "the failed action forces a current source read even while pagination was pending");
+});
+
+
+test("A narrow Teams container uses list-to-detail navigation even on a wide desktop, keeping search and scroll", async t => {
+  const reads: string[] = [];
+  t.mock.method(apiClient, "request", async (path: string) => { reads.push(path); return path === "/api/teams/conversations" ? chats() : page([message("in")]); });
+  const view = await mount(t, null), doc = view.dom.window.document;
+  let resize!: (width: number) => void;
+  Object.defineProperty(view.dom.window, "innerWidth", { value: 1600, configurable: true });
+  Object.defineProperty(view.dom.window, "ResizeObserver", { configurable: true, value: class {
+    constructor(callback: ResizeObserverCallback) { resize = width => callback([{ contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
+    observe() { resize(480); } disconnect() {}
+  } });
+  function Reader() {
+    const [chatId, selectChat] = useState<string>();
+    return <TeamsConversations {...props} chatId={chatId} onSelectChat={selectChat} />;
+  }
+  await view.render(<Reader />);
+  const workspace = doc.querySelector<HTMLElement>(".teams-workspace")!, list = doc.querySelector<HTMLElement>(".teams-conversation-sidebar")!, detail = doc.querySelector<HTMLElement>(".teams-conversation-detail")!;
+  assert.equal(workspace.dataset.compact, "true");
+  assert.equal(list.hidden, false); assert.equal(detail.hidden, true);
+  assert.equal(doc.querySelector('[aria-modal="true"], .teams-list-backdrop'), null);
+  const input = list.querySelector<HTMLInputElement>("input")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(view.dom.window.HTMLInputElement.prototype, "value")!.set!.call(input, "产品");
+    input.dispatchEvent(new view.dom.window.Event("input", { bubbles: true }));
+  });
+  list.scrollTop = 140;
+  await act(async () => { doc.querySelector<HTMLButtonElement>(".teams-conversation-choice")!.click(); });
+  assert.equal(list.hidden, true); assert.equal(detail.hidden, false);
+  assert.equal(doc.activeElement, detail.querySelector("h1"));
+  const scroll = detail.querySelector<HTMLElement>(".teams-message-scroll")!; scroll.scrollTop = 64;
+  await act(async () => { doc.querySelector<HTMLButtonElement>(".teams-mobile-toggle")!.click(); });
+  assert.equal(list.hidden, false); assert.equal(detail.hidden, true);
+  assert.equal(doc.activeElement, input); assert.equal(input.value, "产品"); assert.equal(list.scrollTop, 140);
+  await act(async () => { doc.querySelector<HTMLButtonElement>(".teams-conversation-choice")!.click(); });
+  assert.equal(detail.hidden, false); assert.equal(scroll.scrollTop, 64);
+  assert.equal(reads.filter(path => path.includes("/messages?")).length, 1, "returning to the same conversation must not remount or refetch its timeline");
+  await act(async () => { resize(960); });
+  assert.equal(workspace.dataset.compact, "false"); assert.equal(list.hidden, false); assert.equal(detail.hidden, false);
+  await act(async () => { input.focus(); resize(480); });
+  assert.equal(list.hidden, true); assert.equal(detail.hidden, false);
+  assert.equal(doc.activeElement, detail.querySelector("h1"), "narrowing must not strand keyboard focus in the hidden list");
+  await act(async () => { doc.querySelector<HTMLButtonElement>(".teams-mobile-toggle")!.click(); resize(960); });
+  await act(async () => { button(doc, "刷新消息").focus(); resize(480); });
+  assert.equal(list.hidden, false); assert.equal(detail.hidden, true);
+  assert.equal(doc.activeElement, input, "narrowing while browsing the list must not strand focus in the hidden thread");
+});
+
+test("Compact back, Escape and browser-selected chat changes keep exactly the current screen accessible", async t => {
+  t.mock.method(apiClient, "request", async (path: string) => path === "/api/teams/conversations" ? chats() : page([], null, new URL(path, "http://localhost").searchParams.get("chatId")!));
+  const listStates: boolean[] = [];
+  const view = await mount(t, <TeamsConversations {...props} onListOpenChange={open => listStates.push(open)} />), doc = view.dom.window.document;
+  const list = doc.querySelector<HTMLElement>(".teams-conversation-sidebar")!, detail = doc.querySelector<HTMLElement>(".teams-conversation-detail")!;
+  await act(async () => { doc.querySelector<HTMLButtonElement>(".teams-mobile-toggle")!.click(); });
+  assert.equal(list.hidden, false); assert.equal(detail.hidden, true);
+  await act(async () => { doc.dispatchEvent(new view.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  assert.equal(list.hidden, true); assert.equal(detail.hidden, false);
+  assert.equal(doc.activeElement, detail.querySelector("h1"));
+  await act(async () => { doc.querySelector<HTMLButtonElement>(".teams-mobile-toggle")!.click(); });
+  await view.render(<TeamsConversations {...props} chatId="other" onListOpenChange={open => listStates.push(open)} />);
+  assert.equal(list.hidden, true); assert.equal(detail.hidden, false);
+  assert.equal(detail.querySelector("h1")!.textContent, "另一会话");
+  assert.ok(listStates.every(open => !open), "full-screen list navigation never marks the app as modal");
+  detail.querySelector<HTMLHeadingElement>("h1")!.focus();
+  await view.render(<TeamsConversations {...props} chatId={undefined} />);
+  assert.equal(list.hidden, false); assert.equal(detail.hidden, true);
+  assert.equal(doc.activeElement, list.querySelector("input"));
+});
+
+test("Compact threads keep long originals and archived attachments readable without introducing writes", async t => {
+  const longText = "详细的 Teams 原文与来源限制。".repeat(100), calls: { path: string; body: unknown }[] = [];
+  const imageId = "a".repeat(64), fileId = "b".repeat(64);
+  t.mock.method(apiClient, "request", async (path: string, body?: unknown) => {
+    calls.push({ path, body });
+    return path === "/api/teams/conversations" ? chats() : page([message("long", { text: longText, media: [
+      { id: imageId, name: "已归档截图.png", kind: "image", status: "saved", previewUrl: `/api/teams/media/${imageId}` },
+      { id: fileId, name: "很长的文件名-".repeat(20) + ".pdf", kind: "file", status: "pending" },
+    ] })]);
+  });
+  const { dom } = await mount(t, <TeamsConversations {...props} />), doc = dom.window.document;
+  assert.equal(doc.querySelector(".teams-message-bubble > p")!.textContent, longText);
+  assert.equal(doc.querySelector(".msg-image-link")!.getAttribute("href"), `/api/teams/media/${imageId}`);
+  assert.equal(doc.querySelector(".msg-image-thumb")!.getAttribute("alt"), "已归档截图.png");
+  assert.match(doc.querySelector(".msg-file-card")!.textContent!, /正在保存/);
+  assert.match(doc.querySelector(".teams-readonly-note")!.textContent!, /仅查看消息，回复请前往 Teams/);
+  assert.ok(calls.every(call => call.body === undefined));
+});
+
+
+test("An interrupted compact open waits until the thread is visible before setting its initial scroll position", async t => {
+  let finish!: (data: unknown) => void;
+  t.mock.method(apiClient, "request", async (path: string) => path === "/api/teams/conversations" ? chats() : new Promise(resolve => { finish = resolve; }));
+  const view = await mount(t, <TeamsConversations {...props} />), doc = view.dom.window.document;
+  const scroll = doc.querySelector<HTMLElement>(".teams-message-scroll")!;
+  Object.defineProperty(scroll, "scrollHeight", { configurable: true, value: 800 });
+  await act(async () => { doc.querySelector<HTMLButtonElement>(".teams-mobile-toggle")!.click(); });
+  await act(async () => { finish(page([message("late")])); });
+  assert.equal(scroll.scrollTop, 0, "a hidden timeline must not consume its initial-scroll state");
+  await act(async () => { doc.querySelector<HTMLButtonElement>(".teams-mobile-close")!.click(); });
+  assert.equal(scroll.scrollTop, 800);
 });

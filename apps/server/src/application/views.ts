@@ -2,6 +2,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import type { ConversationId, ConversationView, InboxState, LiveState, UsageState } from "@earendil-works/pi-durable";
 import type { ViewEntry, ConversationView as ClientView } from "@assistant/contracts";
 import { Index } from "@assistant/runtime";
+import { WechatState } from "@assistant/channel-wechat";
 import { Notes, Reminders, Delegations, BackgroundJobs, Parents, splitUserContent, withQuote } from "@assistant/features";
 import type { AppContext } from "./context.js";
 import { enrichTeamsRecordView } from "../teams-records.js";
@@ -58,7 +59,13 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
 	const reminders = (await harness.snapshot(Reminders, conversationId, ctx))?.items ?? [];
 	const subagents = (await harness.snapshot(Delegations, conversationId, ctx))?.items ?? [];
 	const backgroundChildren = (await harness.snapshot(BackgroundJobs, conversationId, ctx))?.items ?? [];
-	const children = (await harness.snapshot(Index, ctx))?.children ?? {};
+	const index = await harness.snapshot(Index, ctx);
+	const children = index?.children ?? {};
+	const wechat = await harness.snapshot(WechatState, ctx);
+	// A binding still forwards assistant replies even if the legacy index lacks its source label.
+	// Expose the source only: never include recipient IDs or credentials in the browser view.
+	const wechatBound = Object.values(wechat?.bindings ?? {}).some(binding => Number(binding.conversationId) === Number(conversationId));
+	const channel = wechatBound ? "wechat" : index?.items?.find(item => Number(item.id) === Number(conversationId))?.channel ?? "web";
 	const v3Children = (await harness.snapshot(Parents, ctx))?.children ?? {};
 	// 本会话和它派出的子会话里还活着的任务
 	const mine = new Set([conversationId, ...subagents.map((a) => a.conversationId),
@@ -77,6 +84,7 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
 		}));
 	return {
 		conversationId,
+		channel,
 		entries,
 		live,
 		busy: Object.keys(live).length > 0,
