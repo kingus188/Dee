@@ -16,7 +16,7 @@ const personal = [
   { page: "data", group: "tasks", label: "任务与提醒", icon: "list-todo" },
 ] as const;
 
-export function WorkspaceNavigation({ route, onNavigate, onHelp, inert = false }: { inert?: boolean; route: WorkspaceRoute; onNavigate: (route: WorkspaceRoute) => void; onHelp: () => void }) {
+export function WorkspaceNavigation({ route, onNavigate, onHelp, onNew, onSearch, newDisabled = false, inert = false }: { inert?: boolean; route: WorkspaceRoute; onNavigate: (route: WorkspaceRoute) => void; onHelp: () => void; onNew?: () => void; onSearch?: () => void; newDisabled?: boolean }) {
   const [more, setMore] = useState(false);
   const panel = useRef<HTMLElement>(null), toggle = useRef<HTMLButtonElement>(null);
   useEffect(() => { setMore(false); }, [route]);
@@ -36,7 +36,7 @@ export function WorkspaceNavigation({ route, onNavigate, onHelp, inert = false }
   }
   const secondaryActive = route.page !== "teams" && !primary.some(item => item.page === route.page);
   return <aside className="sidebar" aria-label="主导航" inert={inert}>
-    <nav id="workspace-primary-nav" className="workspace-primary-nav" aria-label="个人工作空间">{primary.map(item => link({ page: item.page, group: null }, item.label, item.icon, item.aria))}<button ref={toggle} className="workspace-more-button" type="button" aria-label="更多菜单" title="更多" data-tooltip="更多" aria-expanded={more} data-active={secondaryActive} aria-controls="workspace-personal-nav" onClick={() => setMore(value => !value)}><Icon name="more-horizontal" /><span>更多</span></button></nav>
+    <nav id="workspace-primary-nav" className="workspace-primary-nav" aria-label="个人工作空间">{primary.map(item => link({ page: item.page, group: null }, item.label, item.icon, item.aria))}{onNew && <button className="workspace-nav-link workspace-compose" type="button" aria-label="新对话" title="新对话" data-tooltip="新对话" disabled={newDisabled} onClick={onNew}><Icon name="square-pen" /><span>新对话</span></button>}{onSearch && <button className="workspace-nav-link workspace-search" type="button" aria-label="搜索对话" title="搜索对话" data-tooltip="搜索" onClick={onSearch}><Icon name="search" /><span>搜索</span></button>}<button ref={toggle} className="workspace-more-button" type="button" aria-label="更多菜单" title="更多" data-tooltip="更多" aria-expanded={more} data-active={secondaryActive} aria-controls="workspace-personal-nav" onClick={() => setMore(value => !value)}><Icon name="more-horizontal" /><span>更多</span></button></nav>
     <section ref={panel} id="workspace-personal-nav" className="workspace-personal-nav" data-open={more} hidden={!more} aria-label="个人内容与设置"><nav aria-label="个人内容">{link({ page: "home", group: null }, "今日", "calendar-days", "今日概览")}{personal.map(item => link({ page: item.page, group: item.group }, item.label, item.icon))}</nav><div className="workspace-nav-footer">{link({ page: "settings", group: null }, "连接与设置", "settings")}<button className="workspace-nav-link" type="button" onClick={() => { setMore(false); toggle.current?.focus(); onHelp(); }}><Icon name="circle-help" /><span>使用指南</span></button></div></section>
     <div className="workspace-identity"><span className="workspace-identity-avatar" aria-hidden="true">D</span><span>Dee</span><button type="button" className="icon-button" aria-label="打开连接与设置" title="连接与设置" onClick={() => onNavigate({ page: "settings", group: null })}><Icon name="sliders-horizontal" /></button></div>
   </aside>;

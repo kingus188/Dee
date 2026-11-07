@@ -6,6 +6,7 @@ import { ServerConnection } from "./ServerConnection.js";
 import { MailSettings } from "./MailSettings.js";
 import { WechatSettings } from "./WechatSettings.js";
 import { NotificationSettings } from "./NotificationSettings.js";
+import { AppearanceSettings } from "./AppearanceSettings.js";
 
 export function ModelSettings({ onBack }: { onBack: () => void }) {
   const [saved, setSaved] = useState<Settings | null>(null), [modelId, setModelId] = useState("");
@@ -37,8 +38,9 @@ export function ModelSettings({ onBack }: { onBack: () => void }) {
   }
   const activeName = saved?.models.find(item => item.id === saved.activeModel)?.name;
   return <section className="model-settings" aria-labelledby="settings-title">
-    <div className="settings-heading"><div><p className="settings-eyebrow">个人空间 / 设置</p><h1 id="settings-title" ref={heading} tabIndex={-1}>连接与模型</h1><p>连接后台服务器，选择服务器已配置的模型。</p></div><button className="icon-button" type="button" aria-label="关闭设置" onClick={onBack}><Icon name="x" /></button></div>
+    <div className="settings-heading"><div><p className="settings-eyebrow">个人空间 / 设置</p><h1 id="settings-title" ref={heading} tabIndex={-1}>设置</h1><p>调整外观，管理后台连接与模型。</p></div><button className="icon-button" type="button" aria-label="关闭设置" onClick={onBack}><Icon name="x" /></button></div>
     <div className="settings-content">
+      <AppearanceSettings />
       <ServerConnection />
       {loading ? <p role="status">正在读取服务器模型列表…</p> : !saved ? <div className="settings-load-error"><p role="alert">{error}</p><button className="header-button" type="button" onClick={() => void load()}>重新读取</button></div> : <>
         <div className="settings-status"><Icon name="plug" /><div><strong>{saved.restartRequired ? "已选择，等待后台重启" : saved.activeModel ? "当前模型" : "服务器尚未配置模型"}</strong><p>{activeName || saved.activeModel || "请由服务器管理员配置模型，再重新读取列表。"}{saved.restartRequired ? " · 新选择将在后台服务重启后使用" : ""}</p></div></div>

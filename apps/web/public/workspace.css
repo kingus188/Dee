@@ -55,6 +55,14 @@ button:active:not(:disabled), .workspace-nav-link:active { transform: scale(.98)
 .workspace-nav-footer { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
 .chat-column { display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100%; overflow: hidden; position: relative; isolation: isolate; background: transparent; }
 .workspace-frame { display: flex; flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+.appearance-settings { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+.appearance-heading, .appearance-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.appearance-heading h2 { font-size: 16px; font-weight: 600; }
+.appearance-row { margin-top: 16px; font-size: 13px; }
+.appearance-options { display: flex; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-subtle); }
+.appearance-options button { min-width: calc(52px * var(--ui-component-scale, 1)); min-height: calc(36px * var(--ui-component-scale, 1)); padding: 6px 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
+.appearance-options button[aria-pressed="true"] { background: var(--bg-surface); color: var(--primary); box-shadow: var(--shadow-xs); }
+@media (pointer: coarse), (max-width: 700px) { .appearance-options button { min-height: 44px; } }
 .workspace-header, #workspace .management-header { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 40px; border-bottom: 0; flex-shrink: 0; background: var(--bg-surface); z-index: 5; }
 .workspace-location { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--text-muted); font-size: 11px; white-space: nowrap; }
 .workspace-location strong { overflow: hidden; text-overflow: ellipsis; font-weight: 500; color: var(--text-main); }
@@ -368,16 +376,12 @@ button:active:not(:disabled), .workspace-nav-link:active { transform: scale(.98)
 .related-task-picker select { width: 100%; min-width: 0; min-height: 40px; padding: 8px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-surface); color: var(--text-main); font: inherit; font-size: 12px; }
 .related-task-picker select:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 .related-task-overview { padding: 18px 16px; border-radius: 16px; background: #e6ebfb; overflow-wrap: anywhere; }
-.related-task-eyebrow { display: block; margin-bottom: 6px; font-size: 11px; color: var(--text-muted); }
 .related-task-overview h3 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.6; }
 .related-task-progress { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
 .related-task-progress > span { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .related-task-progress small { font-size: 13px; font-weight: 400; color: var(--text-muted); }
 .related-task-progress > div { min-width: 0; flex: 1; }
 .related-task-progress strong { font-size: 11px; font-weight: 400; color: var(--text-muted); }
-.related-task-progress progress { display: block; width: 100%; height: 5px; margin-top: 7px; accent-color: var(--primary); border: 0; border-radius: 4px; overflow: hidden; }
-.related-task-progress progress::-webkit-progress-bar { background: #cdd9ee; border-radius: 4px; }
-.related-task-progress progress::-webkit-progress-value { background: var(--primary); border-radius: 4px; }
 .related-task-fields { margin: 12px 0; padding-inline: 12px; border: 1px solid var(--shell-divider); border-radius: 14px; background: var(--bg-surface); font-size: 12px; }
 .related-task-fields > div { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: center; gap: 12px; min-height: 40px; padding-block: 9px; border-bottom: 1px solid var(--shell-divider); }
 .related-task-fields > div:last-child { border-bottom: 0; }
@@ -402,7 +406,7 @@ button:active:not(:disabled), .workspace-nav-link:active { transform: scale(.98)
 .related-panel-content .conversation-card-header { flex-wrap: wrap; }.related-panel-content .conversation-card-header h3 { font-size: 14px; }
 .related-panel-content .conversation-card-text { font-size: 13px; }.related-panel-content .conversation-card-meta { line-height: 1.7; }
 .related-panel-content .conversation-card-actions { gap: 8px; flex-wrap: wrap; }.related-panel-content .conversation-card-actions button { min-height: 40px; }
-.related-task-notice, .related-task-feedback { margin-top: 14px; color: var(--text-muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.related-task-feedback { margin-top: 14px; color: var(--text-muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 .related-task-feedback { color: var(--primary); }
 .related-panel-backdrop { position: absolute; inset: 0; z-index: 39; padding: 0; border: 0; background: rgb(25 37 58 / 20%); }
 @media (max-width: 1199px) {
@@ -417,5 +421,4 @@ button:active:not(:disabled), .workspace-nav-link:active { transform: scale(.98)
   .app-layout[data-view="chat"][data-external-conversation="false"] .history-search { background: #293342; }
   .app-layout[data-view="chat"][data-external-conversation="false"] .history-list a[aria-current="true"] { background: #2e405d; border-color: #415a7c; }
   .related-tasks-panel { background: #232833; }.related-task-overview { background: #303c55; }
-  .related-task-progress progress::-webkit-progress-bar { background: #49546b; }
 }

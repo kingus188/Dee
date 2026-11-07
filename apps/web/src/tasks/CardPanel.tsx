@@ -101,14 +101,19 @@ export function CardPanel({ view, onPrompt, compactTasks = false, detailsHost, o
   useEffect(() => { onRelatedCount?.(compactTasks ? related.length : 0); }, [compactTasks, related.length, onRelatedCount]);
   const current = related.find(card => card.key === selected) ?? related[0];
   function open(card: ConversationCard) { setSelected(card.key); onOpenDetails?.(); }
-  return <><div id="conversation-cards" aria-label="对话卡片" aria-busy={!loaded}>{shown.map(card => compactTasks && card.group === "tasks" && card.key !== "load-error" ?
-    <button type="button" className="related-task-summary" data-card-key={card.key} key={card.key} aria-controls="related-tasks-panel" onClick={() => open(card)}>
-      <span className="related-summary-icon"><Icon name={card.daylight ? "square-check" : "list-todo"} /></span><span className="related-summary-copy"><strong>{card.daylight || card.key.startsWith("daylight:") ? card.title : card.text.split("\n")[0] || card.title}</strong><small>{card.daylight ? card.meta || "关联待办" : card.title}</small></span>{card.status && <span className="related-summary-status">{card.status}</span>}<Icon name="chevron-right" />
-    </button> : <Card key={card.key} card={card} pending={pending.has(card.key)} onAction={action => void act(card, action)} />)}</div><p id="card-feedback" role="status" aria-live="polite">{feedback}</p>
+  // The thread shows only the selected (by default most recent) task; the side panel lists the rest.
+  const threadCards = compactTasks ? shown.filter(card => card.group !== "tasks" || card.key === "load-error" || card === current) : shown;
+  return <><div id="conversation-cards" aria-label="对话卡片" aria-busy={!loaded}>{threadCards.map(card => compactTasks && card.group === "tasks" && card.key !== "load-error" ?
+    <article className="related-task-summary" data-card-key={card.key} key={card.key}><div className="related-summary-body">
+      <button type="button" className="related-summary-open" aria-controls="related-tasks-panel" onClick={() => open(card)}>
+        <span className="related-summary-icon"><Icon name={card.daylight ? "square-check" : "list-todo"} /></span><span className="related-summary-copy"><strong>{card.daylight || card.key.startsWith("daylight:") ? card.title : card.text.split("\n")[0] || card.title}</strong><small>{card.daylight ? card.meta || "关联待办" : card.title}</small></span>{card.status && <span className="related-summary-status">{card.status}</span>}
+      </button>
+      {!!card.daylight?.task.checklist.length && <ul className="related-summary-checklist" aria-label="子任务（只读）">{card.daylight.task.checklist.map(item => <li key={item.id} data-done={item.done}>{item.title}<span className="sr-only">{item.done ? "已完成" : "未完成"}</span></li>)}</ul>}
+      {card.daylight && <div className="related-summary-actions"><a href={`#tasks/${encodeURIComponent(card.daylight.task.id)}`}>在待办中查看</a></div>}
+    </div></article> : <Card key={card.key} card={card} pending={pending.has(card.key)} onAction={action => void act(card, action)} />)}</div><p id="card-feedback" role="status" aria-live="polite">{feedback}</p>
     {compactTasks && detailsHost && createPortal(<>
       {related.length > 1 && <label className="related-task-picker"><span>当前任务</span><select value={current?.key ?? ""} onChange={event => setSelected(event.target.value)}>{related.map(card => <option key={card.key} value={card.key}>{card.daylight ? card.title : `${card.title} · ${card.text.split("\n")[0]}`}</option>)}</select></label>}
       {current && <Card key={current.key} card={current} pending={pending.has(current.key)} onAction={action => void act(current, action)} />}
-      <p className="related-task-notice">{current?.daylight ? "显示当前待办状态。编辑与勾选请在待办中完成。" : "来自当前对话的任务与提醒。"}</p>
       {feedback && <p className="related-task-feedback" role="status">{feedback}</p>}
     </>, detailsHost)}
   </>;

@@ -54,7 +54,7 @@ test("聊天保留紧凑摘要，详情来自最新快照，原任务管理操�
   assert.equal(host.querySelectorAll("input[type=checkbox]").length, 0, "只读清单不伪装成可写控件");
   assert.doesNotMatch(host.textContent!, /其他对话的待办|修改记录|更新时间/);
   assert.equal(counts.at(-1), 2);
-  await act(async () => { doc.querySelector<HTMLButtonElement>(".related-task-summary")!.click(); });
+  await act(async () => { doc.querySelector<HTMLButtonElement>(".related-summary-open")!.click(); });
   assert.equal(opens, 1);
   const select = host.querySelector<HTMLSelectElement>("select")!;
   await act(async () => { select.value = "reminder:7"; select.dispatchEvent(new mounted.dom.window.Event("change", { bubbles: true })); });

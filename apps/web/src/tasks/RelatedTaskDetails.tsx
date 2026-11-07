@@ -1,5 +1,6 @@
 import type { ConversationCard } from "../chat/cards.js";
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import { renderMarkdown } from "../chat/markdown.js";
 import { Icon } from "../ui/Icon.js";
 import { taskColor, taskPriority, taskStatus } from "./related.js";
@@ -7,11 +8,15 @@ import { taskColor, taskPriority, taskStatus } from "./related.js";
 export function RelatedTaskDetails({ card }: { card: ConversationCard }) {
   const { task, project } = card.daylight!;
   const [descriptionOpen, setDescriptionOpen] = useState(false);
-  const completed = task.checklist.filter(item => item.done).length;
+  const completed = task.checklist.filter(item => item.done).length, total = task.checklist.length;
+  const next = task.checklist.find(item => !item.done);
   return <>
     <div className="related-task-overview">
-      <span className="related-task-eyebrow">关联待办</span><h3>{task.title}</h3>
-      {task.checklist.length > 0 && <div className="related-task-progress"><span>{completed}<small>/{task.checklist.length}</small></span><div><strong>子任务进度</strong><progress max={task.checklist.length} value={completed} aria-label="子任务完成进度" /></div></div>}
+      <h3>{task.title}</h3>
+      {total > 0 && <div className="related-task-progress" role="img" aria-label={`子任务已完成 ${completed}/${total}`}>
+        <span style={{ "--progress": `${completed / total * 360}deg` } as CSSProperties}>{completed}<small>/{total}</small></span>
+        <div><strong>{completed === 0 ? "子任务尚未开始" : completed === total ? "子任务已全部完成" : `已完成 ${completed} 项`}</strong>{next && <small>下一步：{next.title}</small>}</div>
+      </div>}
     </div>
     <dl className="related-task-fields">
       <div><dt>项目</dt><dd>{project ?? "项目不可用"}</dd></div>

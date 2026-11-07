@@ -9,7 +9,12 @@ const root = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../" : "..
 const target = resolve(root, "apps/web/dist");
 await mkdir(target, { recursive: true });
 for (const name of ["index.html", "style.css", "tasks.css", "workspace.css", "chat.css", "teams-conversations.css", "daily-reports.css", "daylight.css", "task-workspace.css", "today.css", "inbox.css", "notifications.css", "notes.css", "editor.css", "prototype.css"]) {
-  await copyFile(resolve(root, "apps/web/public", name), resolve(target, name));
+  const source = await readFile(resolve(root, "apps/web/public", name), "utf8");
+  // Keep authored sizes intact while allowing one font preference across all pages.
+  const content = name.endsWith(".css") ? source
+    .replace(/\bfont-size\s*:\s*([^;}]+)/g, declaration => declaration.replace(/\b(\d*\.?\d+)px\b/g, "calc($1px * var(--ui-font-scale, 1))"))
+    .replace(/\bfont\s*:\s*([^;}]+)/g, declaration => declaration.replace(/\b(\d*\.?\d+)px\b/, "calc($1px * var(--ui-font-scale, 1))")) : source;
+  await writeFile(resolve(target, name), content);
 }
 await cp(resolve(root, "apps/web/public/assets"), resolve(target, "assets"), { recursive: true });
 const katexTarget = resolve(target, "vendor/katex");

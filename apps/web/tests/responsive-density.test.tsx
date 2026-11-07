@@ -87,6 +87,16 @@ test("密度使用有上下限的宽高规则，移动断点与交互一致，�
   assert.match(shell, /max-height: calc\(100dvh - var\(--shell-top-space\) - 12px\)/, "更多菜单的可滚动高度随窗口变化");
 });
 
+test("桌面历史收起为 76px 图标栏，展开时导航横排在历史栏顶部", async () => {
+  const css = await readFile(new URL("../public/prototype.css", import.meta.url), "utf8");
+  assert.match(css, /\.workspace-primary-nav \{ flex-direction: row;/);
+  const folded = css.match(/:has\(\.conversation-sidebar\[data-expanded="false"\]\) \{([\s\S]+?)\n  \}/)?.[1];
+  assert.ok(folded);
+  assert.match(folded, /--rail-width: 76px;/);
+  assert.match(folded, /\.workspace-primary-nav \{ flex-direction: column;/);
+  assert.match(folded, /\.workspace-search \{ order: 2; display: flex; \}/, "收起时提供搜索入口");
+});
+
 test("正文保持可读字号、触控目标至少44px，长草稿和短窗口仍可滚动", async () => {
   const [shell, chat] = await Promise.all([
     readFile(new URL("../public/workspace.css", import.meta.url), "utf8"),

@@ -13,7 +13,7 @@ export function connectionStatusPage(origin: string, error?: string, retryAllowe
 <title>Dee · 你的个人智能助手</title><style>
 :root { color-scheme: light dark; font-family: system-ui, sans-serif; color: #252824; background: #fafbf8; }
 body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
-body::before { content: ""; position: fixed; inset: 0 0 auto; height: 64px; -webkit-app-region: drag; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: 52px; -webkit-app-region: drag; }
 main { width: min(520px, calc(100% - 80px)); padding: 40px 0; }
 .brand { font-size: 32px; font-weight: 700; margin-bottom: 48px; } h1 { font-size: 30px; }
 p { line-height: 1.8; color: #656b60; overflow-wrap: anywhere; } .origin { font-size: 14px; }

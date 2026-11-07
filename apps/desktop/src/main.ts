@@ -65,8 +65,8 @@ async function connect(initialError = startupError) {
   settings?.close();
   if (window) { window.destroy(); window = undefined; }
   const current = new BrowserWindow({ title: "Dee · 你的个人智能助手", width: 1440, height: 920, minWidth: 720, minHeight: 560, icon,
-    frame: false, titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 23 },
-    titleBarOverlay: { color: "#f6f8fc", symbolColor: "#49546a", height: 64 }, backgroundColor: "#f6f8fc",
+    frame: false, titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 19 },
+    titleBarOverlay: { color: "#f6f8fc", symbolColor: "#49546a", height: 52 }, backgroundColor: "#f6f8fc",
     webPreferences: { preload: fileURLToPath(new URL("./skills-preload.cjs", import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false, partition: desktopPartition } });
   window = current;
   current.webContents.on("before-input-event", (event, input) => {

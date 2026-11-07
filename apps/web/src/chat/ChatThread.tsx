@@ -1,4 +1,5 @@
 import { Fragment, memo, useState } from "react";
+import type { CSSProperties } from "react";
 import type { ConversationView, ViewEntry } from "@assistant/contracts";
 import { renderMarkdown } from "./markdown.js";
 import { extractLiveInfo } from "./live.js";
@@ -64,33 +65,37 @@ function TurnCard({ turn, live, busy, onRetry, onSettings }: { turn: ChatTurn; l
   const previousErrors = turn.entries.filter(entry => entry.error && entry !== failure);
   const notice = failure?.error ? describeModelError(failure.error) : undefined;
   const hasError = !!failure || turn.entries.some(entry => entry.isError);
+  const steps = activities.length + previousErrors.length, waiting = activities.filter(activity => activity.status === "pending").length;
+  const done = activities.filter(activity => activity.status === "completed").length;
   return <section className="chat-turn" data-turn-id={turn.id}>
     <UserMessageBubble entry={turn.user} />
-    {records.length ? <TeamsRecords records={records} /> : <TeamsMedia activities={activities} />}
-    {(activities.length > 0 || !!intermediate.length || !!previousErrors.length || !!info?.thinking) && <details className="turn-activities">
-      <summary><Icon name="chevron-right" /><span className="activity-count">{activities.length + previousErrors.length}</span><span>{busy ? "正在处理" : hasError ? "有步骤未完成" : "处理过程"}</span></summary>
-      <div className="turn-activity-list">{activities.map(activity => <div className="turn-activity" key={activity.id}>
-        <span className={`activity-status activity-${activity.status}`} aria-label={{ pending: "等待执行", completed: "已完成", error: "未完成", interrupted: "已停止", ended: "已结束，结果未确认", running: "正在执行" }[activity.status]}>{activity.status === "completed" ? <Icon name="check" /> : activity.status === "error" ? <Icon name="circle-alert" /> : activity.status === "interrupted" ? <Icon name="square" /> : activity.status === "ended" ? <Icon name="circle-help" /> : activity.status === "pending" ? <Icon name="clock-3" /> : <span className="activity-spinner" />}</span>
-        <details><summary>{activityLabel(activity.name)}</summary><pre>{activity.text || (activity.status === "interrupted" ? "步骤已停止，尚无完成结果。" : activity.status === "ended" ? "步骤已结束，暂未收到结果。" : "等待执行结果。")}</pre></details>
-      </div>)}</div>
-      {intermediate.map(entry => <div className="turn-intermediate md" key={entry.id} dangerouslySetInnerHTML={{ __html: renderMarkdown(entry.text) }} />)}
-      {previousErrors.map(entry => <details className="model-error-details" key={entry.id}><summary>{describeModelError(entry.error!).title}</summary><pre>{entry.error}</pre></details>)}
-      {info?.thinking && <pre className="turn-thinking">{info.thinking}</pre>}
-    </details>}
-    {notice && failure && <div className="error-system-card model-error-notice" role="alert">
-      <Icon name="circle-alert" />
-      <div className="model-error-content"><p className="model-error-title">{notice.title}</p><p className="model-error-description">{notice.description}</p>
-        <div className="model-error-actions">
-          {!notice.settings && onRetry && turn.user.text && <button type="button" className="text-button" onClick={() => onRetry(turn.user.text)}><Icon name="rotate-ccw" />编辑后重试</button>}
-          {notice.settings && onSettings && <button type="button" className="text-button" onClick={onSettings}><Icon name="settings" />查看服务器模型</button>}
+    <div className="assistant-turn">
+      {records.length ? <TeamsRecords records={records} /> : <TeamsMedia activities={activities} />}
+      {(activities.length > 0 || !!intermediate.length || !!previousErrors.length || !!info?.thinking) && <details className="turn-activities">
+        <summary>{busy ? <span className="activity-spinner" aria-hidden="true" /> : hasError ? <Icon name="circle-alert" /> : <span className="activity-ring" aria-hidden="true" style={{ "--progress": `${steps ? done / steps * 360 : 0}deg` } as CSSProperties} />}<span>{busy ? "正在处理" : hasError ? "有步骤未完成" : `执行了 ${steps} 个步骤`}</span>{waiting > 0 && <span className="activity-count">{waiting} 步等待执行</span>}<Icon name="chevron-down" /></summary>
+        <div className="turn-activity-list">{activities.map(activity => <div className="turn-activity" key={activity.id}>
+          <span className={`activity-status activity-${activity.status}`} aria-label={{ pending: "等待执行", completed: "已完成", error: "未完成", interrupted: "已停止", ended: "已结束，结果未确认", running: "正在执行" }[activity.status]}>{activity.status === "completed" ? <Icon name="check" /> : activity.status === "error" ? <Icon name="circle-alert" /> : activity.status === "interrupted" ? <Icon name="square" /> : activity.status === "ended" ? <Icon name="circle-help" /> : activity.status === "pending" ? <Icon name="clock-3" /> : <span className="activity-spinner" />}</span>
+          <details><summary>{activityLabel(activity.name)}</summary><pre>{activity.text || (activity.status === "interrupted" ? "步骤已停止，尚无完成结果。" : activity.status === "ended" ? "步骤已结束，暂未收到结果。" : "等待执行结果。")}</pre></details>
+        </div>)}</div>
+        {intermediate.map(entry => <div className="turn-intermediate md" key={entry.id} dangerouslySetInnerHTML={{ __html: renderMarkdown(entry.text) }} />)}
+        {previousErrors.map(entry => <details className="model-error-details" key={entry.id}><summary>{describeModelError(entry.error!).title}</summary><pre>{entry.error}</pre></details>)}
+        {info?.thinking && <pre className="turn-thinking">{info.thinking}</pre>}
+      </details>}
+      {notice && failure && <div className="error-system-card model-error-notice" role="alert">
+        <Icon name="circle-alert" />
+        <div className="model-error-content"><p className="model-error-title">{notice.title}</p><p className="model-error-description">{notice.description}</p>
+          <div className="model-error-actions">
+            {!notice.settings && onRetry && turn.user.text && <button type="button" className="text-button" onClick={() => onRetry(turn.user.text)}><Icon name="rotate-ccw" />编辑后重试</button>}
+            {notice.settings && onSettings && <button type="button" className="text-button" onClick={onSettings}><Icon name="settings" />查看服务器模型</button>}
+          </div>
+          <details className="model-error-details"><summary>查看错误详情</summary><pre>{failure.error}</pre></details>
         </div>
-        <details className="model-error-details"><summary>查看错误详情</summary><pre>{failure.error}</pre></details>
-      </div>
-    </div>}
-    {!!responses.length && (records.length ? <details className="teams-records-summary"><summary>助手说明</summary><ResponseCard text={responses.at(-1)!.text} timestamp={responses.at(-1)!.timestamp} /></details>
-      : <div className="message-row assistant-row"><ResponseCard text={responses.at(-1)!.text} timestamp={responses.at(-1)!.timestamp} /></div>)}
-    {info?.text && <div className="message-row assistant-row"><ResponseCard text={info.text} streaming /></div>}
-    {busy && !info?.text && <div className="message-row assistant-row"><div className="assistant-wrapper response-card"><AssistantIdentity /><p className="turn-thinking turn-loading" role="status"><span className="activity-spinner" aria-hidden="true" />{info?.runningTools.length ? "正在执行…" : "思考中…"}</p></div></div>}
+      </div>}
+      {!!responses.length && (records.length ? <details className="teams-records-summary"><summary>助手说明</summary><ResponseCard text={responses.at(-1)!.text} timestamp={responses.at(-1)!.timestamp} /></details>
+        : <div className="message-row assistant-row"><ResponseCard text={responses.at(-1)!.text} timestamp={responses.at(-1)!.timestamp} /></div>)}
+      {info?.text && <div className="message-row assistant-row"><ResponseCard text={info.text} streaming /></div>}
+      {busy && !info?.text && <div className="message-row assistant-row"><div className="assistant-wrapper response-card"><AssistantIdentity /><p className="turn-thinking turn-loading" role="status"><span className="activity-spinner" aria-hidden="true" />{info?.runningTools.length ? "正在执行…" : "思考中…"}</p></div></div>}
+    </div>
   </section>;
 }
 

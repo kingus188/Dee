@@ -6,6 +6,7 @@ import { useConversation } from "../dist/chat/useConversation.js";
 import { apiClient } from "../dist/api/socket.js";
 import { ConversationHistory } from "../dist/ui/ConversationHistory.js";
 import { readWorkspaceRoute, workspaceHash } from "../dist/ui/navigation.js";
+import { historyGroups, historyTime } from "../dist/ui/history-groups.js";
 import { mount } from "./dom.js";
 
 function view(id: number): ConversationView {
@@ -97,4 +98,16 @@ test("Teams 固定链接使用独立的不透明编号，异常链接仅返回�
   assert.equal(readWorkspaceRoute("#teams/12").conversationId, undefined, "Teams 编号不能订阅助手会话");
   assert.equal(workspaceHash({ ...route, page: "chat" }), "#chat");
   assert.equal(workspaceHash({ ...route, page: "teams", conversationId: 12 }), workspaceHash(route));
+});
+
+test("历史对话按本地日期分组，只有带时刻的今天条目显示时间", () => {
+  const now = new Date(2026, 10, 7, 12);
+  const at = (day: number, hour = 9) => new Date(2026, 10, day, hour, 8).toISOString();
+  const item = (id: number, createdAt: string) => ({ id, title: String(id), createdAt });
+  const groups = historyGroups([item(1, at(7)), item(2, at(6)), item(3, at(3)), item(4, at(-1))], undefined, now);
+  assert.deepEqual(groups.map(group => [group.label, group.items.map(entry => entry.id)]), [["今天", [1]], ["昨天", [2]], ["本周", [3]], ["更早", [4]]]);
+  assert.equal(historyTime(at(7), now), "09:08");
+  assert.equal(historyTime("2026-11-07", now), "");
+  assert.equal(historyTime("bad", now), "");
+  assert.deepEqual(historyGroups([item(1, at(1))], "搜索结果", now).map(group => group.label), ["搜索结果"]);
 });

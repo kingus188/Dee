@@ -22,7 +22,7 @@ test("微信历史是 Dee 会话，保留固定链接与真实标题并说明回
   const { dom } = await mount(t, <ConversationHistory active currentId={12} onOpen={id => opened.push(id)} onClose={() => {}} />);
   const link = dom.window.document.querySelector<HTMLAnchorElement>(".history-list a")!;
   assert.equal(link.getAttribute("href"), "#chat/12");
-  assert.match(link.textContent!, /产品方案跟进.*微信里的 Dee/);
+  assert.match(link.textContent!, /微信产品方案跟进/);
   assert.match(link.title, /回复可能同步到此会话绑定的微信接收方/);
   await act(async () => link.click());
   assert.deepEqual(opened, [12]);
