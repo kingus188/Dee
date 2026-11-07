@@ -99,6 +99,12 @@ test("窄屏关联任务抽屉有模态语义、焦点圈定、Escape 和移除�
   const toggle = doc.querySelector<HTMLButtonElement>(".related-panel-toggle")!, panel = doc.querySelector<HTMLElement>("#related-tasks-panel")!;
   assert.ok(toggle);
   assert.equal(panel.hidden, true, "窄屏不自动展开任务详情");
+  const composerRelated = doc.querySelector<HTMLButtonElement>(".composer-related")!;
+  assert.equal(composerRelated.getAttribute("aria-controls"), panel.id);
+  await act(async () => { composerRelated.click(); });
+  assert.equal(panel.hidden, false);
+  await act(async () => { doc.querySelector<HTMLButtonElement>(".related-panel-close")!.click(); });
+  assert.equal(panel.hidden, true);
   await act(async () => { toggle.focus(); toggle.click(); });
   assert.equal(panel.hidden, false);
   assert.equal(panel.getAttribute("role"), "dialog");

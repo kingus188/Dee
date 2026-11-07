@@ -20,7 +20,8 @@ test("React 浏览器产物已打包，不依赖 npm 裸导入或内联按钮入
 
 test("workspace stylesheets and current React Lucide icons are packaged", async () => {
   const sprite = await readFile(new URL("assets/icons.svg", root), "utf8");
-  for (const name of ["send", "square-check", "chevron-left", "search", "message-circle-more", "chevron-up", "copy", "file-text", "message-circle", "list-todo", "brain", "paperclip", "notebook-pen", "sparkles", "chevron-right", "settings", "plug", "shield-check", "loader-circle", "check", "calendar-days", "more-horizontal", "rotate-ccw", "users-round"]) assert.ok(sprite.includes(`id="${name}"`), name);
+  for (const name of ["arrow-up", "plus", "square-check", "chevron-left", "search", "message-circle-more", "chevron-up", "copy", "file-text", "message-circle", "list-todo", "brain", "notebook-pen", "sparkles", "chevron-right", "settings", "sliders-horizontal", "plug", "shield-check", "loader-circle", "check", "calendar-days", "more-horizontal", "rotate-ccw", "users-round"]) assert.ok(sprite.includes(`id="${name}"`), name);
+  assert.ok((await readFile(new URL("prototype.css", root))).length > 0);
   assert.ok((await readFile(new URL("workspace.css", root))).length > 0);
   assert.ok((await readFile(new URL("today.css", root))).length > 0);
   assert.ok((await readFile(new URL("teams-conversations.css", root))).length > 0);

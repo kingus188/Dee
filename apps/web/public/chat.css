@@ -22,6 +22,7 @@
 .user-text-body { white-space: pre-wrap; font-size: 15px; line-height: 1.7; }
 .message-time { color: var(--chat-muted); font-size: 13px; font-weight: 400; line-height: 1.5; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .user-row > .message-time { margin-right: 2px; }
+.message-delivery-status { color: var(--chat-muted); font-size: 12px; }
 .user-attachments-grid { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: 80%; }
 .teams-records-inline { width: 100%; min-width: 0; }
 .teams-records-chat h3 { margin: 16px 0 4px; font-size: 15px; font-weight: 600; }

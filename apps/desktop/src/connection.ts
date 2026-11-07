@@ -10,11 +10,11 @@ const credentialStorage = {
   ...(process.platform === "linux" ? { getSelectedStorageBackend: () => safeStorage.getSelectedStorageBackend() } : {}),
 };
 
-export function loadConnection(): { config?: ConnectionConfig; password?: string } {
+export function loadConnection(): { config?: ConnectionConfig; password?: string; error?: string } {
   const path = join(app.getPath("userData"), "desktop-connection.json");
   if (!existsSync(path)) return {};
   try { return decodeConnection(readFileSync(path, "utf8"), credentialStorage); }
-  catch { return {}; }
+  catch { return { error: "已保存的连接配置读取失败。请从应用菜单打开「连接设置…」检查后台地址；原配置文件已保留。" }; }
 }
 
 export function saveConnection(config: ConnectionConfig, password: string | undefined): { persistedPassword: boolean } {

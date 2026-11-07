@@ -11,8 +11,8 @@
 ## 安装与配置
 
 ```bash
-git clone https://github.com/kingus188/pi-durable-assistant.git
-cd pi-durable-assistant
+git clone https://github.com/kingus188/Dee.git
+cd Dee
 corepack enable
 pnpm install --frozen-lockfile
 cp .env.example .env

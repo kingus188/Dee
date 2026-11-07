@@ -17,3 +17,4 @@ export * from "./teams/reply.js";
 export * from "./teams/away.js";
 export * from "./mail.js";
 export * from "./daylight/index.js";
+export * from "./daily-reports.js";

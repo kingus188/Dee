@@ -10,8 +10,8 @@
 - 已在模型服务商设置 API 预算和额度限制；本项目不会替你阻止高额调用。
 
 ```bash
-git clone https://github.com/kingus188/pi-durable-assistant.git
-cd pi-durable-assistant
+git clone https://github.com/kingus188/Dee.git
+cd Dee
 cp .env.example .env
 ```
 
@@ -160,9 +160,11 @@ PostgreSQL 迁移验收（2026-10-21）：上述服务器实例已切换到独�
 
 ## 7. 直接使用 cpolar 公网访问（2026-10-26）
 
-当前公网入口：**<https://565784c1.r21.vip.cpolar.cn>**。直接使用 cpolar 的 HTTPS 域名，不需要自有域名或 DNS 配置。该地址为随机分配，重启或重新分配后可能变化，不应当作固定域名。
+当前固定公网入口：**<https://xiaod.vip.cpolar.cn>**（`xiaod` 对应“小 D”，方便记忆）。使用账号套餐内已预留的 cpolar 二级子域名，不需要自有域名或 DNS 配置；不再使用随机地址或原来的长名称。已实测重启助手穿透服务后仍分配同一地址。
 
 首次打开主页时，浏览器会要求登录：用户名为 `demo`，密码沿用现有服务器访问口令。本次没有更改口令，也没有关闭鉴权。需要新设备登录时使用原口令，不要把口令或会话 Cookie 发到聊天、URL 或仓库中。
+
+官网当前“预留”记录为 `China VIP / xiaod`，描述为 `小 D 助手固定入口`。服务器私有 `pi-durable.yml` 在 `pi-durable-assistant` 隧道下设置 `region: cn_vip` 和 `subdomain: xiaod`；必须保留该预留记录和配置，不能仅给随机隧道改显示名称。原长名称 `pidurableassistant` 的账号预留记录保留，但不再绑定本助手隧道。修改私有配置后只重启本助手的 cpolar 单元，使 `LoadCredential` 重新载入。
 
 ### 接入方式与认证
 
@@ -185,9 +187,11 @@ PostgreSQL 迁移验收（2026-10-21）：上述服务器实例已切换到独�
 | `/usr/local/etc/cpolar/pi-durable.yml` | 服务器私有认证/隧道配置，root 所有、`0600`，不得提交 |
 | `updates/cpolar-session-20261026-01/deployment.json` | 部署前的精确镜像、容器、挂载和 13 个 Compose 覆盖文件清单，不含环境值 |
 
-cpolar 单元使用动态用户与 `LoadCredential`，通过 `%d/cpolar.yml` 读取管理器提供的只读凭据副本；仅在本机开放 `4041` 检查入口，隧道设置 `inspect: false`。管理页 `9200` 属于原 cpolar 进程，不代表此独立进程的在线隧道；新地址查看本服务日志或 cpolar 官网后台。原 ai-tutor 的进程和公网地址均未更换。
+cpolar 单元使用动态用户与 `LoadCredential`，通过 `%d/cpolar.yml` 读取管理器提供的只读凭据副本；仅在本机开放 `4041` 检查入口，隧道设置 `inspect: false`。管理页 `9200` 属于原 cpolar 进程，不代表此独立进程的在线隧道；固定域名的在线状态查看本服务日志或 cpolar 官网后台。学习项目由独立的 `cpolar.service` 管理，本助手单独重启不会重启其进程。
 
-本次 API 由 `pi-durable-verify-api:notes-typora-20261023-01` 选择性更新为 `pi-durable-verify-api:cpolar-session-20261026-01`，只加入会话模块及 HTTP/WS 认证调用，不发布工作区其他未提交变化。构建输入保存在服务器上述更新目录。Web 保持 `pi-durable-verify-web:todo-notifications-20261026-01`，未重建；PostgreSQL 也未重建。API 原有环境值、模型配置和持久挂载均保持一致。由于微信桥使用 `network_mode: service:api`，API 和微信桥一起重建，并验证微信桥已指向新的 API 网络命名空间；未更换其镜像或状态卷。
+首次会话鉴权补丁发布时，API 由 `pi-durable-verify-api:notes-typora-20261023-01` 选择性更新为 `pi-durable-verify-api:cpolar-session-20261026-01`，只加入会话模块及 HTTP/WS 认证调用，没有发布工作区其他未提交变化，构建输入保存在服务器上述更新目录。当时 Web 使用 `pi-durable-verify-web:todo-notifications-20261026-01`，未重建；PostgreSQL 也未重建。API 原有环境值、模型配置和持久挂载保持一致，微信桥随 API 一起重建，并验证共用新的 API 网络命名空间。
+
+此次缩短域名验收时，现有 API 和 Web 运行版本已分别为 `pi-durable-verify-api:personal-agent-20261026-01` 和 `pi-durable-verify-web:personal-agent-20261026-01`；本轮保持这些现有版本，只改穿透域名，没有重建或回退业务镜像。
 
 ### 运维与回滚
 
@@ -203,15 +207,27 @@ systemctl is-enabled cpolar-pi-durable
 sudo journalctl -u cpolar-pi-durable -g 'Tunnel established at' --no-pager -n 10
 ```
 
-最后一项含历史地址，仍需实际访问确认。只重载公网网关时：
+最后一项含历史地址，仍需使用当前固定入口实际访问确认。
+
+当前固定入口的匿名检查应返回 `401`，而非公开业务数据；提供原口令后 `/api/info` 应返回 `200`。第二条命令会交互询问口令，不要把口令拼进命令或 URL，输出不包含 Cookie：
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' https://xiaod.vip.cpolar.cn/
+curl -u demo -fsS -o /dev/null -w '%{http_code}\n' https://xiaod.vip.cpolar.cn/api/info
+```
+
+
+只重载公网网关时：
 
 ```bash
 docker compose -f compose.cpolar.yaml up -d --no-deps --force-recreate --wait gateway
 ```
 
-认证补丁必须叠加在 `deployment.json` 记录的原部署覆盖文件之后，再加更新目录中的 `compose.auth.yaml`。不要只用早期 `compose.verify.yaml` 重建整个项目，它与实际运行镜像和环境不一致。API 更新时须一并处理共享网络的微信桥，不能只替换 API 后留下旧命名空间。
+`deployment.json` 和 `compose.auth.yaml` 记录的是首次鉴权补丁的历史部署基础，不是当前所有业务版本的发布清单。当前 `personal-agent` 运行版本已经验证可使用 Cookie 会话；不要为了变更域名再次叠加旧认证镜像覆盖文件，否则会降回早期补丁版本。也不要只用早期 `compose.verify.yaml` 重建整个项目。应用升级应先核对正在运行容器的 Compose 文件与镜像；API 更新时须一并处理共享网络的微信桥。
 
-需要回滚认证补丁时，先停止并禁用本次公网 cpolar 单元，再按清单恢复原 API 镜像及微信桥，保留所有数据卷；旧版本没有 Cookie WS 鉴权，不能在回滚后继续将此公网入口当作可用服务。禁止 `down -v`，也不要用旧 SQLite 文件覆盖当前 PostgreSQL 数据。本次保留了原镜像和回滚清单，未执行生产回滚或灾难恢复演练。
+只变更或回退公网域名时，在账号保留目标子域名后，修改私有配置的 `subdomain/region` 并仅重启本助手穿透服务；不需要降级 API、重建微信桥或恢复数据库。新域名不继承旧域名 Cookie，需要重新登录。
+
+历史认证补丁回滚清单只适用于当时的版本，不能直接覆盖当前 `personal-agent` 部署。若确需回滚业务版本，应先核对当前数据库兼容性、备份和实际部署文件，并停止不兼容的公网入口；旧版本没有 Cookie WS 鉴权，不能继续将该入口当作可用服务。禁止 `down -v`，也不要用旧 SQLite 文件覆盖当前 PostgreSQL 数据。本次文档同步不执行任何生产回滚或恢复演练。
 
 ### 验证范围
 
@@ -220,3 +236,5 @@ docker compose -f compose.cpolar.yaml up -d --no-deps --force-recreate --wait ga
 公网已验证：首页匿名 401 并带 Basic 挑战，正确原口令返回 200 并建立受保护会话；Cookie API 返回 200，篡改 Cookie 返回 401，跨源和缺少 Origin 的写请求均返回 403。真实 Chromium 在 HTTPS 安全上下文完成原口令登录、主页/接口读取与 WSS 只读 `/api/info` 请求，均返回 200，网页 JavaScript 无法读取 HttpOnly Cookie。验收没有发送模型问题、创建提醒或发送微信/Teams 消息，未通过首页执行应用 JS 自动创建对话。长时间连接和实际业务使用仍需正常运营观察。
 
 额外的 WSS 检查在同一连接上间隔 33 秒发送两次只读 `/api/info` 请求，均返回 200，实际连接持续 34.675 秒；这验证了跨两个后端心跳周期后仍可交互，不依赖代理是否向浏览器暴露 ping 帧。公网 HTTP 地址返回 404 且无口令挑战，仅使用 HTTPS 登录。
+
+本轮切换为短域名 `xiaod` 后再次验证：HTTPS 证书正常，真实浏览器以原口令建立新域名会话，主页、API 及 WSS 只读请求均返回 200。两次启动穿透进程均得到上述固定地址；本轮没有重启业务 API、Web、数据库或微信桥。学习项目也按要求独立切换为固定入口 <https://aitutor.vip.cpolar.cn>，其登录和真实流式请求均验证通过。

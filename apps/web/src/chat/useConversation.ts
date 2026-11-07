@@ -5,6 +5,7 @@ import type { ConnectionState } from "../api/socket.js";
 import { openDirectConversation, newDirectConversation } from "../api/conversations.js";
 import { readServerInfo } from "../api/server.js";
 import { showToast } from "../ui/toast.js";
+import { useMessageDelivery } from "./useMessageDelivery.js";
 
 export function useConversation(initialId?: number) {
   const [view, setView] = useState<ConversationView | null>(null);
@@ -14,6 +15,7 @@ export function useConversation(initialId?: number) {
   const id = useRef<number | null>(initialId ?? null), subscribed = useRef(false), selection = useRef(0);
   const connecting = useRef<Promise<number> | null>(null), creating = useRef<Promise<number> | null>(null);
   const switching = useRef<Promise<number> | null>(null);
+  const { pendingMessages, send, reconcile } = useMessageDelivery(view, id, connectDirectChat);
   function openConversation(nextId: number): Promise<number> {
     if (!Number.isSafeInteger(nextId) || nextId < 1) return Promise.reject(new Error("对话编号无效"));
     if (id.current === nextId) {
@@ -47,7 +49,16 @@ export function useConversation(initialId?: number) {
   useEffect(() => {
     let mounted = true;
     let previousBoots: number | undefined;
-    const offView = apiClient.onView(data => { if (mounted && data.conversationId === id.current) setView(data); });
+    let frames = Promise.resolve(), revision = 0;
+    const offView = apiClient.onView(data => {
+      if (!mounted || data.conversationId !== id.current) return;
+      const version = ++revision;
+      frames = frames.then(async () => {
+        if (!mounted || data.conversationId !== id.current) return;
+        await reconcile(data);
+        if (mounted && version === revision && data.conversationId === id.current) setView(data);
+      });
+    });
     const offConnection = apiClient.onConnection(status => {
       if (!mounted) return;
       setConnection(status);
@@ -68,5 +79,5 @@ export function useConversation(initialId?: number) {
     window.addEventListener("pagehide", close); window.addEventListener("pageshow", resume);
     return () => { mounted = false; offView(); offConnection(); window.removeEventListener("pagehide", close); window.removeEventListener("pageshow", resume); };
   }, []);
-  return { view, connection, info, recoveredUntil, connectDirectChat, newConversation, openConversation };
+  return { view, pendingMessages, send, connection, info, recoveredUntil, connectDirectChat, newConversation, openConversation };
 }

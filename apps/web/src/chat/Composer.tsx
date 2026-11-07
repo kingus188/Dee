@@ -8,11 +8,13 @@ import { showToast } from "../ui/toast.js";
 import { Icon } from "../ui/Icon.js";
 import { commandSuggestions, parseCommand, slashCommands } from "./commands.js";
 import { CommandMenu } from "./CommandMenu.js";
+import type { MessageSender } from "./useMessageDelivery.js";
 
-export function Composer({ draft, setDraft, view, connect, onSent, onNewConversation, conversationPending = false }: {
+export function Composer({ draft, setDraft, view, connect, send, onSendStart, onSent, onNewConversation, onRelated, conversationPending = false }: {
   draft: string; setDraft: (text: string) => void; view: ConversationView | null;
   connect: () => Promise<number>; onSent: () => void; onNewConversation: () => Promise<void>;
-  conversationPending?: boolean;
+  conversationPending?: boolean; send?: MessageSender; onSendStart?: () => void;
+  onRelated?: () => void;
 }) {
   const [sending, setSending] = useState(false);
   const [, refreshFiles] = useState(0);
@@ -133,13 +135,21 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
         const payload = JSON.stringify(body);
         let retry = retries.current.get(owner);
         if (retry?.payload !== payload) { retry = { payload, requestId: generateUuid() }; retries.current.set(owner, retry); }
-        const conversationId = await connect();
-        if (context.current.conversationPending || owner !== conversationId
-          || !context.current.view || context.current.view.conversationId !== conversationId
-          || (context.current.view?.channel === "wechat" && !wechat)) {
-          throw new Error("会话来源已变化，请核对当前会话后重新发送");
+        const checkDestination = (conversationId: number) => {
+          if (context.current.conversationPending || owner !== conversationId
+            || !context.current.view || context.current.view.conversationId !== conversationId
+            || (context.current.view?.channel === "wechat" && !wechat)) {
+            throw new Error("会话来源已变化，请核对当前会话后重新发送");
+          }
+        };
+        const request = { ...body, requestId: retry.requestId };
+        onSendStart?.();
+        if (send) await send(request, sentFiles, checkDestination);
+        else {
+          const conversationId = await connect();
+          checkDestination(conversationId);
+          await sendMessage(conversationId, request);
         }
-        await sendMessage(conversationId, { ...body, requestId: retry.requestId });
         retries.current.delete(owner);
         if (!context.current.conversationPending && context.current.view?.conversationId === owner) { onSent(); setHelp(false); }
         for (const file of sentFiles) remove(owner, file);
@@ -162,7 +172,7 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
     </div>
     {menuVisible && <CommandMenu commands={suggestions} selected={selectedIndex} busy={busy} help={help && !draft.trim()} onSelect={command => { void submit(`/${command.name}`); textarea.current?.focus(); }} onClose={() => { dismissMenu(true); textarea.current?.focus(); }} />}
     <div className="composer-main">
-      <button type="button" className="icon-button attach-button" disabled={processing || sourcePending} aria-label="添加附件（图片或文件）" title="添加附件（图片或文件）" onClick={() => { pickerOwner.current = owner ?? undefined; fileInput.current!.value = ""; fileInput.current!.click(); }}><Icon name="paperclip" /></button>
+      <button type="button" className="icon-button attach-button" disabled={processing || sourcePending} aria-label="添加附件（图片或文件）" title="添加附件（图片或文件）" onClick={() => { pickerOwner.current = owner ?? undefined; fileInput.current!.value = ""; fileInput.current!.click(); }}><Icon name="plus" /></button>
       <textarea ref={textarea} className="chat-textarea" id="chat-textarea" aria-label={wechat ? "给微信里的 Dee 发消息" : "给小 D 发消息"} aria-describedby={wechat ? "wechat-conversation-notice" : undefined} role="combobox" aria-autocomplete="list" aria-expanded={menuVisible} aria-controls={menuVisible ? "composer-commands" : undefined} aria-activedescendant={menuVisible ? `command-${suggestions[selectedIndex].name}` : undefined} placeholder={wechat ? "继续与微信里的 Dee 对话…" : "随心输入，告诉我你的想法或需要…"} rows={1} value={draft} onChange={event => setDraft(event.target.value)}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
       onKeyDown={event => {
@@ -176,8 +186,9 @@ export function Composer({ draft, setDraft, view, connect, onSent, onNewConversa
         }
       }}
       onPaste={event => { if (event.clipboardData.files.length) { event.preventDefault(); void addFiles(event.clipboardData.files); } }} />
-      <div className="composer-actions">{busy && <button type="button" className="btn-abort" id="btn-abort" style={{ display: "inline-flex" }} onClick={() => { void stopReply().catch(() => showToast("暂时没能停止回复，请重试。", "error")); }}>停止</button>}
-        <button type="button" className="btn-send" id="btn-send" aria-label={sending ? "正在发送" : wechat ? "发送给微信里的 Dee，回复可能同步到微信" : "发送消息"} aria-describedby={wechat ? "wechat-conversation-notice" : undefined} aria-busy={sending} disabled={sending || processing || sourcePending || (!draft.trim() && !attachments.length)} onClick={() => void submit()}><Icon name="send" /></button>
+      {onRelated && <button type="button" className="composer-related" aria-controls="related-tasks-panel" onClick={onRelated}><Icon name="square-check" />关联待办</button>}
+      <div className="composer-actions"><span className="composer-keyboard-hint">↵ 发送 · ⇧↵ 换行</span>{busy && <button type="button" className="btn-abort" id="btn-abort" style={{ display: "inline-flex" }} onClick={() => { void stopReply().catch(() => showToast("暂时没能停止回复，请重试。", "error")); }}>停止</button>}
+        <button type="button" className="btn-send" id="btn-send" aria-label={sending ? "正在发送" : wechat ? "发送给微信里的 Dee，回复可能同步到微信" : "发送消息"} aria-describedby={wechat ? "wechat-conversation-notice" : undefined} aria-busy={sending} disabled={sending || processing || sourcePending || (!draft.trim() && !attachments.length)} onClick={() => void submit()}><Icon name="arrow-up" /></button>
       </div>
     </div>
     <input ref={fileInput} type="file" multiple className="file-input-hidden" accept="image/png,image/jpeg,image/webp,image/gif,text/*,.md,.json,.ts,.tsx,.py,.yaml,.yml,.csv,.log,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.docx" onChange={event => { const selectedOwner = pickerOwner.current ?? owner; pickerOwner.current = undefined; if (event.target.files) void addFiles(event.target.files, selectedOwner); }} />

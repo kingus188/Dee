@@ -68,6 +68,14 @@ test("真实 WebSocket 完成发送、附件、去重、重连、任务、记忆
     const done = await rpc.view(view => !view.busy && view.entries.some(entry => entry.text === "演示任务完成。"));
     assert.equal(done.entries.filter(entry => entry.kind === "user").length, 1);
     assert.equal(done.entries.find(entry => entry.kind === "user")!.attachments?.length, 2);
+    const delivery = await rpc.request(`/api/conversations/${id}/messages?requestId=ws-once`);
+    assert.equal(delivery.status, 200);
+    assert.deepEqual(delivery.data, { submissionId: (sent.data as { submissionId: number }).submissionId, status: "done", entryId: done.entries.find(entry => entry.kind === "user")!.id });
+    assert.equal((await rpc.request(`/api/conversations/${id}/messages`)).status, 400);
+    assert.equal((await rpc.request(`/api/conversations/${id}/messages?requestId=${"x".repeat(101)}`)).status, 400);
+    assert.equal((await rpc.request(`/api/conversations/${id}/messages?requestId=missing`)).data, null);
+    const other = await rpc.request("/api/conversations", {});
+    assert.equal((await rpc.request(`/api/conversations/${(other.data as { id: number }).id}/messages?requestId=ws-once`)).data, null);
     assert.equal((await rpc.request(`/api/conversations/${id}/management`)).status, 200);
     assert.equal((await rpc.request("/api/personal/memory", { text: "简洁回复", requestId: "ws-memory" })).status, 201);
     assert.equal((await rpc.request("/api/personal")).status, 200);
@@ -89,7 +97,10 @@ test("真实 WebSocket 完成发送、附件、去重、重连、任务、记忆
     assert.equal((await rpc.view(view => view.conversationId === id)).entries.filter(entry => entry.kind === "user").length, 1);
     await rpc.request(`/api/conversations/${id}/messages`, { text: "停止检查", requestId: "ws-abort" });
     await rpc.view(view => !!view.live.tools?.some(tool => tool.name === "wait_seconds" && tool.status === "running"));
+    await rpc.request(`/api/conversations/${id}/messages`, { text: "排队后停止", requestId: "ws-queued-stop", mode: "steer" });
+    assert.equal(((await rpc.request(`/api/conversations/${id}/messages?requestId=ws-queued-stop`)).data as { status: string }).status, "queued");
     assert.equal((await rpc.request(`/api/conversations/${id}/abort`, {})).status, 200);
+    assert.equal(((await rpc.request(`/api/conversations/${id}/messages?requestId=ws-queued-stop`)).data as { status: string }).status, "unanswered");
     await rpc.view(view => !view.busy && view.entries.some(entry => entry.text === "停止检查"));
     const closed = once(socket, "close"); await server.close(); await closed;
   } finally { for (const socket of sockets) socket.terminate(); await server.close(); await rm(dir, { recursive: true, force: true }); }

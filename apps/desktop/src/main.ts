@@ -8,24 +8,33 @@ import { loadConnection, saveConnection } from "./connection.js";
 import { basicAuth, type ConnectionConfig } from "./connection-config.js";
 import { isAppConnection, isAppUrl, isExternalUrl, validateWebUrl } from "./policy.js";
 import { isPinnedCertificate } from "./certificate-trust.js";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { showMailNotification, startMailNotifications, type MailNotificationStatus } from "./mail-notifications.js";
+import { selectServer } from "./network.js";
 
+// Electron captures this name for safeStorage before ready; keep the existing keychain identity.
 app.setName("Pi Durable Assistant");
+// Keep existing connection settings, certificate pins and local skill state across the rename.
+const userData = join(app.getPath("appData"), "Pi Durable Assistant");
+mkdirSync(userData, { recursive: true });
+app.setPath("userData", userData);
 const icon = fileURLToPath(new URL("../assets/icon.png", import.meta.url));
 const connectionPage = new URL("../connection.html", import.meta.url).href;
 let window: BrowserWindow | undefined;
 let settings: BrowserWindow | undefined;
 let config: ConnectionConfig = { url: "http://127.0.0.1:3000" };
+let activeOrigin = config.url;
+let pin: unknown;
 let password: string | undefined;
+let startupError: string | undefined;
 let stopNotifications = () => {};
 let initialized = false;
 const desktopPartition = "persist:desktop-web";
+let mailNotificationLabel = "邮件提醒：等待服务连接";
 
 function setMailNotificationLabel(label: string) {
-  const item = Menu.getApplicationMenu()?.getMenuItemById("mail-notification-status");
-  if (item) item.label = `邮件提醒：${label}`;
+  mailNotificationLabel = `邮件提醒：${label}`;
 }
 
 function showMailNotificationStatus(status: MailNotificationStatus) {
@@ -36,7 +45,7 @@ function showMailNotificationStatus(status: MailNotificationStatus) {
 
 function showConnection() {
   if (settings) { settings.show(); settings.focus(); return; }
-  const current = new BrowserWindow({ title: "连接小 D", width: 660, height: 650, icon,
+  const current = new BrowserWindow({ title: "连接 Dee", width: 660, height: 650, icon,
     webPreferences: { preload: fileURLToPath(new URL("./preload.cjs", import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false } });
   settings = current;
   current.on("closed", () => { settings = undefined; });
@@ -50,16 +59,30 @@ function trustedSettings(event: IpcMainInvokeEvent) {
   return Boolean(settings && event.sender === settings.webContents && event.senderFrame === settings.webContents.mainFrame && event.senderFrame.url === connectionPage);
 }
 
-async function connect(initialError?: string) {
+async function connect(initialError = startupError) {
   stopNotifications();
   setMailNotificationLabel("等待服务连接");
   settings?.close();
   if (window) { window.destroy(); window = undefined; }
-  const current = new BrowserWindow({ title: "小 D · 你的个人智能助手", width: 1200, height: 820, minWidth: 720, minHeight: 560, icon,
+  const current = new BrowserWindow({ title: "Dee · 你的个人智能助手", width: 1440, height: 920, minWidth: 720, minHeight: 560, icon,
+    frame: false, titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 23 },
+    titleBarOverlay: { color: "#f6f8fc", symbolColor: "#49546a", height: 64 }, backgroundColor: "#f6f8fc",
     webPreferences: { preload: fileURLToPath(new URL("./skills-preload.cjs", import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false, partition: desktopPartition } });
   window = current;
-  const origin = config.url;
-  let failed = false;
+  current.webContents.on("before-input-event", (event, input) => {
+    if (!(process.platform === "darwin" ? input.meta : input.control) || input.type !== "keyDown") return;
+    if (input.key === ",") { event.preventDefault(); showConnection(); }
+    // Keep standard editing shortcuts after removing the native Edit menu on macOS.
+    if (process.platform === "darwin") {
+      const actions: Record<string, () => void> = { c: () => current.webContents.copy(), x: () => current.webContents.cut(),
+        v: () => current.webContents.paste(), a: () => current.webContents.selectAll(),
+        z: () => input.shift ? current.webContents.redo() : current.webContents.undo(), q: () => app.quit() };
+      const action = actions[input.key.toLowerCase()];
+      if (action) { event.preventDefault(); action(); }
+    }
+  });
+  let origin = config.url;
+  let failed = false, loading = true;
   const showFailure = () => {
     if (window !== current || current.isDestroyed() || failed) return;
     failed = true;
@@ -69,14 +92,14 @@ async function connect(initialError?: string) {
       .catch(error => console.error("Desktop connection status page failed to load", error));
   };
   current.on("closed", () => { if (window === current) window = undefined; });
-  current.webContents.on("will-navigate", (event, url) => { if (!isAppUrl(url, origin)) event.preventDefault(); });
-  current.webContents.on("will-redirect", (event, url) => { if (!isAppUrl(url, origin)) event.preventDefault(); });
+  current.webContents.on("will-navigate", (event, url) => { if (initialError || !isAppUrl(url, origin)) event.preventDefault(); });
+  current.webContents.on("will-redirect", (event, url) => { if (initialError || !isAppUrl(url, origin)) event.preventDefault(); });
   current.webContents.setWindowOpenHandler(({ url }) => {
     if (isExternalUrl(url)) void shell.openExternal(url).catch(() => {});
     return { action: "deny" };
   });
   current.webContents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => {
-    if (mainFrame && code !== -3) showFailure();
+    if (mainFrame && code !== -3 && !loading) showFailure();
   });
   current.webContents.on("did-finish-load", () => {
     if (window !== current || !isAppUrl(current.webContents.getURL().split("#")[0] ?? "", origin)) return;
@@ -93,10 +116,25 @@ async function connect(initialError?: string) {
     }, (input, init) => session.fromPartition(desktopPartition).fetch(String(input), init), showMailNotificationStatus);
   });
   try {
-    await current.loadURL(connectionStatusPage(origin, initialError));
+    await current.loadURL(connectionStatusPage(origin, initialError, !initialError));
     if (initialError || window !== current) return;
-    await current.loadURL(origin);
+    const selectedConfig = config;
+    const selected = await selectServer(config, pin, basicAuth(config.username, password));
+    if (window !== current || config !== selectedConfig) return;
+    origin = activeOrigin = selected.origin;
+    if (selected.lanUrl && config.lanUrl !== selected.lanUrl) {
+      config = { ...config, lanUrl: selected.lanUrl };
+      try { saveConnection(config, password); }
+      catch { console.warn("LAN connection verified but preference could not be saved"); }
+    }
+    try { await current.loadURL(origin); }
+    catch {
+      if (origin === config.url || window !== current) throw new Error("Server unavailable");
+      origin = activeOrigin = config.url;
+      await current.loadURL(origin);
+    }
   } catch { showFailure(); }
+  finally { loading = false; }
 }
 
 function showMainWindow() {
@@ -114,26 +152,27 @@ else {
   app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
   app.on("before-quit", () => { stopNotifications(); });
   void app.whenReady().then(async () => {
+    app.setName("Dee");
     app.dock?.setIcon(icon);
     const loaded = loadConnection();
     if (loaded.config) config = loaded.config;
     password = loaded.password;
-    let startupError: string | undefined;
+    startupError = loaded.error;
     const serverUrl = process.env.ASSISTANT_SERVER_URL || process.env.ASSISTANT_WEB_URL;
     if (serverUrl) {
       try {
         const url = validateWebUrl(serverUrl);
         // Never reuse saved credentials for an environment-selected different origin.
-        if (url !== config.url) { config = { url }; password = undefined; } else config.url = url;
-      } catch { startupError = "连接地址设置无效。请从应用菜单手动打开「连接设置…」，检查后台服务器地址。"; }
+        if (url !== config.url) { config = { url }; password = undefined; startupError = undefined; } else config.url = url;
+      } catch { startupError = "连接地址设置无效。请按 Cmd+,（Windows/Linux 使用 Ctrl+,）打开连接设置，检查后台服务器地址。"; }
     }
     const web = session.fromPartition(desktopPartition);
+    activeOrigin = config.url;
     const certificatePath = join(app.getPath("userData"), "desktop-certificate.json");
-    let pin: unknown;
     try { pin = existsSync(certificatePath) ? JSON.parse(readFileSync(certificatePath, "utf8")) : undefined; }
-    catch { startupError = "本机证书配置读取失败。请检查服务证书配置后重试；连接设置仍可从应用菜单手动打开。"; }
+    catch { startupError = "本机证书配置读取失败。请检查服务证书配置后重试；按 Cmd+,（Windows/Linux 使用 Ctrl+,）可打开连接设置。"; }
     web.setCertificateVerifyProc((request, callback) => {
-      const trusted = request.errorCode === 0 || isPinnedCertificate(config.url, pin, request.hostname, request.certificate.data);
+      const trusted = request.errorCode === 0 || isPinnedCertificate(activeOrigin, pin, request.hostname, request.certificate.data);
       callback(trusted ? 0 : -2);
     });
     web.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -142,19 +181,30 @@ else {
       const headers = details.requestHeaders;
       for (const name of Object.keys(headers)) if (name.toLowerCase() === "authorization") delete headers[name];
       const authorization = basicAuth(config.username, password);
-      if (authorization && isAppConnection(details.url, config.url)) headers.Authorization = authorization;
+      if (authorization && isAppConnection(details.url, activeOrigin)) headers.Authorization = authorization;
       callback({ requestHeaders: headers });
     });
     // Do not amend response headers: the selected server owns its CSP.
+    const trustedWorkspace = (event: IpcMainInvokeEvent) => Boolean(window && !window.isDestroyed() &&
+      event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame &&
+      isAppUrl(event.senderFrame.url.split("#")[0] ?? "", activeOrigin));
+    ipcMain.handle("desktop:connection-open", event => {
+      if (!trustedWorkspace(event)) throw new Error("Untrusted connection window");
+      showConnection();
+    });
+    ipcMain.handle("desktop:notification-status", event => {
+      if (!trustedWorkspace(event)) throw new Error("Untrusted connection window");
+      return mailNotificationLabel;
+    });
     ipcMain.handle("desktop:server-connect", (event, input: unknown) => {
       if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame ||
-        !isAppUrl(event.senderFrame.url.split("#")[0] ?? "", config.url)) throw new Error("Untrusted server connection window");
+        !isAppUrl(event.senderFrame.url.split("#")[0] ?? "", activeOrigin)) throw new Error("Untrusted server connection window");
       try {
         if (typeof input !== "string") throw new Error("Invalid server address");
         const next = { url: validateWebUrl(input) };
-        if (next.url === config.url) return { ok: true };
+        if (next.url === config.url || next.url === activeOrigin) return { ok: true };
         saveConnection(next, undefined);
-        config = next; password = undefined;
+        config = next; activeOrigin = next.url; password = undefined; startupError = undefined;
         // Reply before replacing the invoking renderer. A new origin gets no previous credentials.
         setImmediate(() => { void connect().catch(error => console.error("Desktop server connection failed", error)); });
         return { ok: true };
@@ -169,12 +219,13 @@ else {
       try {
         if (!input || typeof input !== "object") throw new Error("连接配置无效");
         const value = input as Record<string, unknown>;
-        if (typeof value.url !== "string" || (value.username !== undefined && typeof value.username !== "string") || (value.password !== undefined && typeof value.password !== "string")) throw new Error("连接配置无效");
+        if (typeof value.url !== "string" || (value.username !== undefined && typeof value.username !== "string") || (value.password !== undefined && typeof value.password !== "string") || (value.lanUrl !== undefined && typeof value.lanUrl !== "string")) throw new Error("连接配置无效");
         if (typeof value.username === "string" && /[:\r\n]/.test(value.username)) throw new Error("用户名不得包含冒号或换行");
-        const next = { url: validateWebUrl(value.url), username: value.username as string | undefined };
+        const next: ConnectionConfig = { url: validateWebUrl(value.url), username: value.username as string | undefined,
+          ...(value.lanUrl ? { lanUrl: value.lanUrl as string } : {}) };
         const nextPassword = value.password as string | undefined;
         const saved = saveConnection(next, nextPassword);
-        config = next; password = nextPassword;
+        config = next; activeOrigin = next.url; password = nextPassword; startupError = undefined;
         return { ok: true, persistedPassword: saved.persistedPassword };
       } catch { return { ok: false, error: "无法保存连接。请使用 HTTPS 或本机 HTTP 根地址，并检查配置目录权限。" }; }
     });
@@ -184,19 +235,15 @@ else {
     });
     registerLocalSkills({ ipc: ipcMain, dialog, shell,
       catalog: new LocalSkillCatalog({ home: app.getPath("home"), stateFile: join(app.getPath("userData"), "local-skills.json") }),
-      getWindow: () => window, getOrigin: () => config.url,
+      getWindow: () => window, getOrigin: () => activeOrigin,
     });
-    Menu.setApplicationMenu(Menu.buildFromTemplate([
-      { label: app.name, submenu: [{ label: "连接设置…", click: showConnection },
-        { id: "mail-notification-status", label: "邮件提醒：等待服务连接", enabled: false }, { type: "separator" }, { role: "quit" }] },
-      { role: "editMenu" }, { role: "viewMenu" },
-    ]));
+    Menu.setApplicationMenu(null);
     initialized = true;
     await connect(startupError);
   }).catch(error => {
     console.error("Desktop initialization failed", error);
     initialized = true;
-    void connect("连接初始化失败。请从应用菜单检查连接设置，或重新启动小 D。")
+    void connect("连接初始化失败。请按 Cmd+,（Windows/Linux 使用 Ctrl+,）检查连接设置，或重新启动 Dee。")
       .catch(failure => console.error("Desktop main window failed to open", failure));
   });
 }

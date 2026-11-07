@@ -12,7 +12,8 @@ test("connection status is a script-free main-window page, not a credential form
   const offline = html("https://assistant.example", "服务暂时未连接");
   assert.match(offline, /href="https:\/\/assistant.example"/);
   assert.match(offline, /重新连接/);
-  assert.match(offline, /手动打开/);
+  assert.match(offline, /Cmd\+,.*Ctrl\+,.*打开连接设置/);
+  assert.match(offline, /-webkit-app-region: drag/);
 });
 
 test("connection errors are escaped rather than rendered as markup", () => {

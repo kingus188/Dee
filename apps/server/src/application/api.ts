@@ -130,6 +130,10 @@ export function createApi(context: AppContext) {
     const shelf = method === "POST" && path.match(/^\/api\/conversations\/(\d+)\/(archive|restore|remove)$/);
     if (shelf) return { status: 200, data: await conversations.shelveConversation(Number(shelf[1]), shelf[2]) };
     const chat = path.match(/^\/api\/conversations\/(\d+)\/(messages|fork|abort)$/);
+    if (method === "GET" && chat?.[2] === "messages") {
+      const conversation = await conversations.getConversation(Number(chat[1]));
+      return { status: 200, data: await messages.status(conversation, url.searchParams.get("requestId")) };
+    }
     if (method === "POST" && chat) {
       const conversation = await conversations.getConversation(Number(chat[1]));
       if (chat[2] === "messages") return { status: 202, data: await messages.submit(conversation, body) };

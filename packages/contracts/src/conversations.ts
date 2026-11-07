@@ -43,3 +43,4 @@ export type ConversationView = {
 };
 export type MessageRequest = { text?: string; requestId?: string; mode?: "steer" | "followUp"; attachments?: import("./attachments.js").AttachmentInput[] };
 export type MessageResponse = { submissionId: number };
+export type MessageStatus = MessageResponse & { status: "queued" | "placed" | "done" | "unanswered"; entryId?: number };

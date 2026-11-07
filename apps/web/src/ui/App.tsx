@@ -38,7 +38,7 @@ export function App() {
   const { page, group } = route;
   const dataLabel = group === "skills" && route.skillSource === "remote" ? "远程技能" : group ? groupLabels[group] : "个人内容";
   const dataDescription = group === "skills" && route.skillSource === "remote" ? "查看和批准远程小 D 的技能记录。" : group ? groupDescriptions[group] : "";
-  const { view, connection, info, recoveredUntil, connectDirectChat, newConversation, openConversation } = useConversation(route.conversationId);
+  const { view, pendingMessages, send, connection, info, recoveredUntil, connectDirectChat, newConversation, openConversation } = useConversation(route.conversationId);
   const [teamsOpened, setTeamsOpened] = useState(page === "teams");
   const [historyItems, setHistoryItems] = useState<ConversationItem[]>([]);
   const [reportsOpened, setReportsOpened] = useState(page === "reports"), [daylightOpened, setDaylightOpened] = useState(page === "daylight");
@@ -183,7 +183,7 @@ export function App() {
     if (page === "chat" && !route.conversationId) navigate({ page: "chat", group: null, conversationId: view.conversationId }, true);
   }, [view?.conversationId, page]);
   useEffect(() => { const timer = setInterval(() => tick(value => value + 1), 1000); return () => clearInterval(timer); }, []);
-  useLayoutEffect(() => { if (page === "chat" && autoScroll.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; }, [view, page]);
+  useLayoutEffect(() => { if (page === "chat" && autoScroll.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; }, [view, page, pendingMessages]);
   useEffect(() => {
     const closeOutside = (event: Event) => { if (service.current?.open && !service.current.contains(event.target as Node)) service.current.open = false; };
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && service.current?.open) { service.current.open = false; service.current.querySelector("summary")?.focus(); } };
@@ -217,7 +217,8 @@ export function App() {
     <a className="workspace-skip" href="#workspace" onClick={event => { event.preventDefault(); document.getElementById("workspace")?.focus(); }}>跳到主要内容</a>
     <MailNotifications />
     {connection !== "connected" && <div id="reconnect-banner" className="reconnect-banner" style={{ display: "flex" }} role="status"><div className="reconnect-spinner" /><span>{connection === "connecting" ? "正在连接小 D…" : "与服务器断开，正在重连…"}</span></div>}
-    <div className="app-layout" id="mascot-card" data-state={mascot.state} data-view={page} data-external-conversation={page === "teams" || (page === "chat" && wechatConversation)}>
+    <div className="app-layout" id="mascot-card" data-state={mascot.state} data-view={page} data-desktop={window.desktopServer?.platform} data-external-conversation={page === "teams" || (page === "chat" && wechatConversation)}>
+      {window.desktopServer?.platform && <div className="desktop-titlebar" aria-hidden="true" />}
       <WorkspaceNavigation inert={relatedModal || page === "chat" && narrow && historyOpen} route={route} onNavigate={navigate} onHelp={() => help.current?.showModal()} />
       {page === "chat" && narrow && historyOpen && <button className="history-backdrop" aria-label="关闭历史对话遮罩" onClick={closeHistory} />}
       <div className="conversation-sidebar" inert={relatedModal} hidden={page !== "chat"} data-expanded={historyOpen} role={narrow && historyOpen ? "dialog" : undefined} aria-modal={narrow && historyOpen ? true : undefined} aria-label="历史对话侧栏">
@@ -237,11 +238,11 @@ export function App() {
         {page === "chat" && !emptyChat && <header className="conversation-header"><div className="conversation-heading"><h1 className="conversation-title" title={conversationTitle}>{conversationTitle}</h1>{wechatConversation && <span className="conversation-channel-label"><Icon name="message-circle" />微信里的 Dee</span>}</div><div className="conversation-header-actions">{relatedAction}{!historyOpen && <button className="icon-button" type="button" aria-label="新对话" title="新对话" disabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} onClick={() => { void startChat().catch(error => showToast(error.message, "error")); }}><Icon name="plus" /></button>}{headerActions}</div></header>}
         {page === "chat" && emptyChat && <div className="conversation-toolbar">{!historyOpen && <button className="icon-button conversation-new-button" type="button" aria-label="新对话" title="新对话" disabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} onClick={() => { void startChat().catch(error => showToast(error.message, "error")); }}><Icon name="plus" /><span>新对话</span></button>}{relatedAction}{headerActions}</div>}
         <section ref={scroll} hidden={page !== "chat" && page !== "data"} className={page === "data" ? group === "notes" ? "data-panel data-panel-notes" : "data-panel" : "messages-container"} id="messages-container" aria-label={page === "data" && group ? dataLabel : "与小 D 的对话"} onScroll={() => { if (page !== "chat") return; const el = scroll.current!; autoScroll.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
-          {page === "data" ? <header className="data-panel-heading"><div><h1>{dataLabel}</h1><p>{dataDescription}</p></div>{group === "tasks" && <button className="text-button" type="button" onClick={() => navigate({ page: "activity", group: null })}>全部动态<Icon name="arrow-up-right" /></button>}</header> : <div id="message-history" aria-live="polite"><ChatThread view={view} onRetry={draft.trim() ? undefined : prompt} onSettings={settings} /></div>}
+          {page === "data" ? <header className="data-panel-heading"><div><h1>{dataLabel}</h1><p>{dataDescription}</p></div>{group === "tasks" && <button className="text-button" type="button" onClick={() => navigate({ page: "activity", group: null })}>全部动态<Icon name="arrow-up-right" /></button>}</header> : <div id="message-history" aria-live="polite"><ChatThread view={view} pendingMessages={pendingMessages} onRetry={draft.trim() ? undefined : prompt} onSettings={settings} /></div>}
           <div hidden={page !== "chat"}><CardPanel view={conversationPending ? null : view} onPrompt={prompt} compactTasks={!wechatConversation} detailsHost={relatedHost} onRelatedCount={reportRelatedCount} onOpenDetails={openRelatedDetails} /></div>
           <WorkspaceData skillSource={route.skillSource} onSkillSourceChange={remote => navigate({ page: "data", group: "skills", ...(remote ? { skillSource: "remote" as const } : {}) })} group={page === "data" ? group : null} owner={route.conversationId ?? view?.conversationId ?? null} connect={connectDirectChat} headerActions={page === "data" && group === "notes" ? headerActions : null} />
         </section>
-        <footer className="input-container" hidden={page !== "chat"}><Composer draft={draft} setDraft={setDraft} view={view} conversationPending={conversationPending} connect={connectDirectChat} onSent={() => { refreshHistory(value => value + 1); autoScroll.current = true; }} onNewConversation={startChat} /><div className="composer-footer">{info?.configured === false ? <button className="text-button" type="button" onClick={settings}>配置模型后开始对话</button> : <span className="keyboard-hint">Enter 发送 · Shift + Enter 换行</span>}</div></footer>
+        <footer className="input-container" hidden={page !== "chat"}><Composer draft={draft} setDraft={setDraft} view={view} conversationPending={conversationPending} connect={connectDirectChat} send={send} onSendStart={() => { autoScroll.current = true; }} onSent={() => { refreshHistory(value => value + 1); autoScroll.current = true; }} onNewConversation={startChat} onRelated={relatedCount > 0 && !wechatConversation ? openRelatedDetails : undefined} /><div className="composer-footer">{info?.configured === false ? <button className="text-button" type="button" onClick={settings}>配置模型后开始对话</button> : <span className="keyboard-hint">Enter 发送 · Shift + Enter 换行</span>}</div></footer>
         </ExternalConversationPanel>
       </main>
       {relatedModal && <button className="related-panel-backdrop" aria-label="关闭关联任务遮罩" tabIndex={-1} onClick={closeRelatedDetails} />}

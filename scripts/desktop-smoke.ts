@@ -1,8 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
-export function verifyDesktopPackage(directory: string) {
-  const name = "Pi Durable Assistant";
+export function verifyDesktopPackage(directory: string, name: string) {
   const executable = process.platform === "darwin"
     ? join(directory, name + ".app/Contents/MacOS", name)
     : join(directory, name + (process.platform === "win32" ? ".exe" : ""));

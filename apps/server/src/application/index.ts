@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModelCatalog, openRuntime, Index } from "@assistant/runtime";
-import { createAssistant, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway, createMailInbox } from "@assistant/features";
+import { createAssistant, createDailyReportTools, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway, createMailInbox } from "@assistant/features";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { WechatChannel } from "@assistant/channel-wechat";
@@ -68,7 +68,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
       // Old versions removed Index entries without a tombstone. Reconcile before
       // durable work resumes, retaining the runtime's existing model rebinding.
       beforeResume: async runtime => { episodeStore!.reconcileConversations((await runtime.harness.snapshot(Index, ctx))?.items.map(item => item.id) ?? []); },
-      extensions: [createDaylight(daylight), createMailInbox(mail), createAssistant(notify, daylight), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query), records: rows => teamsStore!.records(rows),
+      extensions: [createDailyReportTools(dailyReports), createDaylight(daylight), createMailInbox(mail), createAssistant(notify, daylight), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query), records: rows => teamsStore!.records(rows),
         refresh: () => teamsSender.refresh?.() ?? Promise.resolve({ ok: false, lastSuccessAt: teamsSender.syncStatus?.().lastSuccessAt ?? null }),
         syncStatus: () => teamsSender.syncStatus?.() ?? { lastSuccessAt: null },
         read: createTeamsReadPort(teamsStore, teamsSender, config.offline) }), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender, config.offline)),

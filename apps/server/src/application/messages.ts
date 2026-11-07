@@ -3,9 +3,18 @@ import { AgentDoc, configure } from "@earendil-works/pi-durable";
 import { Index } from "@assistant/runtime";
 import { AttachmentError, buildUserContent, imageAt, parseAttachmentsAsync } from "@assistant/features";
 import { HttpError } from "../errors.js";
+import type { MessageStatus } from "@assistant/contracts";
 import type { AppContext } from "./context.js";
 import type { createConversations } from "./conversations.js";
 export function createMessages({ harness, ctx, agentModel }: AppContext, { registerIn, updateTitle }: ReturnType<typeof createConversations>) {
+ async function status(conversation: Conversation, requestId: string | null): Promise<MessageStatus | null> {
+   if (!requestId || requestId.length > 100) throw new HttpError(400, "消息标识无效");
+   return conversation.commit(async tx => {
+     const record = await tx.submissionByRequest(conversation.id, requestId);
+     if (!record || record.type !== "input") return null;
+     return { submissionId: record.id, status: record.status, entryId: record.entry };
+   }, ctx);
+ }
  async function submit(conversation: Conversation, body: Record<string, unknown>) {
 			const text = String(body.text ?? "").trim();
 			let files;
@@ -52,5 +61,5 @@ export function createMessages({ harness, ctx, agentModel }: AppContext, { regis
    if (!part) throw new HttpError(404, "图片不存在");
    return part;
  }
- return { submit, fork, image };
+ return { submit, status, fork, image };
 }

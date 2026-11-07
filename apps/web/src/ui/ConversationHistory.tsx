@@ -46,7 +46,7 @@ export function ConversationHistory({ active, currentId, onOpen, onClose, onNew,
       {visible.map(item => {
         const meta = `${sourceLabel(item)} · ${new Date(item.createdAt).toLocaleDateString("zh-CN")} · #${item.id}`;
         const syncHint = item.channel === "wechat" ? "\nDee 的回复可能同步到此会话绑定的微信接收方" : "";
-        return <a href={`#chat/${item.id}`} key={item.id} title={`${item.title || "未命名对话"}\n${meta}${syncHint}`} aria-current={currentId === item.id ? "true" : undefined} onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); onOpen(item.id); }}><span>{item.title || "未命名对话"}</span><small>{meta}</small></a>;
+        return <a href={`#chat/${item.id}`} key={item.id} title={`${item.title || "未命名对话"}\n${meta}${syncHint}`} aria-current={currentId === item.id ? "true" : undefined} onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); onOpen(item.id); }}><span>{item.title || "未命名对话"}</span><small>{sourceLabel(item)} · {new Date(item.createdAt).toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}</small></a>;
       })}
       {!needle && found.length > 6 && <button className="history-older" type="button" aria-expanded={older} onClick={() => setOlder(value => !value)}>{older ? "收起较早对话" : "更早的对话"}{older ? <Icon name="chevron-up" /> : <Icon name="chevron-down" />}</button>}
     </div>

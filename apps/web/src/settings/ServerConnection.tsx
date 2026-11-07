@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function validateServerUrl(value: string): string {
   const input = value.trim();
@@ -14,12 +14,22 @@ export function validateServerUrl(value: string): string {
 }
 
 type ServerConnectionProps = { onConnect?: (target: string) => void };
-declare global { interface Window { desktopServer?: { connect(url: string): Promise<{ ok: boolean; error?: string }> } } }
+declare global { interface Window { desktopServer?: {
+  platform?: string; connect(url: string): Promise<{ ok: boolean; error?: string }>;
+  openSettings?(): Promise<void>; notificationStatus?(): Promise<string>;
+} } }
 
 export function ServerConnection({ onConnect }: ServerConnectionProps = {}) {
   const [address, setAddress] = useState(() => window.location.origin);
   const [error, setError] = useState(""), [feedback, setFeedback] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [notificationStatus, setNotificationStatus] = useState("");
+  useEffect(() => {
+    let current = true;
+    void window.desktopServer?.notificationStatus?.().then(status => { if (current) setNotificationStatus(status); })
+      .catch(() => { if (current) setNotificationStatus("邮件提醒状态暂时无法读取"); });
+    return () => { current = false; };
+  }, []);
   async function connect() {
     if (connecting) return;
     setError(""); setFeedback("");
@@ -41,6 +51,10 @@ export function ServerConnection({ onConnect }: ServerConnectionProps = {}) {
   return <section className="settings-form" aria-labelledby="server-connection-title">
     <h2 id="server-connection-title">服务器连接</h2>
     <p className="settings-field-hint">填写后台服务器地址并连接。首次连接时，请按服务器提示登录。</p>
+    {window.desktopServer?.openSettings && <button type="button" className="text-button" onClick={() => {
+      void window.desktopServer!.openSettings!().catch(() => setError("无法打开桌面连接设置，请使用 Cmd+, 或 Ctrl+, 重试。"));
+    }}>桌面连接设置<small>（账号与网络）</small></button>}
+    {notificationStatus && <p className="settings-field-hint" role="status">{notificationStatus}</p>}
     <form onSubmit={event => { event.preventDefault(); connect(); }}>
       <label htmlFor="server-url">后台服务器地址</label>
       <input id="server-url" name="server-url" type="text" inputMode="url" required value={address} placeholder="http://127.0.0.1:3000" autoComplete="url" spellCheck={false}

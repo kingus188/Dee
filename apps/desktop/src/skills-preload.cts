@@ -2,7 +2,10 @@ import electron = require("electron");
 const { contextBridge, ipcRenderer } = electron;
 
 contextBridge.exposeInMainWorld("desktopServer", {
+  platform: process.platform,
   connect: (url: string) => ipcRenderer.invoke("desktop:server-connect", url),
+  openSettings: () => ipcRenderer.invoke("desktop:connection-open"),
+  notificationStatus: () => ipcRenderer.invoke("desktop:notification-status"),
 });
 
 // Only the configured service's top frame may invoke these handlers; paths stay in the main process.

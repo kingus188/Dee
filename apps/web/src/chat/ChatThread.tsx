@@ -12,6 +12,7 @@ import { Icon } from "../ui/Icon.js";
 import { TeamsMedia } from "./TeamsMedia.js";
 import { TeamsRecords, teamsRecords } from "./TeamsRecords.js";
 import { chatTimestamp } from "./timestamps.js";
+import type { PendingMessage } from "./useMessageDelivery.js";
 
 function MessageTime({ timestamp }: { timestamp?: number }) {
   const value = chatTimestamp(timestamp);
@@ -35,7 +36,7 @@ export function ResponseCard({ text, streaming = false, timestamp }: { text: str
   </div>;
 }
 
-function UserMessageBubble({ entry }: { entry: ViewEntry }) {
+function UserMessageBubble({ entry, status }: { entry: ViewEntry; status?: string }) {
   if (!entry.text && !entry.attachments?.length) return null;
   if (/^\[(定时提醒|计划任务|后台任务结果)\]/.test(entry.text)) return <div className="message-row reminder-system-row"><div className="reminder-system-card">{entry.text.replace(/^\[(定时提醒|计划任务|后台任务结果)\]\s*/, "")}</div></div>;
   return <div className="message-row user-row">
@@ -44,6 +45,7 @@ function UserMessageBubble({ entry }: { entry: ViewEntry }) {
       <div key={index} className="msg-file-card"><Icon name="file-text" /><span>{file.name}<small>{formatFileSize(file.size)}</small></span></div>)}</div>}
     {entry.text && <div className="user-bubble"><div className="user-text-body">{entry.text}</div></div>}
     <MessageTime timestamp={entry.timestamp} />
+    {status && <span className="message-delivery-status" role="status">{status}</span>}
   </div>;
 }
 
@@ -92,10 +94,10 @@ function TurnCard({ turn, live, busy, onRetry, onSettings }: { turn: ChatTurn; l
   </section>;
 }
 
-export const ChatThread = memo(function ChatThread({ view, onRetry, onSettings }: { view: ConversationView | null } & ErrorActions) {
+export const ChatThread = memo(function ChatThread({ view, pendingMessages = [], onRetry, onSettings }: { view: ConversationView | null; pendingMessages?: PendingMessage[] } & ErrorActions) {
   const turns = chatTurns(view?.entries ?? []);
   const busy = !!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length;
-  if (!turns.length) return busy ? <div className="message-row assistant-row"><ResponseCard text="思考中…" streaming /></div> : <div className="chat-welcome"><Icon name="message-circle-more" /><h1>有什么想交给我？</h1><p>我可以帮你思考、整理、规划和执行日常事务。</p></div>;
+  if (!turns.length && !pendingMessages.length) return busy ? <div className="message-row assistant-row"><ResponseCard text="思考中…" streaming /></div> : <div className="chat-welcome"><Icon name="message-circle-more" /><h1>有什么想交给我？</h1><p>我可以帮你思考、整理、规划和执行日常事务。</p></div>;
   let previousDay: string | undefined;
   return <>{turns.map((turn, index) => {
     const timestamp = chatTimestamp(turn.user.timestamp ?? turn.entries.find(entry => entry.timestamp !== undefined)?.timestamp);
@@ -105,5 +107,7 @@ export const ChatThread = memo(function ChatThread({ view, onRetry, onSettings }
       {showDay && <div className="chat-day-separator"><time dateTime={timestamp.day} title={timestamp.fullDate}>{timestamp.dayLabel}</time></div>}
       <TurnCard turn={turn} live={index === turns.length - 1 ? view?.live : undefined} busy={index === turns.length - 1 && busy} onRetry={index === turns.length - 1 ? onRetry : undefined} onSettings={onSettings} />
     </Fragment>;
-  })}</>;
+  })}
+    {pendingMessages.map(message => <section className="chat-turn" key={message.requestId}><UserMessageBubble entry={{ id: -1, kind: "user", text: message.text, attachments: message.attachments }} status={{ sending: "正在发送…", waiting: "已发送，等待处理", unconfirmed: "发送未确认，可在输入框重试", stopped: "已停止处理" }[message.status]} /></section>)}
+  </>;
 });

@@ -8,6 +8,15 @@ export function validateWebUrl(value: string): string {
   return url.origin;
 }
 
+export function validateLanUrl(value: string): string {
+  const origin = validateWebUrl(value), url = new URL(origin);
+  const octets = url.hostname.split(".").map(Number);
+  const privateAddress = octets.length === 4 && octets.every(part => Number.isInteger(part) && part >= 0 && part <= 255) &&
+    (octets[0] === 10 || (octets[0] === 172 && octets[1]! >= 16 && octets[1]! <= 31) || (octets[0] === 192 && octets[1] === 168));
+  if (url.protocol !== "https:" || !privateAddress) throw new Error("局域网地址须为 HTTPS 私有 IPv4 根地址");
+  return origin;
+}
+
 export function isAppUrl(value: string, origin: string) {
   try { const url = new URL(value); return url.origin === origin && !url.username && !url.password && !url.hash; } catch { return false; }
 }

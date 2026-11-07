@@ -1,5 +1,6 @@
 {
-  "name": "pi-durable-assistant",
+  "name": "dee",
+  "productName": "Dee",
   "version": "0.1.0",
   "private": true,
   "description": "基于 Pi Durable 的网页版个人 Agent：断点恢复、记事本、子 Agent、定时计划、任务中心和微信通道",

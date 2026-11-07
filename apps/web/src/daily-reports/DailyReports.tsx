@@ -41,8 +41,14 @@ export function DailyReports({ active }: { active: boolean }) {
     finally { if (sequence.current === current) setLoading(false); }
   }
   function selectDate(next: string) { if (next.length === 10 && next >= "1000-01-01" && next <= "9999-12-31" && next !== date) void load(next); }
-  useEffect(() => { void load(date); void refreshList(); return () => { sequence.current++; }; }, []);
-  useEffect(() => { if (active) heading.current?.focus(); }, [active]);
+  useEffect(() => () => { sequence.current++; }, []);
+  useEffect(() => {
+    if (!active) return;
+    heading.current?.focus();
+    void refreshList();
+    // Chat and the editor share the store; re-entering refreshes saved data only.
+    if (!dirty && !busy.current) void load(date);
+  }, [active]);
   useEffect(() => {
     if (!dirty && !pending) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };

@@ -33,9 +33,36 @@ test("unavailable and basic_text storage never persist a password", () => {
   }
 });
 
+test("LAN aliases round-trip without changing the configured server or encrypted credential", () => {
+  const config = { url: "https://assistant.example", username: "demo", lanUrl: "https://192.168.31.5:3443" };
+  const encoded = encodeConnection(config, "fixture secret", storage);
+  assert.equal(encoded.text.includes("fixture secret"), false);
+  assert.deepEqual(decodeConnection(encoded.text, storage), { config, password: "fixture secret" });
+  for (const lanUrl of ["http://192.168.31.5", "https://other.example", "https://8.8.8.8"]) {
+    assert.throws(() => encodeConnection({ ...config, lanUrl }, undefined, storage));
+    assert.throws(() => decodeConnection(JSON.stringify({ ...config, lanUrl }), storage));
+  }
+});
+
 test("BasicAuth remains a request header, including Unicode and empty passwords", () => {
   assert.equal(basicAuth("demo", undefined), undefined);
   assert.equal(basicAuth(undefined, "secret"), `Basic ${Buffer.from("demo:secret").toString("base64")}`);
   assert.equal(basicAuth("demo", ""), `Basic ${Buffer.from("demo:").toString("base64")}`);
   assert.equal(basicAuth("demo", "口令"), `Basic ${Buffer.from("demo:口令").toString("base64")}`);
 });
+
+for (const [name, unavailable] of [
+  ["decryption failure", { ...storage, decryptString: () => { throw new Error("private keychain detail"); } }],
+  ["unavailable storage", { ...storage, isEncryptionAvailable: () => false }],
+  ["plaintext backend", { ...storage, getSelectedStorageBackend: () => "basic_text" }],
+] as const) {
+  test(`${name} preserves the server and reports a recoverable credential error`, () => {
+    const encoded = encodeConnection({ url: "https://assistant.example", username: "demo" }, "fixture password", storage);
+    const result = decodeConnection(encoded.text, unavailable);
+    assert.deepEqual(result.config, { url: "https://assistant.example", username: "demo" });
+    assert.equal(result.password, undefined);
+    assert.match(result.error!, /连接设置/);
+    assert.equal(result.error!.includes("private keychain detail"), false);
+    assert.equal(result.error!.includes("fixture password"), false);
+  });
+}

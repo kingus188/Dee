@@ -12,13 +12,14 @@ const nativeRequire = createRequire(entry);
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 type MenuItem = { id?: string; label?: string; submenu?: MenuItem[]; click?: () => void };
 
-async function desktop(options: { notificationsSupported?: boolean; offline?: boolean; invalidEnvironment?: boolean; brokenPin?: boolean; noSavedConnection?: boolean; environment?: Record<string, string> } = {}) {
+async function desktop(options: { notificationsSupported?: boolean; offline?: boolean; invalidEnvironment?: boolean; brokenPin?: boolean; noSavedConnection?: boolean; connectionError?: boolean; environment?: Record<string, string>; lan?: boolean; lanLoadFails?: boolean } = {}) {
   const windows: FakeWindow[] = [];
-  const state = { offline: options.offline ?? false, notifications: 0, errors: 0 };
+  const state = { offline: options.offline ?? false, notifications: 0, errors: 0, storageName: "", edits: [] as string[] };
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const saved: { config: { url: string; username?: string }; secret?: string }[] = [];
-  let menu: MenuItem[] = [];
+  let menu: MenuItem[] | null = [];
   let reportMailStatus: ((status: unknown) => void) | undefined;
+  let headersHook!: (details: { url: string; requestHeaders: Record<string, string> }, callback: (result: { requestHeaders: Record<string, string> }) => void) => void;
   class FakeWindow extends EventEmitter {
     visible = true;
     minimized = false;
@@ -28,13 +29,15 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
       url: "", mainFrame: { url: "" },
       getURL: () => this.webContents.url,
       setWindowOpenHandler: () => {},
+      copy: () => state.edits.push("copy"), cut: () => state.edits.push("cut"), paste: () => state.edits.push("paste"),
+      selectAll: () => state.edits.push("selectAll"), undo: () => state.edits.push("undo"), redo: () => state.edits.push("redo"),
     });
-    constructor(readonly options: { title: string; show?: boolean; webPreferences?: { partition?: string } }) {
+    constructor(readonly options: { title: string; show?: boolean; frame?: boolean; titleBarStyle?: string; titleBarOverlay?: unknown; webPreferences?: { partition?: string } }) {
       super(); this.visible = options.show !== false; windows.push(this);
     }
     async loadURL(url: string) {
       this.urls.push(url); this.webContents.url = url; this.webContents.mainFrame.url = url;
-      if (state.offline && url.startsWith("https:")) {
+      if ((state.offline && url.startsWith("https:")) || (options.lanLoadFails && url.startsWith("https://192.168.31.5:3443"))) {
         this.webContents.emit("did-fail-load", {}, -109, "ERR_ADDRESS_UNREACHABLE", url, true);
         throw Object.assign(new Error("ERR_ADDRESS_UNREACHABLE"), { code: "ERR_ADDRESS_UNREACHABLE" });
       }
@@ -51,21 +54,23 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
     close() { this.destroy(); }
     destroy() { this.destroyed = true; this.visible = false; this.emit("closed"); }
   }
+  const paths = new Map<string, string>([["appData", "/synthetic-app-data"]]);
   const app = Object.assign(new EventEmitter(), {
-    name: "Pi Durable Assistant", setName() {},
-    requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), isReady: () => true,
-    getPath: () => "/synthetic-desktop-state", quit() {}, dock: { setIcon() {} },
+    name: "Pi Durable Assistant", setName(name: string) { this.name = name; },
+    requestSingleInstanceLock: () => true, whenReady: () => { state.storageName = app.name; return Promise.resolve(); }, isReady: () => true,
+    getPath: (name: string) => paths.get(name) ?? "/synthetic-desktop-state",
+    setPath: (name: string, path: string) => { paths.set(name, path); },
+    quit() {}, dock: { setIcon() {} },
   });
   const web = {
     setCertificateVerifyProc() {}, setPermissionRequestHandler() {}, setPermissionCheckHandler() {},
-    webRequest: { onBeforeSendHeaders() {} }, fetch: async () => new Response(),
+    webRequest: { onBeforeSendHeaders(handler: typeof headersHook) { headersHook = handler; } }, fetch: async () => new Response(),
   };
   const electron = {
     app, BrowserWindow: FakeWindow,
     dialog: { showErrorBox() { state.errors++; } },
     ipcMain: { handle(name: string, handler: (...args: unknown[]) => unknown) { handlers.set(name, handler); } },
-    Menu: { buildFromTemplate: (items: MenuItem[]) => items, setApplicationMenu(items: MenuItem[]) { menu = items; },
-      getApplicationMenu: () => ({ getMenuItemById: (id: string) => menu.flatMap(item => item.submenu ?? []).find(item => item.id === id) }) },
+    Menu: { setApplicationMenu(items: MenuItem[] | null) { menu = items; } },
     Notification: { isSupported: () => options.notificationsSupported ?? true }, session: { fromPartition: () => web }, shell: { openExternal: async () => {} },
   };
   // Run the real entry point without reading any user configuration.
@@ -78,24 +83,80 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
       if (specifier === "electron") return electron;
       if (specifier === "./skills/catalog.js") return { LocalSkillCatalog: class {} };
       if (specifier === "./skills-ipc.js") return { registerLocalSkills() {} };
+      if (specifier === "./network.js" && options.lan) return { selectServer: async () => ({ origin: "https://192.168.31.5:3443", lanUrl: "https://192.168.31.5:3443" }) };
       if (specifier === "./connection.js") return {
-        loadConnection: () => options.noSavedConnection ? {} : ({ config: { url: "https://assistant.example", username: "fixture" } }),
+        loadConnection: () => ({ ...(!options.noSavedConnection ? { config: { url: "https://assistant.example", username: "fixture" }, ...(options.lan ? { password: "fixture-secret" } : {}) } : {}), ...(options.connectionError ? { error: "连接读取失败，请打开连接设置" } : {}) }),
         saveConnection: (config: { url: string; username?: string }, secret?: string) => { saved.push({ config, secret }); return { persistedPassword: true }; },
       };
       if (specifier === "./mail-notifications.js") return { startMailNotifications: (...args: unknown[]) => { state.notifications++; reportMailStatus = args[4] as (status: unknown) => void; return () => {}; }, showMailNotification() {} };
-      if (specifier === "node:fs") return { existsSync: () => Boolean(options.brokenPin), readFileSync: () => "malformed-public-pin" };
+      if (specifier === "node:fs") return { existsSync: () => Boolean(options.brokenPin), mkdirSync() {}, readFileSync: () => "malformed-public-pin" };
       return nativeRequire(specifier);
     },
   }, { filename: fileURLToPath(entry) });
   await flush(); await flush();
-  const main = () => windows.filter(w => !w.destroyed && w.options.title !== "连接小 D").at(-1)!;
-  const settings = () => windows.filter(w => !w.destroyed && w.options.title === "连接小 D");
-  const openSettings = () => { const item = menu[0]?.submenu?.find(item => item.label === "连接设置…"); assert.ok(item?.click); item.click(); };
-  return { app, windows, main, settings, openSettings, state, handlers, flush, saved,
-    mailStatus: () => menu[0]?.submenu?.find(item => item.id === "mail-notification-status")?.label,
+  const main = () => windows.filter(w => !w.destroyed && w.options.title !== "连接 Dee").at(-1)!;
+  const settings = () => windows.filter(w => !w.destroyed && w.options.title === "连接 Dee");
+  const openSettings = () => main().webContents.emit("before-input-event", { preventDefault() {} }, { meta: true, key: ",", type: "keyDown" });
+  return { app, windows, main, settings, openSettings, state, handlers, flush, saved, headersHook,
+    menu: () => menu,
+    mailStatus: () => handlers.get("desktop:notification-status")!({ sender: main().webContents, senderFrame: main().webContents.mainFrame }),
     reportMailStatus: (status: unknown) => reportMailStatus?.(status),
   };
 }
+
+test("LAN detection changes only the active route, preserves the configured server and scopes credentials", async () => {
+  const d = await desktop({ lan: true });
+  const origin = "https://192.168.31.5:3443";
+  assert.ok(d.main().urls.includes(origin));
+  assert.equal(d.saved.length, 1);
+  assert.equal(d.saved[0]!.config.url, "https://assistant.example");
+  assert.equal((d.saved[0]!.config as { lanUrl?: string }).lanUrl, origin);
+  for (const [url, expected] of [[origin + "/api/info", true], ["wss://192.168.31.5:3443/api/socket", true], ["https://assistant.example/api/info", false], ["https://192.168.31.5:3444/api/info", false]]) {
+    let headers: Record<string, string> = {};
+    d.headersHook({ url: url as string, requestHeaders: { Authorization: "untrusted" } }, result => { headers = result.requestHeaders; });
+    assert.equal(Boolean(headers.Authorization), expected);
+    assert.notEqual(headers.Authorization, "untrusted");
+  }
+  const current = d.main();
+  assert.equal((d.handlers.get("desktop:server-connect")!({ sender: current.webContents, senderFrame: current.webContents.mainFrame }, origin) as { ok: boolean }).ok, true);
+  assert.equal(d.saved.length, 1, "saving the active alias must not replace the logical server or clear credentials");
+});
+
+test("frameless workspace removes the native menu and keeps trusted connection settings", async () => {
+  const d = await desktop();
+  assert.equal(d.menu(), null);
+  assert.equal(d.main().options.frame, false);
+  assert.equal(d.main().options.titleBarStyle, "hidden");
+  assert.ok(d.main().options.titleBarOverlay);
+  let prevented = 0;
+  for (const [key, shift] of [["c", false], ["x", false], ["v", false], ["a", false], ["z", false], ["z", true]] as const) {
+    d.main().webContents.emit("before-input-event", { preventDefault() { prevented++; } }, { meta: true, type: "keyDown", key, shift });
+  }
+  assert.deepEqual(d.state.edits, ["copy", "cut", "paste", "selectAll", "undo", "redo"]);
+  assert.equal(prevented, 6);
+  for (const name of ["desktop:connection-open", "desktop:notification-status"]) {
+    assert.throws(() => d.handlers.get(name)!({ sender: {}, senderFrame: {} }), /Untrusted/);
+    assert.throws(() => d.handlers.get(name)!({ sender: d.main().webContents, senderFrame: { url: "https://assistant.example" } }), /Untrusted/);
+  }
+  d.handlers.get("desktop:connection-open")!({ sender: d.main().webContents, senderFrame: d.main().webContents.mainFrame });
+  assert.equal(d.settings().length, 1);
+});
+
+test("a failed LAN page load falls back to the public server in the same window", async () => {
+  const d = await desktop({ lan: true, lanLoadFails: true });
+  assert.ok(d.main().urls.includes("https://192.168.31.5:3443"));
+  assert.equal(d.main().urls.at(-1), "https://assistant.example");
+  assert.equal(d.windows.filter(window => !window.destroyed).length, 1);
+  assert.equal(d.settings().length, 0);
+});
+
+test("Dee keeps the existing desktop state directory after renaming", async () => {
+  const d = await desktop();
+  assert.equal(d.app.name, "Dee");
+  assert.equal(d.state.storageName, "Pi Durable Assistant");
+  assert.equal(d.app.getPath("userData"), "/synthetic-app-data/Pi Durable Assistant");
+  assert.ok(d.main().urls.includes("https://assistant.example"));
+});
 
 test("new installations load the API backend directly on port 3000", async () => {
   const d = await desktop({ noSavedConnection: true });
@@ -262,7 +323,7 @@ test("server switch only accepts a trusted top frame and a valid backend root", 
 });
 
 
-test("mail polling status stays in the menu without opening dialogs or replacing the workspace", async () => {
+test("mail polling status stays available to settings without opening dialogs or replacing the workspace", async () => {
   const d = await desktop();
   const current = d.main(), urls = [...current.urls];
   assert.equal(d.mailStatus(), "邮件提醒：正在连接");
@@ -287,3 +348,22 @@ test("unsupported native notifications do not claim shared deliveries and leave 
   await d.main().loadURL("https://assistant.example");
   assert.equal(d.state.notifications, 0);
 });
+for (const noSavedConnection of [false, true]) {
+  test(`connection read failure never navigates to a backend or falls back to another app (${noSavedConnection})`, async () => {
+    const d = await desktop({ connectionError: true, noSavedConnection });
+    assert.equal(d.settings().length, 0);
+    assert.ok(d.main().urls.every(url => url.startsWith("data:")));
+    assert.match(decodeURIComponent(d.main().urls.at(-1)!), /连接读取失败/);
+    assert.doesNotMatch(decodeURIComponent(d.main().urls.at(-1)!), /href=/);
+    let prevented = false;
+    d.main().webContents.emit("will-navigate", { preventDefault: () => { prevented = true; } }, noSavedConnection ? "http://127.0.0.1:3000" : "https://assistant.example");
+    assert.equal(prevented, true);
+    d.main().close(); d.app.emit("activate"); await d.flush(); await d.flush();
+    assert.ok(d.main().urls.every(url => url.startsWith("data:")));
+    d.openSettings(); const settings = d.settings()[0]!;
+    const event = { sender: settings.webContents, senderFrame: settings.webContents.mainFrame };
+    assert.equal((d.handlers.get("desktop:connection-save")!(event, { url: "https://assistant.example", username: "fixture", password: "fixture" }) as { ok: boolean }).ok, true);
+    await d.handlers.get("desktop:connection-retry")!(event);
+    assert.ok(d.main().urls.includes("https://assistant.example"));
+  });
+}

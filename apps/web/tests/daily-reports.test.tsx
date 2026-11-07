@@ -163,6 +163,26 @@ test("空白日报模板保留未保存提示，取消切日后可用快捷键�
   assert.equal((document.querySelector(`[data-date="${date}"]`) as HTMLElement).dataset.recorded, "true");
 });
 
+test("重新进入日报页读取聊天保存的内容和历史，但保留本地草稿", async t => {
+  let external: DailyReport | null = null;
+  t.mock.method(apiClient, "request", async (path: string) => path === "/api/daily-reports" ? (external ? [external] : []) : external);
+  const mounted = await mount(t, <DailyReports active />);
+  const { dom } = mounted, document = dom.window.document;
+  const date = document.querySelector<HTMLInputElement>("#report-date")!.value;
+  await mounted.render(<DailyReports active={false} />);
+  external = { date, markdown: "## 今日进展\n\n- 聊天已保存的日报", revision: 1, updatedAt: new Date().toISOString() };
+  await mounted.render(<DailyReports active />);
+  assert.match(document.querySelector('[aria-label="日报正文"]')!.textContent!, /聊天已保存的日报/);
+  assert.match(document.querySelector(".reports-footer")!.textContent!, /已保存/);
+  assert.equal(document.querySelector(".reports-history nav button")!.textContent, date);
+  await input(dom, ".markdown-editor textarea", "保留尚未保存的草稿");
+  await mounted.render(<DailyReports active={false} />);
+  external = { ...external, markdown: "别处更新的日报", revision: 2 };
+  await mounted.render(<DailyReports active />);
+  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, "保留尚未保存的草稿");
+  assert.match(document.querySelector(".reports-footer")!.textContent!, /未保存/);
+});
+
 test("跨午夜、窗口恢复和重新进入时校准今天，保留选中日期与草稿", async t => {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date(2026, 9, 25, 23, 59).getTime() });
   t.mock.method(apiClient, "request", async (path: string) => path === "/api/daily-reports" ? [] : null);
