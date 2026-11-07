@@ -54,6 +54,7 @@ button:active:not(:disabled), .workspace-nav-link:active { transform: scale(.98)
 .workspace-personal-nav .workspace-nav-link .icon { width: 17px; height: 17px; }
 .workspace-nav-footer { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
 .chat-column { display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100%; overflow: hidden; position: relative; isolation: isolate; background: transparent; }
+.workspace-frame { display: flex; flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
 .workspace-header, #workspace .management-header { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 40px; border-bottom: 0; flex-shrink: 0; background: var(--bg-surface); z-index: 5; }
 .workspace-location { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--text-muted); font-size: 11px; white-space: nowrap; }
 .workspace-location strong { overflow: hidden; text-overflow: ellipsis; font-weight: 500; color: var(--text-main); }
@@ -126,7 +127,7 @@ button:active:not(:disabled), .workspace-nav-link:active { transform: scale(.98)
 .history-older .icon { width: 16px; height: 16px; }
 .history-older:hover { background: var(--bg-subtle); }
 @media (max-width: 900px) {
-  .conversation-sidebar { position: absolute; left: var(--rail-width); top: 0; bottom: 0; }
+  .conversation-sidebar { position: absolute; left: 0; top: 0; bottom: 0; }
   .conversation-sidebar[data-expanded="true"] { width: min(280px, calc(100vw - var(--rail-width) - 24px)); box-shadow: var(--shadow-lg); }
   .history-close { display: inline-flex; }
   .conversation-history { padding-top: var(--shell-top-space); }
@@ -287,8 +288,6 @@ button:active:not(:disabled), .workspace-nav-link:active { transform: scale(.98)
 
 /* External messages get a bounded reading surface; assistant chat keeps its own layout. */
 .app-layout { --external-work-surface: #f3f5f8; --external-panel-surface: #fff; --external-border: #e1e6ee; --external-foreground: #2c3441; --external-muted: #737d8c; }
-.app-layout[data-external-conversation="true"] { background: var(--external-work-surface); }
-.app-layout[data-external-conversation="true"] > .sidebar { border-right: 1px solid var(--external-border); }
 .conversation-surface, .conversation-surface-shell, .conversation-surface-panel { display: contents; }
 .external-message-stage { display: flex; justify-content: center; align-items: center; flex: 1; min-width: 0; min-height: 0; padding: 18px clamp(16px, 3vw, 48px) 24px; background: var(--external-work-surface); color: var(--external-foreground); }
 .external-message-shell { display: flex; flex-direction: column; width: 480px; max-width: 100%; height: 100%; max-height: 960px; min-width: 0; min-height: 0; }
@@ -346,14 +345,6 @@ button:active:not(:disabled), .workspace-nav-link:active { transform: scale(.98)
 }
 
 /* Reference direction: conversation list, quiet chat, and optional related work. */
-.app-layout[data-view="chat"][data-external-conversation="false"] {
-  --menu-surface: #f2f6fc;
-  --shell-gradient: #fbfcfe;
-  --shell-divider: #e5eaf2;
-  --primary-light: #e3edfc;
-  --primary-border: #adc8ef;
-  --primary: #386fba;
-}
 .app-layout[data-view="chat"][data-external-conversation="false"] .conversation-history header { margin-bottom: 14px; }
 .app-layout[data-view="chat"][data-external-conversation="false"] .history-brand { font-size: 22px; letter-spacing: -.03em; }
 .app-layout[data-view="chat"][data-external-conversation="false"] .history-search { background: #e8eef7; border-color: transparent; }
@@ -423,7 +414,6 @@ button:active:not(:disabled), .workspace-nav-link:active { transform: scale(.98)
   .related-description summary, .related-panel-content .conversation-card-actions :is(button, a) { min-height: 44px; }
 }
 @media (prefers-color-scheme: dark) {
-  .app-layout[data-view="chat"][data-external-conversation="false"] { --menu-surface: #202733; --shell-gradient: #23272e; --shell-divider: #3d4450; --primary-light: #303f59; --primary-border: #647da5; --primary: #a3bfee; }
   .app-layout[data-view="chat"][data-external-conversation="false"] .history-search { background: #293342; }
   .app-layout[data-view="chat"][data-external-conversation="false"] .history-list a[aria-current="true"] { background: #2e405d; border-color: #415a7c; }
   .related-tasks-panel { background: #232833; }.related-task-overview { background: #303c55; }

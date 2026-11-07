@@ -220,12 +220,13 @@ export function App() {
     <div className="app-layout" id="mascot-card" data-state={mascot.state} data-view={page} data-desktop={window.desktopServer?.platform} data-external-conversation={page === "teams" || (page === "chat" && wechatConversation)}>
       {window.desktopServer?.platform && <div className="desktop-titlebar" aria-hidden="true" />}
       <WorkspaceNavigation inert={relatedModal || page === "chat" && narrow && historyOpen} route={route} onNavigate={navigate} onHelp={() => help.current?.showModal()} />
+      <main className="workspace-frame">
       {page === "chat" && narrow && historyOpen && <button className="history-backdrop" aria-label="关闭历史对话遮罩" onClick={closeHistory} />}
-      <div className="conversation-sidebar" inert={relatedModal} hidden={page !== "chat"} data-expanded={historyOpen} role={narrow && historyOpen ? "dialog" : undefined} aria-modal={narrow && historyOpen ? true : undefined} aria-label="历史对话侧栏">
-        <ConversationHistory load={page === "chat" && !!route.conversationId} onItems={setHistoryItems} onTeams={() => switchConversationSource("teams")} refreshKey={historyRevision} active={page === "chat" && historyOpen} autoFocus={false} currentId={view?.conversationId ?? route.conversationId ?? null} onOpen={openChat} onClose={closeHistory} onNew={() => { void startChat().catch(error => showToast(error.message, "error")); }} newDisabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} />
+      <div className="conversation-sidebar" inert={relatedModal} hidden={narrow && page !== "chat"} data-expanded={historyOpen} role={narrow && historyOpen ? "dialog" : undefined} aria-modal={narrow && historyOpen ? true : undefined} aria-label="历史对话侧栏">
+        <ConversationHistory load={!narrow || page === "chat" && !!route.conversationId} onItems={setHistoryItems} onTeams={() => switchConversationSource("teams")} refreshKey={historyRevision} active={(!narrow || page === "chat") && historyOpen} autoFocus={false} currentId={view?.conversationId ?? route.conversationId ?? null} onOpen={openChat} onClose={closeHistory} onNew={() => { void startChat().catch(error => showToast(error.message, "error")); }} newDisabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} />
         <button ref={historyToggle} className="sidebar-toggle" type="button" aria-label={historyOpen ? "收起历史对话" : "展开历史对话"} title={historyOpen ? "收起历史对话" : "展开历史对话"} aria-expanded={historyOpen} aria-controls="conversation-history" onClick={toggleHistory}><Icon name={historyOpen ? "chevron-left" : "chevron-right"} /></button>
       </div>
-      <main inert={relatedModal || page === "chat" && narrow && historyOpen} className="chat-column" id="workspace" data-view={page} data-empty-chat={emptyChat} tabIndex={-1}>
+      <div inert={relatedModal || page === "chat" && narrow && historyOpen} className="chat-column" id="workspace" data-view={page} data-empty-chat={emptyChat} tabIndex={-1}>
         {page !== "chat" && page !== "teams" && page !== "daylight" && !(page === "data" && group === "notes") && <header className="workspace-header management-header"><div className="workspace-location"><strong>{page === "data" && group ? dataLabel : pageLabels[page]}</strong></div>{headerActions}</header>}
         {routeError && <p className="workspace-route-error" role="alert">{routeError}<a href="#activity" onClick={event => { event.preventDefault(); navigate({ page: "activity", group: null }); }}>返回动态</a></p>}
         <TodayPage active={page === "home"} onPrompt={prompt} onGroup={openGroup} onDaylight={taskId => navigate({ page: "daylight", group: null, taskId })} onActivities={() => navigate({ page: "activity", group: null })} onSettings={settings} onConversation={openChat} />
@@ -244,12 +245,13 @@ export function App() {
         </section>
         <footer className="input-container" hidden={page !== "chat"}><Composer draft={draft} setDraft={setDraft} view={view} conversationPending={conversationPending} connect={connectDirectChat} send={send} onSendStart={() => { autoScroll.current = true; }} onSent={() => { refreshHistory(value => value + 1); autoScroll.current = true; }} onNewConversation={startChat} onRelated={relatedCount > 0 && !wechatConversation ? openRelatedDetails : undefined} /><div className="composer-footer">{info?.configured === false ? <button className="text-button" type="button" onClick={settings}>配置模型后开始对话</button> : <span className="keyboard-hint">Enter 发送 · Shift + Enter 换行</span>}</div></footer>
         </ExternalConversationPanel>
-      </main>
+      </div>
       {relatedModal && <button className="related-panel-backdrop" aria-label="关闭关联任务遮罩" tabIndex={-1} onClick={closeRelatedDetails} />}
       <aside ref={relatedPanel} id="related-tasks-panel" className="related-tasks-panel" hidden={!relatedOpen} role={relatedModal ? "dialog" : undefined} aria-modal={relatedModal || undefined} aria-labelledby="related-tasks-heading">
         <header><h2 id="related-tasks-heading">关联任务</h2><button type="button" className="icon-button related-panel-close" aria-label="收起关联任务" onClick={closeRelatedDetails}><Icon name="x" /></button></header>
         <div ref={setRelatedHost} className="related-panel-content" />
       </aside>
+      </main>
     </div>
     <dialog ref={help} className="help-dialog" aria-labelledby="help-title"><form method="dialog"><button className="icon-button close-help" aria-label="关闭使用指南"><Icon name="x" /></button></form><div className="help-mark"><Icon name="sparkles" /></div><h2 id="help-title">你好，我是小 D</h2><p>一起整理今天，也把交代的事情继续做完。</p><ul><li>对话、待办与通知在主导航；对话侧栏可切换小 D 助手与 Teams；「更多」中可查看今日概览、个人内容与设置。</li><li>在对话中发送文字、图片或文件，用「历史对话」接着上次聊。</li><li>本机技能按目录浏览和导入；记忆和笔记先查看，新增或编辑时再填写内容。远程小 D 提议的内容经你批准后生效。</li><li>输入 / 使用快捷指令，/new 新建、/help 查看说明、/stop 停止回复。</li></ul><p className="help-note">后台任务由独立服务端运行。关闭网页或桌面客户端后，服务端保持在线即可继续执行。</p></dialog>
   </>;

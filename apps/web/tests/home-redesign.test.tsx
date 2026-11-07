@@ -24,6 +24,7 @@ async function appHarness(t: TestContext) {
   t.mock.method(apiClient, "request", async (path: string) => {
     if (path === "/api/conversations") return [{ id: 12, title: "产品方案跟进", channel: "wechat", createdAt: "2026-10-21", archivedAt: null }];
     if (path === "/api/personal") return { memory: [], skills: [], knowledge: { enabled: false, allow: [] } };
+    if (path === "/api/settings/model") return { models: [], selectedModel: "", activeModel: null, restartRequired: false };
     return { items: [], total: 0, schedules: [], reminders: [], background: [] };
   });
   const mounted = await mount(t, null);
@@ -78,7 +79,8 @@ test("历史默认展开且不抢焦点，主导航与历史面板相邻独立",
   assert.equal(view.toggle().getAttribute("aria-label"), "收起历史对话");
   assert.equal(doc.activeElement, doc.body, "初次展开不能自动聚焦历史搜索");
   const rail = doc.querySelector(".sidebar")!, history = doc.querySelector(".conversation-sidebar")!;
-  assert.equal(rail.nextElementSibling, history);
+  assert.equal(rail.nextElementSibling, history.parentElement);
+  assert.equal(history.parentElement?.tagName, "MAIN");
   assert.equal(history.nextElementSibling?.id, "workspace");
   assert.equal(doc.querySelector(".conversation-new-button")!.textContent, "新对话");
   assert.equal(doc.querySelector(".chat-welcome h1")!.textContent, "有什么想交给我？");
@@ -86,6 +88,30 @@ test("历史默认展开且不抢焦点，主导航与历史面板相邻独立",
   await act(async () => { doc.querySelector<HTMLTextAreaElement>("#chat-textarea")!.focus(); });
   await view.render(<App />);
   assert.equal(doc.activeElement?.id, "chat-textarea", "重绘不抢走输入焦点");
+});
+
+test("切换页面只替换内容，外框和主导航保持挂载且历史侧栏属于内容区", async t => {
+  const view = await appHarness(t), { doc, dom } = view;
+  await view.render(<App />);
+  const shell = doc.querySelector("#mascot-card")!;
+  const rail = doc.querySelector(".sidebar")!;
+  const frame = doc.querySelector("main.workspace-frame")!;
+  const content = doc.querySelector("#workspace")!;
+  for (const hash of ["#activity", "#today", "#settings", "#memory", "#chat/12"]) {
+    await act(async () => {
+      dom.window.location.hash = hash;
+      dom.window.dispatchEvent(new dom.window.HashChangeEvent("hashchange"));
+    });
+    assert.equal(doc.querySelector("#mascot-card"), shell);
+    assert.equal(doc.querySelector(".sidebar"), rail);
+    assert.equal(doc.querySelector("main.workspace-frame"), frame);
+    assert.equal(doc.querySelector("#workspace"), content);
+    assert.equal(rail.nextElementSibling, frame);
+    assert.equal(doc.querySelector(".conversation-sidebar")?.parentElement, frame);
+    assert.equal(doc.querySelector<HTMLElement>(".conversation-sidebar")?.hidden, false);
+    assert.equal(doc.querySelector<HTMLElement>("#conversation-history")?.hidden, false);
+    assert.equal(doc.querySelectorAll("main").length, 1);
+  }
 });
 
 test("历史折叠与重新展开保存偏好，路由和常驻导航保持不变", async t => {
@@ -146,7 +172,7 @@ test("旧侧栏偏好可迁移，异常值和不可用存储不阻断历史与�
   assert.equal(view.panel().hidden, false);
   await act(async () => { doc.querySelector<HTMLAnchorElement>('[aria-label="通知中心"]')!.click(); });
   assert.equal(doc.querySelector('[aria-current="page"]')!.getAttribute("href"), "#activity");
-  assert.equal(doc.querySelector<HTMLElement>(".conversation-sidebar")!.hidden, true);
+  assert.equal(doc.querySelector<HTMLElement>(".conversation-sidebar")!.hidden, false);
   assert.ok(doc.querySelector(".sidebar"));
 });
 

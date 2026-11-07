@@ -77,7 +77,7 @@ test("从助手切换 Teams 后隐藏助手输入并恢复来源路由，不订�
   await view.flushFrames();
   assert.equal(view.dom.window.location.hash, "#teams");
   assert.equal(view.doc.getElementById("workspace")?.dataset.view, "teams");
-  assert.equal(view.doc.querySelector<HTMLElement>(".conversation-sidebar")?.hidden, true);
+  assert.equal(view.doc.querySelector<HTMLElement>(".conversation-sidebar")?.hidden, false);
   assert.equal(view.doc.querySelector<HTMLElement>(".input-container")?.hidden, true);
   assert.equal(view.doc.querySelector(".management-header"), null);
   assert.equal(view.doc.activeElement?.id, "workspace");
