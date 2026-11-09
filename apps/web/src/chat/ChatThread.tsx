@@ -11,7 +11,7 @@ import { formatFileSize } from "../ui/format.js";
 import { showToast } from "../ui/toast.js";
 import { Icon } from "../ui/Icon.js";
 import { TeamsMedia } from "./TeamsMedia.js";
-import { TeamsRecords, teamsRecords } from "./TeamsRecords.js";
+import { TeamsRecords, teamsRecords, type ChatRecord } from "./TeamsRecords.js";
 import { chatTimestamp } from "./timestamps.js";
 import type { PendingMessage } from "./useMessageDelivery.js";
 
@@ -50,12 +50,13 @@ function UserMessageBubble({ entry, status }: { entry: ViewEntry; status?: strin
   </div>;
 }
 
-type ErrorActions = { onRetry?: (text: string) => void; onSettings?: () => void };
+type ChatActions = { onRetry?: (text: string) => void; onSettings?: () => void; onQuote?: (record: ChatRecord) => void };
 
-function TurnCard({ turn, live, busy, onRetry, onSettings }: { turn: ChatTurn; live?: ConversationView["live"]; busy: boolean } & ErrorActions) {
+function TurnCard({ turn, live, busy, onRetry, onSettings, onQuote }: { turn: ChatTurn; live?: ConversationView["live"]; busy: boolean } & ChatActions) {
   const info = extractLiveInfo(live);
   const activities = toolActivities(turn.entries, info?.runningTools ?? [], busy);
-  const records = teamsRecords(activities);
+  const forwarded = turn.user.teams;
+  const records = teamsRecords([...activities, ...(forwarded ? [{ id: `forward-${turn.user.id}`, name: "teams_messages", status: "completed" as const, text: `<teams-records>${JSON.stringify(forwarded.records)}</teams-records>` }] : [])]);
   const responses = turn.entries.filter(entry => entry.kind === "assistant" && entry.text && !entry.error);
   const intermediate = responses.slice(0, -1);
   const errorIndex = turn.entries.findLastIndex(entry => !!entry.error);
@@ -67,11 +68,7 @@ function TurnCard({ turn, live, busy, onRetry, onSettings }: { turn: ChatTurn; l
   const hasError = !!failure || turn.entries.some(entry => entry.isError);
   const steps = activities.length + previousErrors.length, waiting = activities.filter(activity => activity.status === "pending").length;
   const done = activities.filter(activity => activity.status === "completed").length;
-  return <section className="chat-turn" data-turn-id={turn.id}>
-    <UserMessageBubble entry={turn.user} />
-    <div className="assistant-turn">
-      {records.length ? <TeamsRecords records={records} /> : <TeamsMedia activities={activities} />}
-      {(activities.length > 0 || !!intermediate.length || !!previousErrors.length || !!info?.thinking) && <details className="turn-activities">
+  const activityDetails = (activities.length > 0 || !!intermediate.length || !!previousErrors.length || !!info?.thinking) && <details className="turn-activities">
         <summary>{busy ? <span className="activity-spinner" aria-hidden="true" /> : hasError ? <Icon name="circle-alert" /> : <span className="activity-ring" aria-hidden="true" style={{ "--progress": `${steps ? done / steps * 360 : 0}deg` } as CSSProperties} />}<span>{busy ? "正在处理" : hasError ? "有步骤未完成" : `执行了 ${steps} 个步骤`}</span>{waiting > 0 && <span className="activity-count">{waiting} 步等待执行</span>}<Icon name="chevron-down" /></summary>
         <div className="turn-activity-list">{activities.map(activity => <div className="turn-activity" key={activity.id}>
           <span className={`activity-status activity-${activity.status}`} aria-label={{ pending: "等待执行", completed: "已完成", error: "未完成", interrupted: "已停止", ended: "已结束，结果未确认", running: "正在执行" }[activity.status]}>{activity.status === "completed" ? <Icon name="check" /> : activity.status === "error" ? <Icon name="circle-alert" /> : activity.status === "interrupted" ? <Icon name="square" /> : activity.status === "ended" ? <Icon name="circle-help" /> : activity.status === "pending" ? <Icon name="clock-3" /> : <span className="activity-spinner" />}</span>
@@ -80,26 +77,32 @@ function TurnCard({ turn, live, busy, onRetry, onSettings }: { turn: ChatTurn; l
         {intermediate.map(entry => <div className="turn-intermediate md" key={entry.id} dangerouslySetInnerHTML={{ __html: renderMarkdown(entry.text) }} />)}
         {previousErrors.map(entry => <details className="model-error-details" key={entry.id}><summary>{describeModelError(entry.error!).title}</summary><pre>{entry.error}</pre></details>)}
         {info?.thinking && <pre className="turn-thinking">{info.thinking}</pre>}
-      </details>}
+      </details>;
+  return <section className="chat-turn" data-turn-id={turn.id}>
+    {!forwarded && <UserMessageBubble entry={turn.user} />}
+    <div className="assistant-turn">
+      {forwarded && !forwarded.records.length && <div className="reminder-system-card">Teams 原消息已不可用</div>}
+      {records.length ? <TeamsRecords records={records} onQuote={onQuote} /> : <TeamsMedia activities={activities} />}
+      {!records.length && activityDetails}
       {notice && failure && <div className="error-system-card model-error-notice" role="alert">
         <Icon name="circle-alert" />
         <div className="model-error-content"><p className="model-error-title">{notice.title}</p><p className="model-error-description">{notice.description}</p>
           <div className="model-error-actions">
-            {!notice.settings && onRetry && turn.user.text && <button type="button" className="text-button" onClick={() => onRetry(turn.user.text)}><Icon name="rotate-ccw" />编辑后重试</button>}
+            {!forwarded && !notice.settings && onRetry && turn.user.text && <button type="button" className="text-button" onClick={() => onRetry(turn.user.text)}><Icon name="rotate-ccw" />编辑后重试</button>}
             {notice.settings && onSettings && <button type="button" className="text-button" onClick={onSettings}><Icon name="settings" />查看服务器模型</button>}
           </div>
           <details className="model-error-details"><summary>查看错误详情</summary><pre>{failure.error}</pre></details>
         </div>
       </div>}
-      {!!responses.length && (records.length ? <details className="teams-records-summary"><summary>助手说明</summary><ResponseCard text={responses.at(-1)!.text} timestamp={responses.at(-1)!.timestamp} /></details>
-        : <div className="message-row assistant-row"><ResponseCard text={responses.at(-1)!.text} timestamp={responses.at(-1)!.timestamp} /></div>)}
+      {!!responses.length && <div className="message-row assistant-row"><ResponseCard text={responses.at(-1)!.text} timestamp={responses.at(-1)!.timestamp} /></div>}
       {info?.text && <div className="message-row assistant-row"><ResponseCard text={info.text} streaming /></div>}
       {busy && !info?.text && <div className="message-row assistant-row"><div className="assistant-wrapper response-card"><AssistantIdentity /><p className="turn-thinking turn-loading" role="status"><span className="activity-spinner" aria-hidden="true" />{info?.runningTools.length ? "正在执行…" : "思考中…"}</p></div></div>}
+      {records.length > 0 && activityDetails}
     </div>
   </section>;
 }
 
-export const ChatThread = memo(function ChatThread({ view, pendingMessages = [], onRetry, onSettings }: { view: ConversationView | null; pendingMessages?: PendingMessage[] } & ErrorActions) {
+export const ChatThread = memo(function ChatThread({ view, pendingMessages = [], onRetry, onSettings, onQuote }: { view: ConversationView | null; pendingMessages?: PendingMessage[] } & ChatActions) {
   const turns = chatTurns(view?.entries ?? []);
   const busy = !!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length;
   if (!turns.length && !pendingMessages.length) return busy ? <div className="message-row assistant-row"><ResponseCard text="思考中…" streaming /></div> : <div className="chat-welcome"><Icon name="message-circle-more" /><h1>有什么想交给我？</h1><p>我可以帮你思考、整理、规划和执行日常事务。</p></div>;
@@ -110,7 +113,7 @@ export const ChatThread = memo(function ChatThread({ view, pendingMessages = [],
     if (timestamp) previousDay = timestamp.day;
     return <Fragment key={turn.id}>
       {showDay && <div className="chat-day-separator"><time dateTime={timestamp.day} title={timestamp.fullDate}>{timestamp.dayLabel}</time></div>}
-      <TurnCard turn={turn} live={index === turns.length - 1 ? view?.live : undefined} busy={index === turns.length - 1 && busy} onRetry={index === turns.length - 1 ? onRetry : undefined} onSettings={onSettings} />
+      <TurnCard turn={turn} live={index === turns.length - 1 ? view?.live : undefined} busy={index === turns.length - 1 && busy} onRetry={index === turns.length - 1 ? onRetry : undefined} onSettings={onSettings} onQuote={onQuote} />
     </Fragment>;
   })}
     {pendingMessages.map(message => <section className="chat-turn" key={message.requestId}><UserMessageBubble entry={{ id: -1, kind: "user", text: message.text, attachments: message.attachments }} status={{ sending: "正在发送…", waiting: "已发送，等待处理", unconfirmed: "发送未确认，可在输入框重试", stopped: "已停止处理" }[message.status]} /></section>)}

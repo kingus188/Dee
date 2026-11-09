@@ -6,13 +6,16 @@ import { WechatState } from "@assistant/channel-wechat";
 import { Notes, Reminders, Delegations, BackgroundJobs, Parents, splitUserContent, withQuote } from "@assistant/features";
 import type { AppContext } from "./context.js";
 import { enrichTeamsRecordView } from "../teams-records.js";
+import { createTeamsForwardView } from "../teams-forward-view.js";
 export function createViews({ harness, ctx, taskGraph, redact, teamsStore }: AppContext) {
+const teamsForwardView = createTeamsForwardView({ harness, ctx, teamsStore });
 const contentText = (content: Message["content"] | undefined) =>
 	typeof content === "string" ? content : (content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("");
 
 // 把 Harness 的视图压成前端要的样子
 async function simplifyView(conversationId: ConversationId, value: ConversationView): Promise<ClientView> {
 	const entries: ViewEntry[] = [];
+	const forwarded = await teamsForwardView(conversationId, value.entries ?? []);
 	for (const entry of value.entries ?? []) {
         if (entry.kind === "app.goal-report" && entry.data && typeof entry.data === "object" && "text" in entry.data && typeof entry.data.text === "string") {
           entries.push({ id: entry.id, kind: "assistant", text: entry.data.text });
@@ -29,7 +32,8 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
 			for (const a of attachments) {
 				if (a.kind === "image" && a.index !== undefined) a.url = `/api/conversations/${conversationId}/images/${entry.id}/${a.index}`;
 			}
-			entries.push({ id: entry.id, kind: "user", text: withQuote(split), attachments, ...time });
+			const teams = forwarded.get(entry.id);
+			entries.push({ id: entry.id, kind: "user", text: teams ? "" : withQuote(split), attachments, ...(teams ? { teams } : {}), ...time });
 		} else if (entry.kind === "pi.assistant" && message.role === "assistant") {
 			const parts = Array.isArray(message.content) ? message.content : [];
 			entries.push({

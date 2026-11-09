@@ -59,6 +59,10 @@ export function openTeamsArchive(db: DatabaseSync) {
       if (row && row.value !== key) throw new Error("Teams 账号已变化，停止归档以免混入其他账号；请先处理原账号归档");
       db.prepare("INSERT OR IGNORE INTO teams_archive_meta(key,value) VALUES ('owner',?)").run(key);
     },
+    messageDirection(senderId?: string): "in" | "out" | "unknown" {
+      const owner = db.prepare("SELECT value FROM teams_archive_meta WHERE key='owner'").get()?.value;
+      return senderId && owner ? digest(senderId) === owner ? "out" : "in" : "unknown";
+    },
     chats(items: ArchivedChat[]) {
       for (const chat of items) { if (!chat.id) throw new Error("Teams 聊天缺少标识"); saveChat.run(chat.id, JSON.stringify(chat)); }
     },
@@ -124,6 +128,9 @@ export function openTeamsArchive(db: DatabaseSync) {
       db.prepare("UPDATE teams_archive_media SET status='failed',attempts=3,error='截图列表读取失败，需检查权限或重新读取原消息' WHERE id=?").run(id);
     },
     mediaRows,
+    messageReadable(chatId: string, id: string) {
+      return knownAccess(chatId) && allowed(chatId, id);
+    },
     chatLabel(chatId: string) {
       const row = db.prepare("SELECT value FROM teams_archive_chats WHERE id=?").get(chatId) as { value: string } | undefined;
       const chat = row ? JSON.parse(row.value) as ArchivedChat : undefined;

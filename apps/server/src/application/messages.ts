@@ -6,6 +6,7 @@ import { HttpError } from "../errors.js";
 import type { MessageStatus } from "@assistant/contracts";
 import type { AppContext } from "./context.js";
 import type { createConversations } from "./conversations.js";
+import { initialConversationTitle } from "../conversation-titles.js";
 export function createMessages({ harness, ctx, agentModel }: AppContext, { registerIn, updateTitle }: ReturnType<typeof createConversations>) {
  async function status(conversation: Conversation, requestId: string | null): Promise<MessageStatus | null> {
    if (!requestId || requestId.length > 100) throw new HttpError(400, "消息标识无效");
@@ -32,7 +33,7 @@ export function createMessages({ harness, ctx, agentModel }: AppContext, { regis
 				{ type: "input", content, requestId, whenBusy: body.mode === "steer" ? "steer" : "followUp" },
 				ctx,
 			);
-			await updateTitle(conversation.id, (text || `[附件] ${files[0].name}`).slice(0, 20));
+			await updateTitle(conversation.id, initialConversationTitle(content));
 			return { submissionId: submission.id };
  }
  async function fork(conversation: Conversation, body: Record<string, unknown>) {

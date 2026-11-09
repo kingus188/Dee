@@ -13,7 +13,8 @@ export type TeamsReadQuery =
 	| { kind: "archiveStatus" }
 	| { kind: "media"; id: string };
 export type TeamsMediaInfo = { id: string; name: string; kind: "image" | "file"; status: string; url?: string; previewUrl?: string; error?: string };
-export type TeamsChatRecord = { chatId: string; id: string; chatLabel: string; sender: string; createdAt: string; text: string; deleted?: boolean; media: TeamsMediaInfo[] };
+import type { TeamsChatRecord } from "@assistant/contracts";
+export type { TeamsChatRecord } from "@assistant/contracts";
 export type TeamsReadResult = { data: unknown; attachment?: Attachment; media?: TeamsMediaInfo[]; records?: TeamsChatRecord[] };
 export type TeamsReadPort = (query: TeamsReadQuery) => Promise<TeamsReadResult>;
 

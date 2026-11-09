@@ -42,14 +42,14 @@ test("外部消息面板展开、收起和隐藏都不重建当前内容或更�
   assert.equal(view.dom.window.location.hash, hash);
 });
 
-async function harness(t: TestContext) {
+async function harness(t: TestContext, entries?: ConversationView["entries"]) {
   t.mock.method(apiClient, "connect", async () => {});
   t.mock.method(apiClient, "onConnection", () => () => {});
   let receive!: (view: ConversationView) => void;
   t.mock.method(apiClient, "onView", (callback: (view: ConversationView) => void) => { receive = callback; return () => {}; });
   let pending = false;
   const subscriptions: number[] = [], writes: string[] = [];
-  function sendView(id: number, channel: string) { receive({ conversationId: id, channel, entries: [{ id: 1, kind: "user", text: "原有对话" }], live: {}, busy: false, inbox: 0, notes: { todos: [], memos: [] }, usage: null, tasks: [], reminders: [], subagents: [], parentId: null }); }
+  function sendView(id: number, channel: string) { receive({ conversationId: id, channel, entries: entries ?? [{ id: 1, kind: "user", text: "原有对话" }], live: {}, busy: false, inbox: 0, notes: { todos: [], memos: [] }, usage: null, tasks: [], reminders: [], subagents: [], parentId: null }); }
   t.mock.method(apiClient, "subscribeConversation", async (id: number) => { subscriptions.push(id); if (!pending) sendView(id, id === 12 ? "wechat" : "web"); });
   t.mock.method(apiClient, "request", async (path: string, body?: unknown) => {
     if (body !== undefined && path !== "/api/mail/delivery") writes.push(path);
@@ -66,7 +66,7 @@ async function harness(t: TestContext) {
   };
 }
 
-test("只有 Teams 和真实微信绑定对话使用紧凑消息面板，普通 Dee 保持原布局", async t => {
+test("微信与普通 Dee 使用相同完整对话布局，保留来源提示、输入框和独立 Teams 阅读器", async t => {
   const view = await harness(t);
   view.dom.window.history.replaceState(null, "", "#chat/19");
   await view.render(<App />);
@@ -74,13 +74,14 @@ test("只有 Teams 和真实微信绑定对话使用紧凑消息面板，普通 
   assert.equal(view.doc.querySelector(".external-message-stage:not([hidden])"), null, "不能以历史列表的过期来源标签推断当前发送身份");
   assert.equal(view.doc.querySelector(".conversation-title")?.textContent, "网页里的计划");
   await view.restore("#chat/12");
-  const wechatFrame = view.doc.querySelector(".external-message-stage:not([hidden]) .external-message-panel")!;
+  const wechatFrame = view.doc.querySelector(".conversation-surface-panel")!;
   assert.equal(wechatFrame.id, "assistant-conversation-panel");
+  assert.equal(view.doc.querySelector(".external-message-stage:not([hidden])"), null);
+  assert.equal(view.doc.querySelector<HTMLElement>(".app-layout")?.dataset.externalConversation, "false");
   assert.equal(view.doc.querySelector(".conversation-title")?.textContent, "微信里的安排");
   assert.match(view.doc.querySelector(".conversation-channel-label")?.textContent ?? "", /微信里的 Dee/);
   assert.ok(wechatFrame.contains(view.doc.querySelector(".wechat-conversation-notice")));
   assert.equal(view.doc.querySelector("#chat-textarea"), input);
-  await act(async () => { wechatFrame.parentElement!.querySelector<HTMLButtonElement>(".external-message-resize")!.click(); });
   assert.equal(view.dom.window.location.hash, "#chat/12");
   await view.restore("#teams/19%3Aexample%40thread.v2");
   const teamsFrame = view.doc.querySelector(".external-message-stage:not([hidden]) .external-message-panel")!;
@@ -88,13 +89,38 @@ test("只有 Teams 和真实微信绑定对话使用紧凑消息面板，普通 
   assert.equal(view.doc.querySelector<HTMLElement>(".input-container")?.hidden, true);
   assert.equal(view.doc.querySelector(".app-layout > .sidebar")?.hasAttribute("inert"), false);
   await view.restore("#chat/12");
-  assert.equal(view.doc.querySelector(".external-message-stage:not([hidden]) .external-message-panel"), wechatFrame);
-  assert.equal(wechatFrame.closest<HTMLElement>(".external-message-stage")?.dataset.expanded, "true");
+  assert.equal(view.doc.querySelector(".conversation-surface-panel"), wechatFrame);
+  assert.equal(view.doc.querySelector(".external-message-stage:not([hidden])"), null);
   assert.equal(view.doc.querySelector("#chat-textarea"), input);
   await view.restore("#chat/19");
   assert.equal(view.doc.querySelector(".external-message-stage:not([hidden])"), null);
   assert.equal(view.doc.querySelector(".conversation-channel-label"), null);
   assert.deepEqual(view.subscriptions, [19, 12, 19]);
+  assert.deepEqual(view.writes, []);
+});
+
+test("内嵌 IM 引用仅进入当前会话草稿，切换与取消不串会话，也不发送消息", async t => {
+  const record = { chatId: "source-chat", id: "one", chatLabel: "原始聊天", sender: "甲", createdAt: "2026-11-09T13:24:06Z", text: "原始 FTP 申请", media: [] };
+  const view = await harness(t, [{ id: 1, kind: "user", text: "查看聊天" }, { id: 2, kind: "tool", name: "teams_history", text: `<teams-records>${JSON.stringify([record])}</teams-records>` }, { id: 3, kind: "assistant", text: "读取完成" }]);
+  view.dom.window.history.replaceState(null, "", "#chat/19");
+  await view.render(<App />);
+  const input = view.doc.querySelector<HTMLTextAreaElement>("#chat-textarea")!;
+  assert.ok(view.doc.querySelector(".assistant-turn .teams-records-chat .teams-records-scroll"));
+  await act(async () => view.doc.querySelector<HTMLButtonElement>(".teams-record-quote")!.click());
+  assert.match(view.doc.querySelector(".composer-quote")!.textContent!, /原始 FTP 申请/);
+  assert.equal(input.value, "");
+  await view.restore("#chat/12");
+  assert.equal(view.doc.querySelector(".composer-quote"), null);
+  await act(async () => view.doc.querySelector<HTMLButtonElement>(".teams-record-quote")!.click());
+  await act(async () => view.doc.querySelector<HTMLButtonElement>('[aria-label="取消引用"]')!.click());
+  assert.equal(view.doc.querySelector(".composer-quote"), null);
+  await view.restore("#chat/19");
+  assert.match(view.doc.querySelector(".composer-quote")!.textContent!, /原始 FTP 申请/);
+  view.defer();
+  await view.restore("#chat/12");
+  assert.equal(view.doc.querySelector(".composer-quote"), null);
+  assert.equal(view.doc.querySelector(".teams-record-quote"), null, "来源未加载不能引用旧会话记录");
+  assert.equal(view.doc.querySelector<HTMLButtonElement>(".btn-send")!.disabled, true);
   assert.deepEqual(view.writes, []);
 });
 

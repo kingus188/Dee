@@ -5,6 +5,7 @@ import { Goals, Schedules, Reminders, BackgroundJobs } from "@assistant/features
 import { WechatState } from "@assistant/channel-wechat";
 import { HttpError } from "../errors.js";
 import type { AppContext } from "./context.js";
+import { needsConversationTitle } from "../conversation-titles.js";
 export function createConversations({ harness, root, ctx, redact, episodeStore }: AppContext) {
 async function getConversation(id: number) {
 	const conversation = Number.isInteger(id) && id !== root.id ? await harness.conversation(id as ConversationId, ctx) : undefined;
@@ -20,7 +21,9 @@ const registerIn = (item: Omit<ConversationItem, "id" | "createdAt">) => async (
 async function updateTitle(id: ConversationId, title: string) {
 	await root.commit(async (tx) => {
 		const item = (await tx.doc(Index)).items.find((i) => i.id === id);
-		if (item && item.title === "新对话") item.title = title;
+		if (!item || !needsConversationTitle(item) || !title) return;
+		const wechat = await tx.doc(WechatState);
+		if (!Object.values(wechat.bindings).some(binding => Number(binding.conversationId) === Number(id))) item.title = title;
 	}, ctx);
 }
 

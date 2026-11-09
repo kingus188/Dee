@@ -19,13 +19,25 @@ export function teamsRecords(archive: TeamsArchive, messages: (ArchivedMessage &
   return messages.filter(m => m.id && m.chatId && Number.isFinite(Date.parse(m.createdDateTime))).map(message => ({
     chatId: message.chatId, id: message.id, chatLabel: archive.chatLabel(message.chatId),
     sender: message.from?.user?.displayName || "未提供发送人", createdAt: message.createdDateTime,
+    direction: archive.messageDirection(message.from?.user?.id),
     text: teamsOriginalText(message), deleted: !!message.deletedDateTime, media: archive.mediaRows(message.chatId, message.id),
   }));
 }
 
 // 旧会话只从已经返回的原消息 ID 关联归档，不补造未读消息，不修改模型或用户的历史条目。
 export function enrichTeamsRecordView(archive: TeamsArchive, name: string, text: string, args?: Record<string, unknown>, legacy?: (query: TeamsInboxQuery) => TeamsMessageRow[]) {
-  if (!["teams_history", "teams_archive", "teams_messages"].includes(name) || text.includes("<teams-records>")) return text;
+  if (!["teams_history", "teams_archive", "teams_messages"].includes(name)) return text;
+  if (text.includes("<teams-records>")) return text.replace(/^<teams-records>([^\n]*)<\/teams-records>$/gm, (marker, payload: string) => {
+    let records: unknown;
+    try { records = JSON.parse(payload); } catch { return marker; }
+    if (!Array.isArray(records)) return marker;
+    return `<teams-records>${JSON.stringify(records.flatMap(record => {
+      if (!record || typeof record.chatId !== "string" || typeof record.id !== "string") return [record];
+      if (!archive.messageReadable(record.chatId, record.id)) return [];
+      const original = archive.message(record.chatId, record.id);
+      return original ? teamsRecords(archive, [{ ...original, chatId: record.chatId }]) : [{ ...record, direction: "unknown" }];
+    }))}</teams-records>`;
+  });
   if (name === "teams_messages" && legacy) {
     const rows = legacy({ chat: typeof args?.chat === "string" ? args.chat : undefined, sender: typeof args?.sender === "string" ? args.sender : undefined, limit: 5000 });
     const previews = rows.map(row => ({ row, ...teamsPreviewParts(row) }));

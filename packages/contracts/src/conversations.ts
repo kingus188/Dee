@@ -22,6 +22,8 @@ export type ViewEntry = {
   /** Source message time in Unix milliseconds; absent when no valid time was recorded. */
   timestamp?: number;
   attachments?: AttachmentSummary[];
+  /** Host-verified forwarded IM input; model instructions stay outside the display payload. */
+  teams?: { records: import("./teams-conversations.js").TeamsChatRecord[] };
   toolCalls?: { id: string; name: string; args: ToolArgs }[];
   error?: string; toolCallId?: string; name?: string; isError?: boolean;
 };

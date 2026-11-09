@@ -183,6 +183,14 @@ export function openTeamsStore(dataDir: string) {
     notificationIds() {
       return (db.prepare("SELECT id FROM visible_teams_messages WHERE direction = 'in' AND important = 1").all() as { id: string }[]).map(row => row.id);
     },
+    notificationHistoryIds() {
+      return (db.prepare(`SELECT id FROM teams_messages WHERE direction = 'in' AND important = 1
+        UNION SELECT chat_id || ':' || id AS id FROM teams_archive_messages
+        UNION SELECT message_id AS id FROM source_message_revocations WHERE source LIKE 'teams:%'`).all() as { id: string }[]).map(row => row.id);
+    },
+    notificationHistorySources() {
+      return (db.prepare("SELECT message_ids FROM teams_notification_batches").all() as { message_ids: string }[]).map(row => JSON.parse(row.message_ids) as string[]);
+    },
     message(id: string) {
       const found = db.prepare("SELECT * FROM visible_teams_messages WHERE id = ?").get(id);
       return found ? row(found) : undefined;

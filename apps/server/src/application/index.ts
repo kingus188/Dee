@@ -13,6 +13,7 @@ import { openTeamsStore } from "../teams-store.js";
 import { createTeamsReadPort } from "../teams-read-port.js";
 import { openEpisodeStore } from "../episode-store.js";
 import { createSummarizer } from "../episode-model.js";
+import { repairConversationTitles } from "../conversation-titles.js";
 import { reviewTeamsNotification } from "../teams-notifications.js";
 import { createTeamsReplyPort, type TeamsSender } from "../teams-reply-port.js";
 import { openDaylightStore, type DaylightStore } from "../daylight-store.js";
@@ -67,7 +68,10 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
       // Old versions removed Index entries without a tombstone. Reconcile before
       // durable work resumes, retaining the runtime's existing model rebinding.
-      beforeResume: async runtime => { episodeStore!.reconcileConversations((await runtime.harness.snapshot(Index, ctx))?.items.map(item => item.id) ?? []); },
+      beforeResume: async runtime => {
+        await repairConversationTitles(runtime, ctx);
+        episodeStore!.reconcileConversations((await runtime.harness.snapshot(Index, ctx))?.items.map(item => item.id) ?? []);
+      },
       extensions: [createDailyReportTools(dailyReports), createDaylight(daylight), createMailInbox(mail), createAssistant(notify, daylight), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query), records: rows => teamsStore!.records(rows),
         refresh: () => teamsSender.refresh?.() ?? Promise.resolve({ ok: false, lastSuccessAt: teamsSender.syncStatus?.().lastSuccessAt ?? null }),
         syncStatus: () => teamsSender.syncStatus?.() ?? { lastSuccessAt: null },

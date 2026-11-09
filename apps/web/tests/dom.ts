@@ -5,8 +5,8 @@ import type { TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 
 export async function mount(t: TestContext, component: ReactNode) {
-  const dom = new JSDOM('<div id="root"></div><div id="toast-container"></div>', { url: "http://localhost/" });
-  const values = { window: dom.window, document: dom.window.document, navigator: dom.window.navigator, HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true };
+  const dom = new JSDOM('<div id="root"></div><div id="toast-container"></div>', { url: "http://localhost/", pretendToBeVisual: true });
+  const values = { window: dom.window, document: dom.window.document, navigator: dom.window.navigator, HTMLElement: dom.window.HTMLElement, requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window), cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window), IS_REACT_ACT_ENVIRONMENT: true };
   const descriptors = new Map<string, PropertyDescriptor | undefined>();
   for (const [key, value] of Object.entries(values)) {
     descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));

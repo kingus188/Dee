@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { teamsRecords, TeamsRecords } from "../dist/chat/TeamsRecords.js";
 import { ChatThread } from "../dist/chat/ChatThread.js";
 import type { ConversationView } from "@assistant/contracts";
 import type { ToolActivity } from "../dist/chat/activities.js";
+import { mount } from "./dom.js";
 
 const image = { id: "a".repeat(64), name: "截图", kind: "image", status: "ready", previewUrl: "/api/teams/media/"+"a".repeat(64) };
 const later = { chatId: "chat", id: "2", chatLabel: "原聊天", sender: "乙", createdAt: "2026-01-02T00:00:00Z", text: "后一句原话", media: [] };
@@ -23,11 +24,53 @@ test("多页逆序与重叠结果按原时间合并，截图跟随原消息，�
   assert.doesNotMatch(html, /<script>/); assert.match(html, /&lt;script&gt;/);
 });
 
-test("有真实记录时不再把图集中在顶部，助手解释默认折叠，过程错误仍保留", () => {
+test("真实记录内嵌在普通回复中，附件跟随消息，助手解释直接可见且过程仍保留", () => {
   const view: ConversationView={conversationId:1,entries:[{id:1,kind:"user",text:"按真实聊天整理"},{id:2,kind:"tool",name:"teams_history",text:output},{id:3,kind:"assistant",text:"模型对截图的分析"}],busy:false,live:{},inbox:0,usage:null,notes:{todos:[],memos:[]},tasks:[],reminders:[],subagents:[],parentId:null};
   const html=renderToStaticMarkup(createElement(ChatThread,{view}));
   assert.match(html,/teams-records-inline/);assert.doesNotMatch(html,/user-attachments-grid teams-media-inline/);
-  assert.match(html,/<details class="teams-records-summary"><summary>助手说明<\/summary>/);
-  assert.doesNotMatch(html,/<details[^>]*teams-records-summary[^>]*open/);
+  assert.match(html,/<details class="teams-records-chat" open="">/);
+  assert.doesNotMatch(html,/teams-records-summary/);
+  assert.match(html,/assistant-bubble md[^]*模型对截图的分析/);
+  assert.match(html,/turn-activities/);
+  assert.ok(html.indexOf("teams-records-inline") < html.indexOf("assistant-bubble md"));
+  assert.ok(html.indexOf("assistant-bubble md") < html.indexOf("turn-activities"));
   assert.match(html,/后一句原话/);
+});
+
+test("方向仅取可信字段，旧记录不猜身份，连续本人消息分组且跨日重新显示发送者", async t => {
+  const rows = [
+    { ...later, id: "a", createdAt: new Date(2026, 10, 9, 23, 59, 3).toISOString(), direction: "out" },
+    { ...later, id: "b", createdAt: new Date(2026, 10, 9, 23, 59, 40).toISOString(), direction: "out" },
+    { ...later, id: "c", createdAt: new Date(2026, 10, 10, 0, 0).toISOString(), direction: "out" },
+    { ...later, id: "d", createdAt: new Date(2026, 10, 10, 0, 1).toISOString(), direction: "me" },
+  ];
+  const records = teamsRecords([{ ...activity, text: `<teams-records>${JSON.stringify(rows)}</teams-records>` }]);
+  assert.deepEqual(records.map(record => record.direction), ["out", "out", "out", "unknown"]);
+  const { dom } = await mount(t, <TeamsRecords records={records} onQuote={() => {}} />), doc = dom.window.document;
+  const messages = [...doc.querySelectorAll<HTMLElement>(".teams-record")];
+  assert.equal(messages[0].dataset.direction, "out");
+  assert.equal(messages[1].classList.contains("is-grouped"), true);
+  assert.equal(messages[2].classList.contains("is-grouped"), false);
+  assert.equal(messages[3].dataset.direction, "unknown");
+  assert.match(messages[0].textContent!, /乙 · 我/);
+  assert.doesNotMatch(messages[3].textContent!, /· 我/);
+  assert.ok(messages[2].querySelector(".teams-record-day"));
+});
+
+test("多个聊天分别折叠，引用保留原消息，删除记录不暴露旧正文、图片或引用动作", async t => {
+  const records = teamsRecords([{ ...activity, text: `<teams-records>${JSON.stringify([first, { ...later, chatId: "other", deleted: true, text: "应隐藏的旧正文", media: [image] }])}</teams-records>` }]);
+  let quoted: unknown;
+  const { dom } = await mount(t, <TeamsRecords records={records} onQuote={record => { quoted = record; }} />), doc = dom.window.document;
+  const chats = [...doc.querySelectorAll<HTMLDetailsElement>(".teams-records-chat")];
+  assert.equal(chats.length, 2);
+  assert.ok(chats.every(chat => chat.open));
+  assert.equal(chats[0].querySelector('[role="region"]')?.getAttribute("tabindex"), "0");
+  await act(async () => chats[0].querySelector<HTMLButtonElement>(".teams-record-quote")!.click());
+  assert.equal(quoted, records[0]);
+  assert.equal(chats[1].querySelector("img"), null);
+  assert.equal(chats[1].querySelector(".teams-record-quote"), null);
+  assert.doesNotMatch(chats[1].textContent!, /应隐藏的旧正文/);
+  await act(async () => chats[0].querySelector("summary")!.click());
+  assert.equal(chats[0].open, false);
+  assert.equal(chats[1].open, true);
 });

@@ -5,6 +5,7 @@ import { useConversation } from "../chat/useConversation.js";
 import { Composer } from "../chat/Composer.js";
 import { chatTurns } from "../chat/turns.js";
 import { ChatThread } from "../chat/ChatThread.js";
+import type { ChatRecord } from "../chat/TeamsRecords.js";
 import { CardPanel } from "../tasks/CardPanel.js";
 import { Icon } from "./Icon.js";
 import { ModelSettings } from "../settings/ModelSettings.js";
@@ -43,6 +44,7 @@ export function App() {
   const [historyItems, setHistoryItems] = useState<ConversationItem[]>([]);
   const [reportsOpened, setReportsOpened] = useState(page === "reports"), [daylightOpened, setDaylightOpened] = useState(page === "daylight");
   const [draft, setDraft] = useState(""), [routeError, setRouteError] = useState("");
+  const [quotes, setQuotes] = useState(new Map<number, ChatRecord>());
   const [narrow, setNarrow] = useState(() => window.matchMedia?.("(max-width: 900px)").matches ?? false);
   const [historyExpanded, setHistoryExpanded] = useState(() => {
     try { return (window.localStorage.getItem("dee.history.collapsed") ?? window.localStorage.getItem("dee.sidebar.collapsed")) !== "true"; }
@@ -208,6 +210,20 @@ export function App() {
   const emptyChat = !view?.busy && !view?.inbox && !Object.keys(view?.live ?? {}).length && chatTurns(view?.entries ?? []).length === 0;
   const conversationPending = !!route.conversationId && view?.conversationId !== route.conversationId;
   const wechatConversation = !conversationPending && view?.channel === "wechat";
+  const quote = conversationPending ? undefined : quotes.get(view?.conversationId ?? -1);
+  function quoteRecord(record: ChatRecord) {
+    if (conversationPending || !view) return;
+    setQuotes(previous => new Map(previous).set(view.conversationId, record));
+    requestAnimationFrame(() => document.getElementById("chat-textarea")?.focus());
+  }
+  function clearQuote(record: ChatRecord) {
+    const owner = view?.conversationId;
+    if (owner === undefined) return;
+    setQuotes(previous => {
+      if (previous.get(owner) !== record) return previous;
+      const next = new Map(previous); next.delete(owner); return next;
+    });
+  }
   const conversationTitle = historyItems.find(item => item.id === (route.conversationId ?? view?.conversationId))?.title?.trim() || view?.entries.find(entry => entry.kind === "user" && entry.text.trim())?.text.trim().split("\n")[0] || "与小 D 对话";
   const relatedAction = !wechatConversation && relatedCount > 0 && <button ref={relatedToggle} className="icon-button related-panel-toggle" type="button" aria-label={relatedOpen ? "收起关联任务" : "展开关联任务"} title="关联任务" aria-expanded={relatedOpen} aria-controls="related-tasks-panel" onClick={() => { if (relatedOpen) closeRelatedDetails(); else openRelatedDetails(); }}><Icon name="panel-right" /><span className="related-panel-count">{relatedCount}</span></button>;
   const serviceLabel = connection !== "connected" ? "连接中" : info?.configured === false ? "模型待配置" : "已连接";
@@ -217,7 +233,7 @@ export function App() {
     <a className="workspace-skip" href="#workspace" onClick={event => { event.preventDefault(); document.getElementById("workspace")?.focus(); }}>跳到主要内容</a>
     <MailNotifications />
     {connection !== "connected" && <div id="reconnect-banner" className="reconnect-banner" style={{ display: "flex" }} role="status"><div className="reconnect-spinner" /><span>{connection === "connecting" ? "正在连接小 D…" : "与服务器断开，正在重连…"}</span></div>}
-    <div className="app-layout" id="mascot-card" data-state={mascot.state} data-view={page} data-desktop={window.desktopServer?.platform} data-external-conversation={page === "teams" || (page === "chat" && wechatConversation)}>
+    <div className="app-layout" id="mascot-card" data-state={mascot.state} data-view={page} data-desktop={window.desktopServer?.platform} data-external-conversation={page === "teams"}>
       {window.desktopServer?.platform && <div className="desktop-titlebar" aria-hidden="true" />}
       <WorkspaceNavigation inert={relatedModal || page === "chat" && narrow && historyOpen} route={route} onNavigate={navigate} onHelp={() => help.current?.showModal()} onSearch={historyOpen ? undefined : toggleHistory} onNew={() => { void startChat().catch(error => showToast(error.message, "error")); }} newDisabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} />
       <main className="workspace-frame">
@@ -235,15 +251,15 @@ export function App() {
         {teamsOpened && <ExternalConversationPanel active={page === "teams"} id="teams-external-message-panel" label="Teams"><PageLoad><TeamsConversations active={page === "teams"} chatId={page === "teams" ? route.chatId : lastTeamsChat.current} onSelectChat={chatId => navigate({ page: "teams", group: null, chatId })} onAssistant={() => switchConversationSource("chat")} onDaylight={taskId => navigate({ page: "daylight", group: null, taskId })} onSettings={settings} /></PageLoad></ExternalConversationPanel>}
         {reportsOpened && <div className="page-load-host" hidden={page !== "reports"}><PageLoad><DailyReports active={page === "reports"} /></PageLoad></div>}
         {daylightOpened && <div className="page-load-host" hidden={page !== "daylight"}><PageLoad><DaylightPage active={page === "daylight"} taskId={route.taskId} headerActions={page === "daylight" ? headerActions : null} /></PageLoad></div>}
-        <ExternalConversationPanel active={page === "chat" || page === "data"} compact={page === "chat" && wechatConversation} id="assistant-conversation-panel" label="微信里的 Dee">
+        <ExternalConversationPanel active={page === "chat" || page === "data"} compact={false} id="assistant-conversation-panel" label="与 Dee 对话">
         {page === "chat" && !emptyChat && <header className="conversation-header"><div className="conversation-heading"><h1 className="conversation-title" title={conversationTitle}>{conversationTitle}</h1>{wechatConversation && <span className="conversation-channel-label"><Icon name="message-circle" />微信里的 Dee</span>}</div><div className="conversation-header-actions">{relatedAction}{!historyOpen && <button className="icon-button conversation-header-new" type="button" aria-label="新对话" title="新对话" disabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} onClick={() => { void startChat().catch(error => showToast(error.message, "error")); }}><Icon name="plus" /></button>}{headerActions}</div></header>}
         {page === "chat" && emptyChat && <div className="conversation-toolbar">{!historyOpen && <button className="icon-button conversation-new-button" type="button" aria-label="新对话" title="新对话" disabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} onClick={() => { void startChat().catch(error => showToast(error.message, "error")); }}><Icon name="plus" /><span>新对话</span></button>}{relatedAction}{headerActions}</div>}
         <section ref={scroll} hidden={page !== "chat" && page !== "data"} className={page === "data" ? group === "notes" ? "data-panel data-panel-notes" : "data-panel" : "messages-container"} id="messages-container" aria-label={page === "data" && group ? dataLabel : "与小 D 的对话"} onScroll={() => { if (page !== "chat") return; const el = scroll.current!; autoScroll.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
-          {page === "data" ? <header className="data-panel-heading"><div><h1>{dataLabel}</h1><p>{dataDescription}</p></div>{group === "tasks" && <button className="text-button" type="button" onClick={() => navigate({ page: "activity", group: null })}>全部动态<Icon name="arrow-up-right" /></button>}</header> : <div id="message-history" aria-live="polite"><ChatThread view={view} pendingMessages={pendingMessages} onRetry={draft.trim() ? undefined : prompt} onSettings={settings} /></div>}
+          {page === "data" ? <header className="data-panel-heading"><div><h1>{dataLabel}</h1><p>{dataDescription}</p></div>{group === "tasks" && <button className="text-button" type="button" onClick={() => navigate({ page: "activity", group: null })}>全部动态<Icon name="arrow-up-right" /></button>}</header> : <div id="message-history" aria-live="polite"><ChatThread view={view} pendingMessages={pendingMessages} onRetry={draft.trim() ? undefined : prompt} onSettings={settings} onQuote={conversationPending ? undefined : quoteRecord} /></div>}
           <div hidden={page !== "chat"}><CardPanel view={conversationPending ? null : view} onPrompt={prompt} compactTasks={!wechatConversation} detailsHost={relatedHost} onRelatedCount={reportRelatedCount} onOpenDetails={openRelatedDetails} /></div>
           <WorkspaceData skillSource={route.skillSource} onSkillSourceChange={remote => navigate({ page: "data", group: "skills", ...(remote ? { skillSource: "remote" as const } : {}) })} group={page === "data" ? group : null} owner={route.conversationId ?? view?.conversationId ?? null} connect={connectDirectChat} headerActions={page === "data" && group === "notes" ? headerActions : null} />
         </section>
-        <footer className="input-container" hidden={page !== "chat"}><Composer draft={draft} setDraft={setDraft} view={view} conversationPending={conversationPending} connect={connectDirectChat} send={send} onSendStart={() => { autoScroll.current = true; }} onSent={() => { refreshHistory(value => value + 1); autoScroll.current = true; }} onNewConversation={startChat} onRelated={relatedCount > 0 && !wechatConversation ? openRelatedDetails : undefined} /><div className="composer-footer">{info?.configured === false ? <button className="text-button" type="button" onClick={settings}>配置模型后开始对话</button> : <span className="keyboard-hint">Enter 发送 · Shift + Enter 换行</span>}</div></footer>
+        <footer className="input-container" hidden={page !== "chat"}><Composer draft={draft} setDraft={setDraft} view={view} conversationPending={conversationPending} quote={quote} onClearQuote={clearQuote} connect={connectDirectChat} send={send} onSendStart={() => { autoScroll.current = true; }} onSent={() => { refreshHistory(value => value + 1); autoScroll.current = true; }} onNewConversation={startChat} onRelated={relatedCount > 0 && !wechatConversation ? openRelatedDetails : undefined} /><div className="composer-footer">{info?.configured === false ? <button className="text-button" type="button" onClick={settings}>配置模型后开始对话</button> : <span className="keyboard-hint">Enter 发送 · Shift + Enter 换行</span>}</div></footer>
         </ExternalConversationPanel>
       </div>
       {relatedModal && <button className="related-panel-backdrop" aria-label="关闭关联任务遮罩" tabIndex={-1} onClick={closeRelatedDetails} />}

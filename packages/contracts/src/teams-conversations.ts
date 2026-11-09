@@ -18,6 +18,7 @@ export type TeamsConversationList = {
 export type TeamsConversationMedia = {
   id: string; name: string; kind: "image" | "file"; status: string; url?: string; previewUrl?: string;
 };
+export type TeamsChatRecord = { chatId: string; id: string; chatLabel: string; sender: string; createdAt: string; text: string; direction?: "in" | "out" | "unknown"; deleted?: boolean; media: TeamsConversationMedia[] };
 export type TeamsConversationMessage = {
   id: string;
   chatId: string;

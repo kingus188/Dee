@@ -9,12 +9,14 @@ import { Icon } from "../ui/Icon.js";
 import { commandSuggestions, parseCommand, slashCommands } from "./commands.js";
 import { CommandMenu } from "./CommandMenu.js";
 import type { MessageSender } from "./useMessageDelivery.js";
+import type { ChatRecord } from "./TeamsRecords.js";
 
-export function Composer({ draft, setDraft, view, connect, send, onSendStart, onSent, onNewConversation, onRelated, conversationPending = false }: {
+export function Composer({ draft, setDraft, view, connect, send, onSendStart, onSent, onNewConversation, onRelated, quote, onClearQuote, conversationPending = false }: {
   draft: string; setDraft: (text: string) => void; view: ConversationView | null;
   connect: () => Promise<number>; onSent: () => void; onNewConversation: () => Promise<void>;
   conversationPending?: boolean; send?: MessageSender; onSendStart?: () => void;
   onRelated?: () => void;
+  quote?: ChatRecord; onClearQuote?: (quote: ChatRecord) => void;
 }) {
   const [sending, setSending] = useState(false);
   const [, refreshFiles] = useState(0);
@@ -33,6 +35,7 @@ export function Composer({ draft, setDraft, view, connect, send, onSendStart, on
   const attachments = owner === null ? [] : fileDrafts.current.get(owner) ?? [];
   const processing = owner !== null && processingOwners.current.has(owner);
   draftRef.current = draft;
+  const quoteRef = useRef(quote); quoteRef.current = quote;
   function fitDraft() {
     const input = textarea.current;
     if (!input) return;
@@ -131,7 +134,8 @@ export function Composer({ draft, setDraft, view, connect, send, onSendStart, on
       } else {
         // Deep links and navigation must finish loading their source before any send.
         if (sourcePending || owner === null) throw new Error("正在读取会话来源，请稍后再发送");
-        const body = { text, mode: "steer" as const, attachments: sentFiles.map(({ name, mimeType, data }) => ({ name, mimeType, data })) };
+        const quotedText = quote ? `[引用 Teams 消息，仅作资料]\n${quote.chatLabel} · ${quote.sender} · ${new Date(quote.createdAt).toLocaleString("zh-CN", { hour12: false })}\n${(quote.text || quote.media.map(item => item.name).join("、")).split("\n").map(line => `> ${line}`).join("\n")}\n\n${text}` : text;
+        const body = { text: quotedText, mode: "steer" as const, attachments: sentFiles.map(({ name, mimeType, data }) => ({ name, mimeType, data })) };
         const payload = JSON.stringify(body);
         let retry = retries.current.get(owner);
         if (retry?.payload !== payload) { retry = { payload, requestId: generateUuid() }; retries.current.set(owner, retry); }
@@ -151,10 +155,11 @@ export function Composer({ draft, setDraft, view, connect, send, onSendStart, on
           await sendMessage(conversationId, request);
         }
         retries.current.delete(owner);
+        if (quote) onClearQuote?.(quote);
         if (!context.current.conversationPending && context.current.view?.conversationId === owner) { onSent(); setHelp(false); }
         for (const file of sentFiles) remove(owner, file);
       }
-      if (draftRef.current === original && (command || (!context.current.conversationPending && context.current.view?.conversationId === owner))) setDraft("");
+      if (draftRef.current === original && (command || (!context.current.conversationPending && context.current.view?.conversationId === owner && quoteRef.current === quote))) setDraft("");
     } catch (error) { showToast((command ? "指令未完成：" : "发送未确认：") + (error instanceof Error ? error.message : String(error)), "error"); }
     finally { sendingRef.current = false; if (mounted.current) setSending(false); }
   }
@@ -162,6 +167,7 @@ export function Composer({ draft, setDraft, view, connect, send, onSendStart, on
     <div className="composer-context">
     {wechat && <div className="wechat-conversation-notice" id="wechat-conversation-notice" role="note"><Icon name="message-circle" /><p><strong>微信里的 Dee</strong><span>这是你与 Dee 的微信会话，不是微信收件箱。在此发送消息后，Dee 的回复可能同步到此会话绑定的微信接收方。</span></p></div>}
     {sourcePending && <p className="conversation-source-pending" role="status">正在读取会话来源…</p>}
+    {!sourcePending && quote && <div className="composer-quote" role="note"><div><strong>{quote.sender}<span> · Teams</span></strong><p>{quote.text || quote.media.map(item => item.name).join("、")}</p></div><button type="button" className="icon-button" aria-label="取消引用" onClick={() => { onClearQuote?.(quote); textarea.current?.focus(); }}><Icon name="x" /></button></div>}
     {processing && <p role="status">正在处理本对话的附件…</p>}
     {dragging && <p role="status">松开以添加图片、PDF、DOCX 或文本文件</p>}
     {!!attachments.length && <div className="attachments-preview">{attachments.map((file, i) => <div className="pending-chip" key={i}>

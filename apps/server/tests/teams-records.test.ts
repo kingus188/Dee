@@ -49,3 +49,51 @@ test("每张图只关联原消息，姓名与时间取原始字段，不生成�
     assert.equal(enrichTeamsRecordView(archive, "teams_history", '资料\n'+JSON.stringify({ items: [{ ...a, id: "not-in-archive" }] }), { chatId: "chat" }).includes("<teams-records>"), false);
   } finally { db.close(); }
 });
+
+test("左右方向按归档账号身份计算，同名不认本人，缺少身份时明确未知", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    const archive = openTeamsArchive(db);
+    const original = { chatId: "chat", id: "a", createdDateTime: "2026-11-09T00:00:00Z", from: { user: { id: "owner", displayName: "同名" } }, body: { content: "本人原话" } };
+    assert.equal(teamsRecords(archive, [original])[0].direction, "unknown");
+    archive.bindAccount("owner");
+    const other = { ...original, id: "b", from: { user: { id: "other", displayName: "同名" } } };
+    assert.deepEqual(teamsRecords(archive, [original, other, { ...original, from: undefined }]).map(record => record.direction), ["out", "in", "unknown"]);
+    assert.notEqual(db.prepare("SELECT value FROM teams_archive_meta WHERE key='owner'").get()!.value, "owner", "不改变既有身份摘要存储");
+  } finally { db.close(); }
+});
+
+test("旧记录标记只补充经原始账号核实的方向，保留内容与时间且不信任伪造方向", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    const archive = openTeamsArchive(db); archive.bindAccount("owner");
+    const original = { chatId: "chat", id: "a", createdDateTime: "2026-11-09T00:00:00Z", from: { user: { id: "owner", displayName: "本人" } }, body: { content: "原话" } };
+    archive.save("chat", [original]);
+    const records = teamsRecords(archive, [original]).map(({ direction, ...record }) => record);
+    const text = `资料\n<teams-records>${JSON.stringify([...records, { ...records[0], id: "missing", direction: "out" }])}</teams-records>`;
+    const enriched = enrichTeamsRecordView(archive, "teams_history", text);
+    const actual = JSON.parse(enriched.match(/<teams-records>([^\n]*)<\/teams-records>/)![1]);
+    assert.deepEqual(actual[0], { ...records[0], direction: "out" });
+    assert.equal(actual[1].direction, "unknown");
+    assert.equal(enrichTeamsRecordView(archive, "not_teams", text), text);
+    assert.equal(enrichTeamsRecordView(archive, "teams_history", "<teams-records>bad-json</teams-records>"), "<teams-records>bad-json</teams-records>");
+  } finally { db.close(); }
+});
+
+test("历史工具快照随原消息更新，已撤回或失去访问权的记录不在 IM 区域复活", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    const archive = openTeamsArchive(db);
+    const original = { id: "one", createdDateTime: "2026-11-09T00:00:00Z", from: { user: { id: "other", displayName: "原发送者" } }, body: { content: "当前原文" } };
+    archive.save("chat", [original]);
+    const text = `<teams-records>${JSON.stringify([{ chatId: "chat", id: "one", sender: "旧姓名", text: "旧正文", createdAt: original.createdDateTime, media: [] }])}</teams-records>`;
+    const read = () => JSON.parse(enrichTeamsRecordView(archive, "teams_messages", text).match(/<teams-records>([^\n]*)<\/teams-records>/)![1]);
+    assert.equal(read()[0].text, "当前原文");
+    assert.equal(read()[0].sender, "原发送者");
+    db.exec("CREATE TABLE teams_chat_access(chat_id TEXT PRIMARY KEY,available INTEGER); INSERT INTO teams_chat_access VALUES ('chat',0)");
+    assert.deepEqual(read(), []);
+    db.exec("UPDATE teams_chat_access SET available=1");
+    archive.save("chat", [{ ...original, deletedDateTime: "2026-11-09T00:01:00Z" }]);
+    assert.deepEqual(read(), []);
+  } finally { db.close(); }
+});
