@@ -37,6 +37,26 @@ test("真实记录内嵌在普通回复中，附件跟随消息，助手解释�
   assert.match(html,/后一句原话/);
 });
 
+test("最新 Teams 缓存查询按聊天分块显示，保留双方原话而不依赖助手摘要", () => {
+  const records = [
+    { ...first, direction: "in" },
+    { ...later, direction: "out", text: "收到" },
+    { ...later, id: "other", chatId: "other-chat", chatLabel: "另一个聊天", direction: "in" },
+  ];
+  const view: ConversationView = { conversationId: 1, entries: [
+    { id: 1, kind: "user", text: "最新的teams 消息" },
+    { id: 2, kind: "tool", name: "teams_messages", text: `Teams 已同步至今天。\n<teams-records>${JSON.stringify(records)}</teams-records>\n界面展示原消息。` },
+    { id: 3, kind: "assistant", text: "已读取最近 3 条缓存消息。" },
+  ], busy: false, live: {}, inbox: 0, usage: null, notes: { todos: [], memos: [] }, tasks: [], reminders: [], subagents: [], parentId: null };
+  const html = renderToStaticMarkup(createElement(ChatThread, { view }));
+  assert.equal((html.match(/class="teams-records-chat"/g) ?? []).length, 2);
+  assert.match(html, /data-direction="in"/);
+  assert.match(html, /data-direction="out"/);
+  assert.match(html, /收到/);
+  assert.match(html, /已读取最近 3 条缓存消息/);
+  assert.ok(html.indexOf("teams-records-inline") < html.indexOf("assistant-bubble md"));
+});
+
 test("方向仅取可信字段，旧记录不猜身份，连续本人消息分组且跨日重新显示发送者", async t => {
   const rows = [
     { ...later, id: "a", createdAt: new Date(2026, 10, 9, 23, 59, 3).toISOString(), direction: "out" },

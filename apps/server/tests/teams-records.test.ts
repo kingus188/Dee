@@ -30,6 +30,22 @@ test("旧预览按原时间、发送人和原文唯一关联，状态变化不�
   } finally { db.close(); }
 });
 
+test("无完整归档的旧缓存预览可恢复分块，已有分块随当前缓存刷新且不复活已消失的消息", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    const archive = openTeamsArchive(db);
+    const row: TeamsMessageRow = { id: "chat:one", chatId: "chat", chatType: "oneOnOne", chatTopic: null, senderName: "甲", direction: "in", text: "缓存中的原话", createdAt: "2026-11-09T00:00:00Z", important: false, pushedAt: null, repliedAt: null };
+    const parts = teamsPreviewParts(row);
+    const preview = `同步时间\n${parts.prefix}未推送/未回复${parts.suffix}`;
+    const restored = enrichTeamsRecordView(archive, "teams_messages", preview, {}, () => [row]);
+    const parse = (text: string) => JSON.parse(text.match(/<teams-records>([^\n]*)<\/teams-records>/)![1]);
+    assert.deepEqual(parse(restored).map((record: { text: string; direction: string }) => [record.text, record.direction]), [[row.text, "in"]]);
+    const refreshed = enrichTeamsRecordView(archive, "teams_messages", restored, {}, () => [{ ...row, text: "更新的原话" }]);
+    assert.equal(parse(refreshed)[0].text, "更新的原话");
+    assert.deepEqual(parse(enrichTeamsRecordView(archive, "teams_messages", restored, {}, () => [])), []);
+  } finally { db.close(); }
+});
+
 test("每张图只关联原消息，姓名与时间取原始字段，不生成图片解释", () => {
   const db = new DatabaseSync(":memory:");
   try {

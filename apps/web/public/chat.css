@@ -5,6 +5,8 @@
   --chat-foreground: var(--text-main);
   --chat-muted: var(--text-muted);
   --chat-soft: oklch(from var(--chat-foreground) l c h / 0.05);
+  --chat-scrollbar-thumb: color-mix(in srgb, var(--text-muted) 45%, transparent);
+  --chat-scrollbar-thumb-hover: color-mix(in srgb, var(--text-muted) 65%, transparent);
   --bg-subtle: var(--chat-soft);
   --assistant-text: var(--chat-foreground);
   background: transparent;
@@ -12,6 +14,17 @@
 }
 #workspace[data-view="chat"]::before { display: none; }
 #workspace[data-view="chat"] .messages-container { max-width: 1024px; padding: 16px var(--chat-gutter) 20px; }
+#workspace[data-view="chat"] * { scrollbar-width: thin; scrollbar-color: var(--chat-scrollbar-thumb) transparent; }
+@supports selector(::-webkit-scrollbar) {
+  /* Chromium 的标准滚动条属性会覆盖伪元素样式，交由伪元素统一控制轨道与宽度。 */
+  #workspace[data-view="chat"] * { scrollbar-width: auto; scrollbar-color: auto; }
+  #workspace[data-view="chat"] ::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }
+  #workspace[data-view="chat"] ::-webkit-scrollbar-track,
+  #workspace[data-view="chat"] ::-webkit-scrollbar-corner { background: transparent; border: 0; box-shadow: none; }
+  #workspace[data-view="chat"] ::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--chat-scrollbar-thumb); }
+  #workspace[data-view="chat"] ::-webkit-scrollbar-thumb:hover { background: var(--chat-scrollbar-thumb-hover); }
+  #workspace[data-view="chat"] ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+}
 #workspace[data-view="chat"] #message-history { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
 .chat-day-separator { display: flex; align-items: center; gap: 12px; width: min(420px, 80%); margin: 0 auto 4px; color: var(--chat-muted); font-size: 14px; }
 .chat-day-separator::before, .chat-day-separator::after { content: ""; flex: 1; min-width: 12px; height: 1px; background: var(--border); }

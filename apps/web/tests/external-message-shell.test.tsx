@@ -9,7 +9,7 @@ import { App } from "../dist/ui/App.js";
 import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
 
-test("外部消息面板展开、收起和隐藏都不重建当前内容或更改路由", async t => {
+test("外部消息面板默认展开，手动收起和隐藏都不重建当前内容或更改路由", async t => {
   let mounts = 0;
   function Content() { const [value, setValue] = useState(() => { mounts++; return 0; }); return <button id="content-state" onClick={() => setValue(previous => previous + 1)}>{value}</button>; }
   const render = (active = true, compact = true) => <ExternalConversationPanel active={active} compact={compact} id="test-messages" label="Teams"><Content /></ExternalConversationPanel>;
@@ -18,22 +18,23 @@ test("外部消息面板展开、收起和隐藏都不重建当前内容或更�
   const resize = doc.querySelector<HTMLButtonElement>(".external-message-resize")!;
   const content = doc.querySelector<HTMLButtonElement>("#content-state")!;
   const hash = view.dom.window.location.hash;
-  assert.equal(stage.dataset.expanded, "false");
-  assert.equal(resize.getAttribute("aria-controls"), "test-messages");
-  assert.equal(resize.getAttribute("aria-label"), "展开消息面板");
-  await act(async () => { content.click(); resize.focus(); resize.click(); });
   assert.equal(stage.dataset.expanded, "true");
   assert.equal(resize.getAttribute("aria-expanded"), "true");
+  assert.equal(resize.getAttribute("aria-controls"), "test-messages");
   assert.equal(resize.getAttribute("aria-label"), "收起消息面板");
+  await act(async () => { content.click(); resize.focus(); resize.click(); });
+  assert.equal(stage.dataset.expanded, "false");
+  assert.equal(resize.getAttribute("aria-expanded"), "false");
+  assert.equal(resize.getAttribute("aria-label"), "展开消息面板");
   assert.equal(doc.activeElement, resize);
   assert.equal(doc.querySelector("#content-state"), content);
   assert.equal(content.textContent, "1");
   await view.render(render(false));
   assert.equal(stage.hidden, true);
   await view.render(render(true));
-  assert.equal(stage.dataset.expanded, "true");
-  await act(async () => { resize.click(); });
   assert.equal(stage.dataset.expanded, "false");
+  await act(async () => { resize.click(); });
+  assert.equal(stage.dataset.expanded, "true");
   await view.render(render(true, false));
   assert.equal(doc.querySelector(".external-message-stage"), null, "内部对话不套用外部消息布局");
   assert.equal(doc.querySelector<HTMLElement>(".external-message-toolbar")?.hidden, true);
@@ -86,6 +87,7 @@ test("微信与普通 Dee 使用相同完整对话布局，保留来源提示、
   await view.restore("#teams/19%3Aexample%40thread.v2");
   const teamsFrame = view.doc.querySelector(".external-message-stage:not([hidden]) .external-message-panel")!;
   assert.equal(teamsFrame.id, "teams-external-message-panel");
+  assert.equal(teamsFrame.closest<HTMLElement>(".external-message-stage")?.dataset.expanded, "true");
   assert.equal(view.doc.querySelector<HTMLElement>(".input-container")?.hidden, true);
   assert.equal(view.doc.querySelector(".app-layout > .sidebar")?.hasAttribute("inert"), false);
   await view.restore("#chat/12");

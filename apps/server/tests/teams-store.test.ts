@@ -9,6 +9,29 @@ import { openTeamsStore } from "../dist/teams-store.js";
 const at = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const base = { chatId: "c1", chatType: "oneOnOne", senderId: "u1", senderName: "张三", direction: "in" as const, text: "在吗", important: true };
 
+test("缓存查询在归档缺失或不齐时仍返回每条可读消息的分块记录", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-teams-store-"));
+  const store = openTeamsStore(directory);
+  try {
+    const createdAt = at(10);
+    store.record({ ...base, id: "c1:1", createdAt });
+    store.record({ ...base, id: "c1:2", senderName: "我", direction: "out", text: "收到", createdAt: at(5) });
+    const rows = store.list({ limit: 20 });
+    const cached = store.records(rows);
+    assert.deepEqual(cached.map(record => [record.id, record.text, record.direction]), [["2", "收到", "out"], ["1", "在吗", "in"]]);
+    assert.ok(cached.every(record => record.chatLabel === "张三"));
+    store.archive.save("c1", [{ id: "1", createdDateTime: createdAt, from: { user: { displayName: "张三" } }, body: { content: "在吗" } }]);
+    assert.equal(store.records(rows).length, 2, "一条归档缺失不能使整批记录消失");
+    store.revokeMessage("c1", "c1:2");
+    assert.deepEqual(store.records(rows).map(record => record.id), ["1"], "旧查询行也不能恢复已撤回的来源");
+    store.triage.access("c1", false);
+    assert.deepEqual(store.records(rows), [], "失去聊天访问权后不回退展示缓存");
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("推送标记、已回复标记与查询过滤", async () => {
   const directory = await mkdtemp(join(tmpdir(), "pi-teams-store-"));
   const store = openTeamsStore(directory);

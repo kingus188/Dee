@@ -4,7 +4,7 @@ import type { TeamsChatRef, TeamsDraft, TeamsDraftDelivery, TeamsDraftInput, Tea
 import { messageText } from "./teams-message-text.js";
 import { createSourceLifecycle } from "./source-lifecycle.js";
 import { openTeamsArchive } from "./teams-archive-store.js";
-import { teamsRecords } from "./teams-records.js";
+import { teamsInboxRecords } from "./teams-records.js";
 import { createTeamsNotificationBatches, type TeamsNotice } from "./teams-notification-batches.js";
 import { createTeamsTriageStore } from "./teams-triage-store.js";
 
@@ -122,12 +122,7 @@ export function openTeamsStore(dataDir: string) {
       } catch (error) { db.exec("ROLLBACK"); throw error; }
     },
     records(rows: TeamsMessageRow[]) {
-      const messages = rows.flatMap(row => {
-        if (!row.id || !row.chatId) return [];
-        const message = archive.message(row.chatId, row.id.slice(row.chatId.length + 1));
-        return message ? [{ ...message, chatId: row.chatId }] : [];
-      });
-      return messages.length === rows.length ? teamsRecords(archive, messages) : [];
+      return teamsInboxRecords(archive, rows);
     },
     // 重复写入同一条消息无副作用；用户自己发出的消息会把此前该聊天里的未回复来信标为已回复。
     record(message: TeamsMessage) {
