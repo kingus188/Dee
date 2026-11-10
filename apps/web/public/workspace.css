@@ -75,7 +75,7 @@ button:active:not(:disabled), .workspace-nav-link:active { transform: scale(.98)
 .service-menu > summary { cursor: pointer; list-style: none; color: var(--text-muted); font-size: 11px; }
 .service-menu > summary::-webkit-details-marker { display: none; }
 .service-menu > summary .icon { width: 12px; }
-.service-popover { position: absolute; right: 0; top: calc(100% + 8px); width: min(290px, calc(100vw - 32px)); padding: 20px; border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); background: var(--bg-surface); font-size: 12px; line-height: 1.8; }
+.service-popover { position: absolute; z-index: 10; right: 0; top: calc(100% + 8px); width: min(290px, calc(100vw - 32px)); padding: 20px; border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); background: var(--bg-surface); font-size: 12px; line-height: 1.8; }
 .service-popover strong { font-size: 14px; font-weight: 600; }
 .service-popover p { margin-top: 9px; color: var(--text-muted); overflow-wrap: anywhere; }
 #mascot-card:is([data-state="disconnected"], [data-state="error"]) .status-dot { background: var(--danger); }
