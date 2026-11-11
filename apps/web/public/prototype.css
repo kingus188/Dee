@@ -214,11 +214,7 @@
     & .conversation-sidebar { background: var(--history-surface); }
     & .conversation-history { padding-bottom: 52px; }
     & .conversation-header-new { display: none; }
-    & .conversation-history > header { padding-right: 32px; }
     & .conversation-history .history-close { display: none; }
-    & .conversation-sidebar[data-expanded="true"] > .sidebar-toggle { top: 26px; right: 12px; width: 30px; height: 30px; border-radius: 6px; }
-    & .conversation-sidebar[data-expanded="true"] > .sidebar-toggle::before { background: transparent; box-shadow: none; border-radius: 6px; }
-    & .conversation-sidebar[data-expanded="true"] > .sidebar-toggle:hover::before { background: var(--dee-fill); }
   }
   /* Folded history: a 76px icon rail (logo, new chat, search, tasks, notifications, more, avatar); the chat takes the rest. */
   #mascot-card.app-layout:has(.conversation-sidebar[data-expanded="false"]) {
@@ -250,7 +246,6 @@
 @media (min-width: 901px) {
   #mascot-card[data-desktop] {
     &[data-desktop="darwin"] .conversation-history { padding-top: var(--header-height); }
-    &[data-desktop="darwin"] .conversation-sidebar[data-expanded="true"] > .sidebar-toggle { top: calc(var(--header-height) + 16px); }
     &:not([data-desktop="darwin"]) .conversation-header-actions { padding-right: 138px; }
     &:not([data-desktop="darwin"]):has(.related-tasks-panel:not([hidden])) .conversation-header-actions { padding-right: 0; }
     &:not([data-desktop="darwin"]) .related-tasks-panel > header { padding-right: 146px; }
