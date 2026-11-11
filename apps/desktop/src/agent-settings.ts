@@ -1,10 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import type { DesktopModelInput } from "@assistant/contracts";
+import type { DesktopAgentKind, DesktopAgentSelection, DesktopModelInput, ExternalAgentConfig } from "@assistant/contracts";
 import type { CredentialStorage } from "./connection-config.js";
 
-export type AgentSettings = { nodeId: string; workspace: string | null; model: Required<DesktopModelInput> };
+export type AgentSettings = { nodeId: string; workspace: string | null; model: Required<DesktopModelInput>; agent: DesktopAgentKind; agents: Record<Exclude<DesktopAgentKind, "pi">, ExternalAgentConfig> };
+export function validateAgentSelection(input: unknown): DesktopAgentSelection {
+  if (!input || typeof input !== "object") throw new Error("Agent 配置无效");
+  const { kind, config } = input as DesktopAgentSelection;
+  if (!["pi", "codex", "claude", "acp"].includes(kind)) throw new Error("Agent 类型无效");
+  if (kind === "pi" || config === undefined) return { kind };
+  if (!config || typeof config.executable !== "string" || !config.executable.trim() || config.executable.length > 4096 || /[\r\n\0]/.test(config.executable) || !Array.isArray(config.args) || config.args.length > 32 || config.args.some(arg => typeof arg !== "string" || arg.length > 4096 || arg.includes("\0"))) throw new Error("请填写可执行文件和逐行参数");
+  if (kind !== "acp" && config.args.length) throw new Error("原生 Agent 不接受额外启动参数");
+  if (config.mode !== undefined && (typeof config.mode !== "string" || config.mode.length > 200)) throw new Error("ACP 模式无效");
+  return { kind, config: { executable: config.executable.trim(), args: [...config.args], ...(kind === "acp" && config.mode ? { mode: config.mode } : {}) } };
+}
 export function validateDesktopModel(input: unknown, previousKey = ""): Required<DesktopModelInput> {
   if (!input || typeof input !== "object") throw new Error("模型配置无效");
   const value = input as Record<string, unknown>;
@@ -19,27 +29,30 @@ export function validateDesktopModel(input: unknown, previousKey = ""): Required
 }
 export function openAgentSettings(directory: string, storage: CredentialStorage) {
   const path = join(directory, "desktop-agent.json");
-  let settings: AgentSettings = { nodeId: `desktop-${randomUUID()}`, workspace: null, model: { api: "openai-completions", baseUrl: "", model: "", apiKey: "", contextWindow: 128000, maxTokens: 8192 } };
+  let settings: AgentSettings = { nodeId: `desktop-${randomUUID()}`, workspace: null, model: { api: "openai-completions", baseUrl: "", model: "", apiKey: "", contextWindow: 128000, maxTokens: 8192 }, agent: "pi", agents: { codex: { executable: "codex", args: [] }, claude: { executable: "claude", args: [] }, acp: { executable: "", args: [] } } };
   if (existsSync(path)) {
-    const stored = JSON.parse(readFileSync(path, "utf8")) as { nodeId: unknown; workspace: unknown; model: Record<string, unknown>; encryptedKey?: string };
+    const stored = JSON.parse(readFileSync(path, "utf8")) as { nodeId: unknown; workspace: unknown; model: Record<string, unknown>; encryptedKey?: string; agent?: DesktopAgentKind; agents?: AgentSettings["agents"] };
     if (typeof stored.nodeId !== "string" || !/^desktop-[0-9a-f-]{36}$/i.test(stored.nodeId) || (stored.workspace !== null && (typeof stored.workspace !== "string" || !isAbsolute(stored.workspace)))) throw new Error("本机 Agent 配置损坏，原文件已保留");
     let apiKey = "";
     if (stored.encryptedKey) {
       if (!storage.isEncryptionAvailable() || storage.getSelectedStorageBackend?.() === "basic_text") throw new Error("系统安全存储不可用，无法读取本机模型密钥");
       apiKey = storage.decryptString(Buffer.from(stored.encryptedKey, "base64"));
     }
-    settings = { nodeId: stored.nodeId, workspace: stored.workspace as string | null, model: stored.model.baseUrl ? validateDesktopModel({ ...stored.model, apiKey }) : settings.model };
+    const agent = validateAgentSelection({ kind: stored.agent ?? "pi" }).kind;
+    for (const kind of ["codex", "claude", "acp"] as const) if (stored.agents?.[kind]?.executable) settings.agents[kind] = validateAgentSelection({ kind, config: stored.agents[kind] }).config!;
+    settings = { ...settings, nodeId: stored.nodeId, workspace: stored.workspace as string | null, model: stored.model.baseUrl ? validateDesktopModel({ ...stored.model, apiKey }) : settings.model, agent };
   }
   function persist(next: AgentSettings): { persistedKey: boolean } {
     const { apiKey, ...model } = next.model;
     const persistedKey = Boolean(apiKey && storage.isEncryptionAvailable() && storage.getSelectedStorageBackend?.() !== "basic_text");
     const encryptedKey = persistedKey ? storage.encryptString(apiKey).toString("base64") : undefined;
-    writeFileSync(`${path}.tmp`, JSON.stringify({ nodeId: next.nodeId, workspace: next.workspace, model, encryptedKey }), { mode: 0o600 });
+    writeFileSync(`${path}.tmp`, JSON.stringify({ nodeId: next.nodeId, workspace: next.workspace, model, encryptedKey, agent: next.agent, agents: next.agents }), { mode: 0o600 });
     renameSync(`${path}.tmp`, path);
     settings = next;
     return { persistedKey };
   }
   if (!existsSync(path)) persist(settings);
   return { get: () => settings, saveModel: (input: unknown) => persist({ ...settings, model: validateDesktopModel(input, settings.model.apiKey) }),
+    selectAgent: (input: unknown) => { const selected = validateAgentSelection(input); persist({ ...settings, agent: selected.kind, agents: selected.kind === "pi" || !selected.config ? settings.agents : { ...settings.agents, [selected.kind]: selected.config } }); },
     saveWorkspace: (workspace: string) => { if (!isAbsolute(workspace)) throw new Error("工作目录须为绝对路径"); persist({ ...settings, workspace }); } };
 }

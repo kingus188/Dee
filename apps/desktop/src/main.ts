@@ -271,7 +271,7 @@ else {
       return new Response(response.body, { status: response.status, headers });
     });
     showLocalWindow();
-    localAgent = await registerDesktopAgent({ ipc: ipcMain, directory: app.getPath("userData"), localUrl,
+    localAgent = await registerDesktopAgent({ ipc: ipcMain, directory: app.getPath("userData"), localUrl, searchPath: process.env.PATH, env: { ...process.env },
       getWindow: () => localWindow, serverId: () => config.url, openServer: () => connect(), openConnection: showConnection,
       request: async (path, body, serverId) => {
         if (serverId && serverId !== config.url) throw new Error("任务属于之前的服务器，请切回原服务器后继续");

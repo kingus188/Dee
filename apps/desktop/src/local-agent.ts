@@ -10,6 +10,9 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { openAgentSettings } from "./agent-settings.js";
+import { openExternalAgents } from "./agents/service.js";
+import { resolveAgentExecutable } from "./agents/process.js";
+import type { AgentApprovalAnswer } from "@assistant/contracts";
 const Approvals = defineDoc<{ ids: string[] }>({ kind: "app.desktop-peer-approvals", version: 1, scope: "session", initial: () => ({ ids: [] }) });
 const PeerServers = defineDoc<{ origins: Record<string, string> }>({ kind: "app.desktop-peer-servers", version: 1, scope: "session", initial: () => ({ origins: {} }) });
 
@@ -18,12 +21,19 @@ export async function openDesktopAgent(options: {
   directory: string; settings: ReturnType<typeof openAgentSettings>; request: AgentRequest;
   confirm(tool: string, args: unknown): Promise<boolean>;
   serverId?: () => string;
+  searchPath?: string;
+  env?: NodeJS.ProcessEnv;
 }) {
   let runtime: Runtime | undefined;
   let busy = false, error: string | undefined, connectionError: string | undefined, serverConnected = false, closed = false;
   let syncing: Promise<void> | undefined;
   let reconfiguring = false;
+  const peerRuns = new Set<string>();
   const configured = () => { const m = options.settings.get().model; return Boolean(m.baseUrl && m.model && m.apiKey); };
+  const external = openExternalAgents({ directory: options.directory, searchPath: options.searchPath, env: options.env, binding: () => {
+    const settings = options.settings.get();
+    return settings.agent === "pi" || !settings.workspace ? undefined : { kind: settings.agent, cwd: settings.workspace, config: settings.agents[settings.agent] };
+  } });
   const nodeId = options.settings.get().nodeId;
   async function jobServer(id: string): Promise<string> {
     return runtime!.root.commit(async tx => { const doc = await tx.doc(PeerServers); return doc.origins[id] ??= options.serverId?.() ?? "server"; }, ctx);
@@ -34,6 +44,10 @@ export async function openDesktopAgent(options: {
     return response.item;
   };
   let peers = makePeers();
+  async function runPeer(id: string) {
+    peerRuns.add(id);
+    try { return await peers.run(id); } finally { peerRuns.delete(id); }
+  }
   function makePeers() {
     return createPeerService({ nodeId, configured,
       remote: job => requestJob(job.id, "/api/peers/tasks", { id: job.id, source: nodeId, target: "server", task: job.task }),
@@ -67,7 +81,7 @@ export async function openDesktopAgent(options: {
     if (catalog.configured) {
       runtime.harness.resume();
       const approvals = (await runtime.harness.snapshot(Approvals, ctx))?.ids ?? [];
-      for (const job of await peers.list()) if (job.target === nodeId && approvals.includes(job.id) && !["done", "failed"].includes(job.status)) void peers.run(job.id).catch(report);
+      for (const job of await peers.list()) if (job.target === nodeId && approvals.includes(job.id) && !["done", "failed"].includes(job.status)) void runPeer(job.id).catch(report);
     }
   }
   async function syncOnce() {
@@ -89,12 +103,20 @@ export async function openDesktopAgent(options: {
     if (closed || reconfiguring || syncing) return;
     syncing = syncOnce().catch(() => { serverConnected = false; connectionError = "服务器协作暂不可用，本机对话不受影响。"; }).finally(() => { syncing = undefined; });
   }
+  async function changeSettings<T>(change: () => Promise<T>): Promise<T> {
+    if (closed || reconfiguring || busy || peerRuns.size || external.busy) throw new Error("请先停止当前任务再修改本机设置");
+    reconfiguring = true;
+    try {
+      if ((await runtime!.harness.inspect(ctx)).tasks.length) throw new Error("请先停止当前任务再修改本机设置");
+      return await change();
+    } finally { reconfiguring = false; }
+  }
   await start();
   const timer = setInterval(sync, 5000); timer.unref(); sync();
   return {
     async snapshot(): Promise<DesktopAgentSnapshot> {
       const value = await runtime!.root.context(ctx), settings = options.settings.get();
-      const messages: DesktopAgentSnapshot["messages"] = [];
+      let messages: DesktopAgentSnapshot["messages"] = [];
       for (const entry of value.entries) for (const message of entry.model ?? []) {
         if (message.role !== "user" && message.role !== "assistant") continue;
         const text = typeof message.content === "string" ? message.content : message.content.filter(part => part.type === "text").map(part => part.text).join("");
@@ -102,23 +124,30 @@ export async function openDesktopAgent(options: {
       }
       const { apiKey, ...model } = settings.model;
       const inspection = await runtime!.harness.inspect(ctx);
-      return { configured: configured(), model: { ...model, hasApiKey: Boolean(apiKey) }, workspace: settings.workspace, nodeId,
-        busy: busy || inspection.tasks.length > 0, messages, jobs: await peers.list(), serverConnected, error: error ?? connectionError };
+      const externalState = settings.agent !== "pi" ? external.snapshot() : undefined;
+      let agentConfigured = configured(), agentError: string | undefined;
+      if (externalState) {
+        messages = externalState.messages; agentConfigured = Boolean(settings.workspace);
+        try { resolveAgentExecutable(settings.agents[settings.agent as "codex" | "claude" | "acp"].executable, options.searchPath); } catch (cause) { agentConfigured = false; agentError = cause instanceof Error ? cause.message : "Agent 未安装"; }
+      }
+      return { configured: agentConfigured, piConfigured: configured(), agent: settings.agent, agentConfig: settings.agent === "pi" ? undefined : settings.agents[settings.agent], external: externalState?.external,
+        model: { ...model, hasApiKey: Boolean(apiKey) }, workspace: settings.workspace, nodeId,
+        busy: busy || peerRuns.size > 0 || external.busy || inspection.tasks.length > 0, messages, jobs: await peers.list(), serverConnected, error: externalState?.error ?? agentError ?? error ?? connectionError };
     },
     async saveModel(input: unknown) {
-      if (reconfiguring || busy || (await runtime!.harness.inspect(ctx)).tasks.length) throw new Error("请先停止当前任务再修改模型");
-      reconfiguring = true;
-      try {
+      return changeSettings(async () => {
         await syncing;
         const saved = options.settings.saveModel(input);
         await peers.close(); await runtime!.harness.close(ctx); peers = makePeers(); error = undefined;
         await start(); return saved;
-      } finally { reconfiguring = false; }
+      });
     },
     async send(input: { id: string; text: string }) {
       if (closed || reconfiguring) throw new Error("本机模型正在重新加载");
-      if (!configured()) throw new Error("请先配置本机模型");
+      if (peerRuns.size) throw new Error("本机 Pi 正在执行委托任务");
       if (!input || typeof input.id !== "string" || !/^[0-9a-f-]{36}$/i.test(input.id) || typeof input.text !== "string" || !input.text.trim() || input.text.length > 16000) throw new Error("消息无效或过长");
+      if (options.settings.get().agent !== "pi") return external.send(input);
+      if (!configured()) throw new Error("请先配置本机模型");
       if (busy) throw new Error("小D正在执行，请先等待或停止");
       busy = true; error = undefined;
       try {
@@ -127,19 +156,28 @@ export async function openDesktopAgent(options: {
       } catch (cause) { busy = false; throw cause; }
     },
     async approve(id: string) {
-      if (closed || reconfiguring) throw new Error("本机模型正在重新加载");
-      const job = await peers.get(id);
-      if (!job || job.target !== nodeId || job.source !== "server" || job.status !== "queued") throw new Error("没有可批准的本机任务");
-      if (!configured() || !options.settings.get().workspace) throw new Error("请先配置本机模型并选择工作目录");
-      await runtime!.root.commit(async tx => { const approvals = await tx.doc(Approvals); if (!approvals.ids.includes(id)) approvals.ids.push(id); }, ctx);
-      void peers.run(id).then(() => sync()).catch(report);
+      return changeSettings(async () => {
+        const job = await peers.get(id);
+        if (!job || job.target !== nodeId || job.source !== "server" || job.status !== "queued") throw new Error("没有可批准的本机任务");
+        if (!configured() || !options.settings.get().workspace) throw new Error("请先配置本机模型并选择工作目录");
+        await runtime!.root.commit(async tx => { const approvals = await tx.doc(Approvals); if (!approvals.ids.includes(id)) approvals.ids.push(id); }, ctx);
+        void runPeer(id).then(() => sync()).catch(report);
+      });
     },
     async reject(id: string) {
       const job = await peers.get(id);
       if (!job || job.target !== nodeId || job.status !== "queued") throw new Error("任务不可拒绝");
       await peers.complete(id, { status: "failed", result: "用户拒绝在本机执行" }); sync();
     },
-    async abort() { await runtime!.root.abort(ctx); for (const job of await peers.list()) if (job.target === nodeId && job.status === "running" && job.conversationId) { const child = await runtime!.harness.conversation(job.conversationId as Runtime["root"]["id"], ctx); await child?.abort(ctx); } },
-    async close() { closed = true; clearInterval(timer); await peers.close(); await runtime!.harness.close(ctx); await syncing; },
+    async selectAgent(input: unknown) {
+      return changeSettings(async () => { await external.detach(); options.settings.selectAgent(input); error = undefined; });
+    },
+    async chooseWorkspace(workspace: string) {
+      return changeSettings(async () => { await external.detach(); options.settings.saveWorkspace(workspace); });
+    },
+    async newSession() { return changeSettings(async () => { if (options.settings.get().agent === "pi") throw new Error("Pi 使用现有持久会话"); await external.newSession(); }); },
+    async answerApproval(input: AgentApprovalAnswer) { external.answer(input); },
+    async abort() { try { await external.abort(); } finally { await runtime!.root.abort(ctx); for (const job of await peers.list()) if (job.target === nodeId && job.status === "running" && job.conversationId) { const child = await runtime!.harness.conversation(job.conversationId as Runtime["root"]["id"], ctx); await child?.abort(ctx); } } },
+    async close() { closed = true; clearInterval(timer); await external.close(); await peers.close(); await runtime!.harness.close(ctx); await syncing; },
   };
 }

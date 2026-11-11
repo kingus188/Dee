@@ -1,0 +1,141 @@
+import { randomUUID } from "node:crypto";
+import type { AgentApproval, AgentApprovalAnswer, DesktopAgentKind, ExternalAgentConfig } from "@assistant/contracts";
+import { openCodex } from "./codex.js";
+import { openAcp } from "./acp.js";
+import { openAgentSessionStore, type StoredAgentSession } from "./store.js";
+import type { AgentDriver, DriverOptions, AgentEvent } from "./types.js";
+
+type ExternalKind = Exclude<DesktopAgentKind, "pi">;
+export type ExternalBinding = { kind: ExternalKind; cwd: string; config: ExternalAgentConfig };
+export type DriverFactory = (kind: ExternalKind, options: DriverOptions) => Promise<AgentDriver>;
+const factories: Record<ExternalKind, (options: DriverOptions) => Promise<AgentDriver>> = { codex: openCodex, claude: async options => (await import("./claude.js")).openClaude(options), acp: openAcp };
+
+export function openExternalAgents(options: { directory: string; binding(): ExternalBinding | undefined; factory?: DriverFactory; searchPath?: string; env?: NodeJS.ProcessEnv }) {
+  const store = openAgentSessionStore(options.directory);
+  const approvals = new Map<string, { request: AgentApproval; resolve(value: AgentApprovalAnswer): void }>();
+  let active: Promise<void> | undefined, controller: AbortController | undefined, driver: AgentDriver | undefined;
+  let boundKey: string | undefined, closed = false;
+  let requestId = "", rejectExecution: ((error: Error) => void) | undefined, driverController: AbortController | undefined;
+  let driverFailed = false;
+  let driverGeneration = 0;
+  let transition: Promise<void> | undefined;
+  const key = (binding: ExternalBinding) => JSON.stringify(binding);
+  function current() { const binding = options.binding(); return binding ? store.get(key(binding)) : undefined; }
+  function emit(session: StoredAgentSession, requestId: string, event: AgentEvent) {
+    if (event.type === "session") session.nativeId = event.id;
+    if (event.type === "text") {
+      const id = `${requestId}:${event.id}`;
+      let message = session.messages.find(message => message.id === id && message.role === "assistant");
+      if (!message) { message = { id, role: "assistant", text: "" }; session.messages.push(message); }
+      const text = event.delta ? message.text + event.text : event.text;
+      if (text.length > 1_000_000) throw new Error("Agent 回复超过长度限制");
+      message.text = text;
+    }
+    if (event.type === "activity") {
+      const index = session.activities.findIndex(item => item.id === event.activity.id);
+      if (index < 0) session.activities.push(event.activity); else {
+        const previous = session.activities[index]!;
+        session.activities[index] = { ...previous, ...event.activity, title: event.activity.title === "工具调用" ? previous.title : event.activity.title, detail: event.activity.detail ?? previous.detail };
+      }
+      if (session.activities.length > 200) session.activities.shift();
+    }
+    store.persist();
+  }
+  async function ask(session: StoredAgentSession, request: Omit<AgentApproval, "id">, signal?: AbortSignal): Promise<AgentApprovalAnswer> {
+    if (!controller || controller.signal.aborted || signal?.aborted) return { id: "", allow: false };
+    const id = randomUUID();
+    session.status = "waiting"; store.persist();
+    return new Promise(resolve => {
+      const deny = () => finish({ id, allow: false });
+      const timer = setTimeout(deny, 5 * 60_000); timer.unref();
+      const localSignal = controller!.signal;
+      function finish(value: AgentApprovalAnswer) {
+        if (!approvals.delete(id)) return;
+        clearTimeout(timer); localSignal.removeEventListener("abort", deny); signal?.removeEventListener("abort", deny);
+        if (!localSignal.aborted && !approvals.size && session.status === "waiting") session.status = "running";
+        resolve(value);
+      }
+      approvals.set(id, { request: { ...request, id }, resolve: finish });
+      localSignal.addEventListener("abort", deny, { once: true }); signal?.addEventListener("abort", deny, { once: true });
+    });
+  }
+  async function detach() { const previous = driver; driver = undefined; boundKey = undefined; driverGeneration++; driverController?.abort(); driverController = undefined; await previous?.close(); }
+  async function change(action: () => Promise<void>) {
+    if (closed || active || transition) throw new Error("请先等待当前操作结束或停止任务");
+    transition = Promise.resolve().then(action);
+    try { await transition; } finally { transition = undefined; }
+  }
+  return {
+    get busy() { return Boolean(active); },
+    snapshot() {
+      const session = current();
+      return { messages: session?.messages ?? [], error: store.error ?? session?.error,
+        external: { status: session?.status ?? "idle", sessionId: session?.nativeId, activities: session?.activities ?? [], approvals: [...approvals.values()].map(item => item.request) } };
+    },
+    async send(input: { id: string; text: string }) {
+      if (closed) throw new Error("外部 Agent 已关闭");
+      if (transition) throw new Error("Agent 会话正在切换");
+      if (store.error) throw new Error(store.error);
+      const binding = options.binding(); if (!binding) throw new Error("请先选择外部 Agent 和工作目录");
+      const bindingKey = key(binding), session = store.get(bindingKey) ?? store.create(bindingKey);
+      const existing = session.messages.find(message => message.role === "user" && message.id === input.id);
+      if (existing) { if (existing.text !== input.text) throw new Error("消息 ID 与已有内容冲突"); return; }
+      if (active) throw new Error("Agent 正在执行，请先停止");
+      const previous = { messages: session.messages, status: session.status, error: session.error, activities: session.activities };
+      session.messages = [...session.messages, { id: input.id, role: "user", text: input.text }];
+      session.status = "running"; session.error = undefined; session.activities = [];
+      try { store.persist(); } catch (error) { Object.assign(session, previous); throw error; }
+      controller = new AbortController();
+      const signal = controller.signal;
+      let fail!: (error: Error) => void;
+      const failure = new Promise<never>((_, reject) => { fail = reject; });
+      requestId = input.id; rejectExecution = fail;
+      // A process can fail during startup, before its driver promise settles.
+      void failure.catch(() => {});
+      const abort = () => fail(new Error("执行已取消"));
+      signal.addEventListener("abort", abort, { once: true });
+      let timedOut = false;
+      const timeout = setTimeout(() => { timedOut = true; fail(new Error("Agent 执行超过 30 分钟")); controller?.abort(); }, 30 * 60_000); timeout.unref();
+      active = (async () => {
+        try {
+          if (boundKey !== bindingKey || driverFailed) await detach();
+          if (!driver) {
+            driverController = new AbortController();
+            const generation = ++driverGeneration;
+            const opening = (options.factory ?? ((kind, value) => factories[kind](value)))(binding.kind, {
+              cwd: binding.cwd, config: binding.config, sessionId: session.nativeId, signal: driverController.signal, searchPath: options.searchPath, env: options.env,
+              emit: event => { if (generation === driverGeneration && controller && !controller.signal.aborted) emit(session, requestId, event); },
+              ask: (request, requestSignal) => generation === driverGeneration ? ask(session, request, requestSignal) : Promise.resolve({ id: "", allow: false }),
+              failed: error => { if (generation === driverGeneration) { driverFailed = true; rejectExecution?.(error); } },
+            });
+            const startup = setTimeout(() => fail(new Error("Agent 启动超过 20 秒，请检查安装和认证")), 20000); startup.unref();
+            try { driver = await Promise.race([opening, failure]); boundKey = bindingKey; driverFailed = false; } finally { clearTimeout(startup); }
+          }
+          await Promise.race([driver.send(input.text, input.id), failure]);
+          session.status = signal.aborted ? "cancelled" : "done";
+        } catch (error) {
+          session.status = timedOut ? "failed" : signal.aborted ? "cancelled" : "failed";
+          session.error = timedOut ? "Agent 执行超过 30 分钟，已请求停止，请核对工作区" : signal.aborted ? "执行已取消，请核对已产生的文件改动" : error instanceof Error ? error.message : "Agent 执行失败";
+          try { await detach(); } catch { session.status = "interrupted"; session.error = "无法确认 Agent 已停止，请核对工作区和本机进程"; }
+        } finally {
+          clearTimeout(timeout); signal.removeEventListener("abort", abort);
+          for (const approval of [...approvals.values()]) approval.resolve({ id: approval.request.id, allow: false });
+          for (const activity of session.activities) if (activity.status === "running") activity.status = "failed";
+          store.persist();
+        }
+      })().finally(() => { active = undefined; controller = undefined; rejectExecution = undefined; });
+      // send acknowledges persisted intent; snapshot carries the eventual execution result.
+      void active.catch(() => { session.status = "failed"; session.error = "无法保存 Agent 执行结果，记录文件已保留"; });
+    },
+    answer(input: AgentApprovalAnswer) {
+      if (!input || typeof input.id !== "string" || typeof input.allow !== "boolean" || (input.answers !== undefined && (!input.answers || typeof input.answers !== "object" || Array.isArray(input.answers) || Object.values(input.answers).some(answer => typeof answer !== "string" || answer.length > 16000)))) throw new Error("审批响应无效");
+      const pending = approvals.get(input.id); if (!pending) throw new Error("审批已结束或过期");
+      if (input.allow && pending.request.questions?.some(question => !input.answers?.[question.id]?.trim())) throw new Error("请填写所有问题的回答");
+      pending.resolve(input);
+    },
+    async newSession() { return change(async () => { await detach(); const binding = options.binding(); if (!binding) throw new Error("请先选择外部 Agent 和工作目录"); store.create(key(binding)); }); },
+    async abort() { controller?.abort(); await active; await detach(); if (current()?.status === "interrupted") throw new Error("无法确认 Agent 已停止，请核对本机进程"); },
+    async detach() { return change(detach); },
+    async close() { closed = true; await transition; controller?.abort(); await active; await detach(); },
+  };
+}
