@@ -137,7 +137,7 @@ export function App() {
     const closeOrTrap = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); closeHistory(); return; }
       if (event.key !== "Tab") return;
-      const controls = [...document.querySelectorAll<HTMLElement>(".conversation-sidebar a[href], .conversation-sidebar button:not(:disabled), .conversation-sidebar input, .conversation-sidebar select")].filter(element => !element.closest("[hidden]"));
+      const controls = [...document.querySelectorAll<HTMLElement>(".conversation-sidebar a[href], .conversation-sidebar button:not(:disabled), .conversation-sidebar input, .conversation-sidebar select, .conversation-sidebar summary")].filter(element => !element.closest("[hidden]") && !element.closest("details:not([open]) > :not(summary)"));
       const first = controls[0], last = controls.at(-1);
       if (!first || !last) return;
       if (event.shiftKey && (document.activeElement === first || !document.querySelector(".conversation-sidebar")?.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
@@ -239,7 +239,7 @@ export function App() {
       <main className="workspace-frame">
       {page === "chat" && narrow && historyOpen && <button className="history-backdrop" aria-label="关闭历史对话遮罩" onClick={closeHistory} />}
       <div className="conversation-sidebar" inert={relatedModal} hidden={narrow && page !== "chat"} data-expanded={historyOpen} role={narrow && historyOpen ? "dialog" : undefined} aria-modal={narrow && historyOpen ? true : undefined} aria-label="历史对话侧栏">
-        <ConversationHistory load={!narrow || page === "chat" && !!route.conversationId} onItems={setHistoryItems} onTeams={() => switchConversationSource("teams")} refreshKey={historyRevision} active={(!narrow || page === "chat") && historyOpen} autoFocus={false} currentId={view?.conversationId ?? route.conversationId ?? null} onOpen={openChat} onClose={closeHistory} onNew={() => { void startChat().catch(error => showToast(error.message, "error")); }} newDisabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} />
+        <ConversationHistory load={!narrow || page === "chat" && !!route.conversationId} onItems={setHistoryItems} onTeams={() => switchConversationSource("teams")} refreshKey={historyRevision} active={(!narrow || page === "chat") && historyOpen} autoFocus={false} currentId={view?.conversationId ?? route.conversationId ?? null} workingId={view && (view.busy || Object.keys(view.live).length > 0) ? view.conversationId : undefined} onOpen={openChat} onClose={closeHistory} onNew={() => { void startChat().catch(error => showToast(error.message, "error")); }} newDisabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} />
         <button ref={historyToggle} className="sidebar-toggle" type="button" aria-label={historyOpen ? "收起历史对话" : "展开历史对话"} title={historyOpen ? "收起历史对话" : "展开历史对话"} aria-expanded={historyOpen} aria-controls="conversation-history" onClick={toggleHistory}><Icon name={historyOpen ? "chevron-left" : "chevron-right"} /></button>
       </div>
       <div inert={relatedModal || page === "chat" && narrow && historyOpen} className="chat-column" id="workspace" data-view={page} data-empty-chat={emptyChat} tabIndex={-1}>

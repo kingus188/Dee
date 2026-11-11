@@ -38,7 +38,14 @@ test("打包后跨页面字号受同一偏好控制，组件尺寸不缩放外�
   assert.doesNotMatch(css, /zoom\s*:/);
   assert.doesNotMatch(css, /100dvh \/ var\(--ui-scale/);
   const prototype = await readFile(new URL("prototype.css", root), "utf8");
-  assert.match(prototype, /padding-left: 66px;/);
+  assert.match(prototype, /\[data-desktop="darwin"\] \.conversation-history \{ padding-top: var\(--header-height\); \}/);
   assert.match(prototype, /padding: calc\(18px \* var\(--ui-component-scale, 1\)\)/);
   assert.doesNotMatch(prototype, /var\(--ui-scale/);
+});
+
+test("打包资源包含侧栏各个真实状态的图标", async () => {
+  const sprite = await readFile(new URL("assets/icons.svg", root), "utf8");
+  for (const name of ["loader-circle", "circle-pause", "circle-check", "circle-alert", "circle-slash", "panel-left-close"]) {
+    assert.ok(sprite.includes(`id="${name}"`), `Missing sidebar icon: ${name}`);
+  }
 });

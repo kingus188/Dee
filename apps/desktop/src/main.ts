@@ -38,6 +38,18 @@ protocol.registerSchemesAsPrivileged([{ scheme: "dee", privileges: { standard: t
 let localWindow: BrowserWindow | undefined;
 let localAgent: Awaited<ReturnType<typeof openDesktopAgent>> | undefined;
 let quitting = false;
+async function showServerWorkspace(hash = "") {
+  if (!window || window.isDestroyed() || !isAppUrl(window.webContents.getURL().split("#")[0] ?? "", activeOrigin)) await connect();
+  const current = window;
+  if (!current || current.isDestroyed()) throw new Error("服务器窗口未打开，请重试。");
+  if (hash) {
+    if (!isAppUrl(current.webContents.getURL().split("#")[0] ?? "", activeOrigin)) throw new Error("服务器未连接，请检查连接设置后重试。");
+    await current.loadURL(new URL(hash, activeOrigin).href);
+  }
+  if (current.isMinimized()) current.restore();
+  current.show(); current.focus();
+}
+
 function showLocalWindow() {
   if (localWindow && !localWindow.isDestroyed()) { if (localWindow.isMinimized()) localWindow.restore(); localWindow.show(); localWindow.focus(); return; }
   const current = new BrowserWindow({ title: "Dee · 小 D", width: 1440, height: 920, minWidth: 720, minHeight: 560, icon,
@@ -272,7 +284,7 @@ else {
     });
     showLocalWindow();
     localAgent = await registerDesktopAgent({ ipc: ipcMain, directory: app.getPath("userData"), localUrl, searchPath: process.env.PATH, env: { ...process.env },
-      getWindow: () => localWindow, serverId: () => config.url, openServer: () => connect(), openConnection: showConnection,
+      getWindow: () => localWindow, serverId: () => config.url, openServer: showServerWorkspace, openConnection: showConnection,
       request: async (path, body, serverId) => {
         if (serverId && serverId !== config.url) throw new Error("任务属于之前的服务器，请切回原服务器后继续");
         const target = new URL(path, activeOrigin);

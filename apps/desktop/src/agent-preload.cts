@@ -1,6 +1,7 @@
 import electron = require("electron");
 const { contextBridge, ipcRenderer } = electron;
 contextBridge.exposeInMainWorld("desktopAgent", {
+  platform: process.platform,
   snapshot: () => ipcRenderer.invoke("desktop:agent:snapshot"),
   saveModel: (input: unknown) => ipcRenderer.invoke("desktop:agent:save-model", input),
   selectAgent: (input: unknown) => ipcRenderer.invoke("desktop:agent:select-agent", input),
@@ -11,6 +12,6 @@ contextBridge.exposeInMainWorld("desktopAgent", {
   approve: (id: string) => ipcRenderer.invoke("desktop:agent:approve", id),
   reject: (id: string) => ipcRenderer.invoke("desktop:agent:reject", id),
   abort: () => ipcRenderer.invoke("desktop:agent:abort"),
-  openServer: () => ipcRenderer.invoke("desktop:agent:open-server"),
+  openServer: (hash?: string) => ipcRenderer.invoke("desktop:agent:open-server", hash),
   openConnection: () => ipcRenderer.invoke("desktop:agent:open-connection"),
 });

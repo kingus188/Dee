@@ -35,3 +35,9 @@ export function isExternalUrl(value: string) {
     return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
   } catch { return false; }
 }
+
+export function validateServerRoute(input: unknown): string {
+  if (input === undefined || input === "") return "";
+  if (typeof input !== "string" || !["#today", "#chat", "#teams", "#tasks", "#activity", "#memory", "#skills", "#notes", "#reports", "#schedules", "#settings"].includes(input)) throw new Error("无效的服务器页面");
+  return input;
+}

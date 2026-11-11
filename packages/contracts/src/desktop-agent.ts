@@ -29,6 +29,7 @@ export type DesktopAgentSnapshot = {
   jobs: DesktopPeerJob[]; serverConnected: boolean; error?: string;
 };
 export type DesktopAgentBridge = {
+  platform?: string;
   snapshot(): Promise<DesktopAgentSnapshot>;
   saveModel(input: DesktopModelInput): Promise<{ persistedKey: boolean }>;
   selectAgent(input: DesktopAgentSelection): Promise<void>;
@@ -39,6 +40,6 @@ export type DesktopAgentBridge = {
   approve(id: string): Promise<void>;
   reject(id: string): Promise<void>;
   abort(): Promise<void>;
-  openServer(): Promise<void>;
+  openServer(hash?: string): Promise<void>;
   openConnection(): Promise<void>;
 };

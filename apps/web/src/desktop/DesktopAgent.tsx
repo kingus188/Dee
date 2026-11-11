@@ -8,6 +8,11 @@ import type { DesktopAgentBridge } from "./bridge.js";
 import { ExternalAgentSettings } from "./ExternalAgentSettings.js";
 import { AgentRequests } from "./AgentRequests.js";
 import { AgentPicker, agentNames } from "./AgentPicker.js";
+import { WorkspaceNavigation } from "../ui/WorkspaceNavigation.js";
+import { workspaceHash, type WorkspaceRoute } from "../ui/navigation.js";
+import { DesktopSidebar, useDesktopSidebar } from "./DesktopSidebar.js";
+
+const localRoute: WorkspaceRoute = { page: "chat", group: null };
 
 const executionStates = { idle: "就绪", running: "正在执行", waiting: "等待你处理", done: "已完成", failed: "未完成", cancelled: "已取消", interrupted: "上次执行已中断" };
 
@@ -64,6 +69,8 @@ function ModelForm({ bridge, model, busy }: ModelFormProps) {
 
 export function DesktopAgent() {
   const bridge = desktopAgentBridge();
+  const sidebar = useDesktopSidebar();
+  const help = useRef<HTMLDialogElement>(null);
   const [snapshot, setSnapshot] = useState<DesktopAgentSnapshot | null>(null);
   const [pollError, setPollError] = useState(""), [error, setError] = useState("");
   const [draft, setDraft] = useState(""), [sending, setSending] = useState(false);
@@ -125,8 +132,17 @@ export function DesktopAgent() {
   const jobs = snapshot?.jobs ?? [];
   const showPanel = modelOpen || jobs.length > 0;
   const status = { queued: "等待批准", running: "正在执行", done: "已完成", failed: "未完成" };
-  return <div className="app-layout desktop-agent" id="mascot-card" data-view="chat" data-desktop={window.desktopServer?.platform}>
+  const newDisabled = busy || !snapshot?.workspace || pending.includes("new-session");
+  const newSession = agentKind !== "pi" ? () => { void action("new-session", () => bridge.newSession()); } : undefined;
+  function navigate(route: WorkspaceRoute) {
+    if (route.page === "chat") { scroll.current?.focus(); return; }
+    void action("server", () => bridge!.openServer(workspaceHash(route)));
+  }
+  return <div className="app-layout desktop-agent" id="mascot-card" data-view="chat" data-desktop={bridge.platform ?? window.desktopServer?.platform}>
+    <WorkspaceNavigation inert={sidebar.narrow && sidebar.open} route={localRoute} onNavigate={navigate} onHelp={() => help.current?.showModal()} onSearch={sidebar.open ? undefined : sidebar.toggleOpen} onNew={newSession} newDisabled={newDisabled} />
     <main className="workspace-frame">
+      <DesktopSidebar sidebar={sidebar} snapshot={snapshot} onOpen={() => requestAnimationFrame(() => scroll.current?.focus())} onTeams={() => { void action("server", () => bridge.openServer("#teams")); }} onNew={newSession} newDisabled={newDisabled} />
+      <div className="workspace-frame desktop-agent-content" inert={sidebar.narrow && sidebar.open}>
       <div className="chat-column" id="workspace" data-view="chat">
         <header className="conversation-header desktop-agent-header">
           <div className="conversation-heading"><span className="workspace-brand" aria-hidden="true">D</span><h1 className="conversation-title">小 D</h1></div>
@@ -142,7 +158,7 @@ export function DesktopAgent() {
           {agentKind !== "pi" && <button className="text-button" type="button" disabled={busy || !snapshot?.workspace || pending.includes("new-session")} onClick={() => void action("new-session", () => bridge.newSession())}>新会话</button>}
         </div>
         {(error || pollError || snapshot?.error) && <div className="desktop-agent-error" role="alert">{error || pollError || snapshot?.error}</div>}
-        <section className="messages-container" ref={scroll} aria-label="与本机小 D 的对话" onScroll={() => { const element = scroll.current!; follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
+        <section className="messages-container" ref={scroll} tabIndex={-1} aria-label="与本机小 D 的对话" onScroll={() => { const element = scroll.current!; follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
           {!snapshot && <p role="status">正在读取本机状态…</p>}
           <div id="message-history" aria-live="polite" aria-relevant="additions text">
             {messages?.map(message => <section className="chat-turn" key={message.id}>{message.role === "user" ? <div className="message-row user-row"><div className="user-bubble"><div className="user-text-body">{message.text}</div></div></div> : <div className="assistant-turn"><div className="message-row assistant-row"><div className="assistant-wrapper response-card"><div className="assistant-identity"><strong>{agentKind === "pi" ? "小 D" : agentNames[agentKind]}</strong></div><div className="assistant-bubble md" dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text) }} /></div></div></div>}</section>)}
@@ -174,6 +190,8 @@ export function DesktopAgent() {
           {job.status === "queued" && incoming && <div className="desktop-agent-job-actions"><button type="button" className="header-button" disabled={pending.includes(job.id) || busy || !(snapshot?.piConfigured ?? snapshot?.configured) || !!pollError} onClick={() => void action(job.id, () => bridge.approve(job.id))}>批准 Pi 执行</button><button type="button" className="header-button" disabled={pending.includes(job.id) || !!pollError} onClick={() => void action(job.id, () => bridge.reject(job.id))}>拒绝</button></div>}
         </article>; })}</section>}
       </aside>}
+      </div>
     </main>
+    <dialog ref={help} className="help-dialog" aria-labelledby="desktop-help-title"><form method="dialog"><button className="icon-button close-help" aria-label="关闭使用指南"><Icon name="x" /></button></form><h2 id="desktop-help-title">使用指南</h2><ul><li>对话使用本机选择的 Agent，其配置与登录由对应 Agent 管理。</li><li>待办、通知及「更多」中的个人内容在服务器窗口打开，本机对话继续保留。</li><li>服务器请求使用本机资源时，需要先在本机批准委托任务。</li></ul></dialog>
   </div>;
 }

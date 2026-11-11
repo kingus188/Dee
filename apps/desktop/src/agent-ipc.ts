@@ -3,8 +3,9 @@ import { dialog, safeStorage } from "electron";
 import { openAgentSettings } from "./agent-settings.js";
 import { openDesktopAgent } from "./local-agent.js";
 import type { AgentRequest } from "./local-agent.js";
+import { validateServerRoute } from "./policy.js";
 
-export async function registerDesktopAgent(options: { ipc: IpcMain; directory: string; getWindow(): BrowserWindow | undefined; localUrl: string; request: AgentRequest; serverId?: () => string; searchPath?: string; env?: NodeJS.ProcessEnv; openServer(): Promise<void>; openConnection(): void }) {
+export async function registerDesktopAgent(options: { ipc: IpcMain; directory: string; getWindow(): BrowserWindow | undefined; localUrl: string; request: AgentRequest; serverId?: () => string; searchPath?: string; env?: NodeJS.ProcessEnv; openServer(hash?: string): Promise<void>; openConnection(): void }) {
   const settings = openAgentSettings(options.directory, safeStorage);
   const agent = await openDesktopAgent({ directory: options.directory, settings, request: options.request, serverId: options.serverId, searchPath: options.searchPath, env: options.env, confirm: async (tool, args) => {
     const window = options.getWindow();
@@ -23,7 +24,7 @@ export async function registerDesktopAgent(options: { ipc: IpcMain; directory: s
       const selected = await dialog.showOpenDialog(window, { title: "选择小 D 的工作目录", properties: ["openDirectory"] });
       if (!selected.canceled && selected.filePaths[0]) await agent.chooseWorkspace(selected.filePaths[0]);
     },
-    "open-server": () => options.openServer(), "open-connection": () => options.openConnection(),
+    "open-server": input => options.openServer(validateServerRoute(input)), "open-connection": () => options.openConnection(),
   };
   for (const [name, handler] of Object.entries(handlers)) options.ipc.handle(`desktop:agent:${name}`, async (event, input) => {
     trusted(event);

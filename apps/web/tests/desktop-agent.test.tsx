@@ -229,3 +229,93 @@ test("picker prevents duplicate switches and keeps the current selection after a
   assert.equal(picker.disabled, false);
   assert.equal(document.querySelector('[aria-label="选择 Pi"]')!.getAttribute("aria-pressed"), "true");
 });
+
+test("本机侧栏沿用原有展开和收起状态，切换不重建对话或丢失草稿", async t => {
+  const state = snapshot();
+  state.messages = [{ id: "local", role: "user", text: "正在继续的本机对话" }];
+  const native = bridge(state);
+  const { dom, render } = await mount(t, <DesktopAgent />);
+  Object.defineProperty(dom.window, "desktopAgent", { value: native });
+  await render(<DesktopAgent />);
+  const document = dom.window.document, shell = document.querySelector("#mascot-card"), frame = document.querySelector("main"), chat = document.querySelector(".chat-column");
+  const input = document.querySelector<HTMLTextAreaElement>(".chat-textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!.call(input, "还没发送");
+    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  });
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "true");
+  assert.match(document.querySelector(".history-list")!.textContent!, /正在继续的本机对话/);
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="收起历史对话"]')!.click());
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
+  assert.equal(dom.window.localStorage.getItem("dee.history.collapsed"), "true");
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="搜索对话"]')!.click());
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "true");
+  assert.equal(dom.window.localStorage.getItem("dee.history.collapsed"), "false");
+  assert.equal(document.querySelector("#mascot-card"), shell); assert.equal(document.querySelector("main"), frame); assert.equal(document.querySelector(".chat-column"), chat);
+  assert.equal(input.value, "还没发送");
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="收起历史对话"]')!.click());
+  await render(null); await render(<DesktopAgent />);
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
+});
+
+test("窄窗口侧栏使用原有覆盖布局，可用遮罩和 Escape 关闭并恢复焦点", async t => {
+  const { dom, render } = await mount(t, null);
+  Object.defineProperty(dom.window, "desktopAgent", { value: bridge(snapshot()) });
+  Object.defineProperty(dom.window, "matchMedia", { value: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) });
+  await render(<DesktopAgent />);
+  const document = dom.window.document;
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="展开历史对话"]')!.click());
+  assert.equal(document.querySelector('[aria-label="本机对话侧栏"]')!.getAttribute("aria-modal"), "true");
+  assert.ok(document.querySelector(".desktop-agent-content")!.hasAttribute("inert"));
+  await act(async () => document.querySelector<HTMLButtonElement>(".history-backdrop")!.click());
+  assert.equal(document.querySelector(".history-backdrop"), null);
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="展开历史对话"]')!.click());
+  await act(async () => document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
+  assert.equal(document.activeElement, document.querySelector(".sidebar-toggle"));
+  assert.equal(document.querySelector(".desktop-agent-content")!.hasAttribute("inert"), false);
+});
+
+test("本机侧栏与服务模式共用来源、搜索和分组布局，来源跳转不丢失本机对话", async t => {
+  const state = snapshot();
+  state.messages = [{ id: "local", role: "user", text: "本机待处理事项" }];
+  const native = bridge(state);
+  const openServer = t.mock.method(native, "openServer", async (_hash?: string) => {});
+  const { dom, render } = await mount(t, null);
+  Object.defineProperty(dom.window, "desktopAgent", { value: native });
+  await render(<DesktopAgent />);
+  const document = dom.window.document, chat = document.querySelector(".chat-column");
+  const panel = document.querySelector(".conversation-history")!;
+  assert.match(panel.querySelector(".history-search kbd")!.textContent!, /^(⌘K|Ctrl K)$/);
+  assert.equal(panel.querySelector(".history-heading")!.textContent, "当前对话");
+  assert.equal(panel.querySelector(".history-row-title")!.textContent, "本机待处理事项");
+  assert.equal(panel.querySelector(".conversation-new-button"), null, "Pi 不提供不支持的新会话操作");
+  const source = panel.querySelector<HTMLSelectElement>('[aria-label="切换对话来源"]')!;
+  assert.equal(source.value, "assistant");
+  await act(async () => {
+    source.value = "teams";
+    source.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  });
+  assert.deepEqual(openServer.mock.calls[0]!.arguments, ["#teams"]);
+  assert.equal(source.value, "assistant");
+  assert.equal(document.querySelector(".chat-column"), chat);
+  document.querySelector<HTMLTextAreaElement>("textarea")!.focus();
+  await act(async () => document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true })));
+  const search = panel.querySelector<HTMLInputElement>(".history-search input")!;
+  assert.equal(document.activeElement, search);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!.call(search, "不存在");
+    search.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  });
+  assert.equal(panel.querySelector(".history-list a"), null);
+  assert.match(panel.querySelector(".history-list")!.textContent!, /没有匹配的本机会话/);
+  await act(async () => document.querySelector<HTMLButtonElement>(".sidebar-toggle")!.click());
+  await act(async () => {
+    document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
+    await new Promise<void>(resolve => dom.window.requestAnimationFrame(() => resolve()));
+  });
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "true");
+  assert.equal(document.activeElement, search);
+  assert.equal(document.querySelector(".chat-column"), chat);
+});

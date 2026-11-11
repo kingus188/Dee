@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isAppConnection, isAppUrl, isExternalUrl } from "../dist/policy.js";
+import { isAppConnection, isAppUrl, isExternalUrl, validateServerRoute } from "../dist/policy.js";
+
+test("local navigation accepts only known server workspace hashes", () => {
+  assert.equal(validateServerRoute(undefined), "");
+  for (const route of ["", "#today", "#chat", "#teams", "#tasks", "#activity", "#memory", "#skills", "#notes", "#reports", "#schedules", "#settings"]) assert.equal(validateServerRoute(route), route);
+  for (const route of [null, {}, 1, "https://example.com", "//example.com", "javascript:alert(1)", "#unknown", "#notes/1", "#tasks\n", "#tasks?url=https://example.com", "#teams/1", "#teams\n", "#teams?url=https://example.com"]) assert.throws(() => validateServerRoute(route), /无效的服务器页面/);
+});
 
 test("desktop credentials and navigation stay on the exact local origin", () => {
   const origin = "http://127.0.0.1:43123";

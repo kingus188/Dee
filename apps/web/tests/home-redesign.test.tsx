@@ -227,7 +227,7 @@ test("发送成功后同一会话标题刷新，保留历史搜索与选中编�
   assert.deepEqual(sent, ["/api/conversations/12/messages"]);
   assert.equal(reads, before + 1, "发送成功触发一次历史刷新，而不是依赖会话编号变化");
   assert.equal(search.value, "产品");
-  assert.match(doc.querySelector(".history-list a > span")!.textContent!, /产品方案跟进/);
+  assert.match(doc.querySelector(".history-row-title")!.textContent!, /产品方案跟进/);
   assert.equal(doc.querySelector('.history-list a[aria-current="true"]')!.getAttribute("href"), "#chat/12");
   assert.equal(dom.window.location.hash, "#chat/12");
   assert.deepEqual(view.subscriptions, [12]);
@@ -255,7 +255,7 @@ test("窄屏历史为模态侧栏，隔离背景、循环 Tab、Escape 与选择
   assert.equal(main.hasAttribute("inert"), true);
   assert.ok(doc.querySelector(".history-backdrop"));
   assert.equal(doc.activeElement?.getAttribute("aria-label"), "搜索历史对话");
-  const controls = [...sidebar.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input')].filter(element => !element.closest("[hidden]"));
+  const controls = [...sidebar.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input, select, summary')].filter(element => !element.closest("[hidden]") && !element.closest("details:not([open]) > :not(summary)"));
   const first = controls[0], last = controls.at(-1)!;
   const tab = (shiftKey = false) => new dom.window.KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true });
   const forward = tab();
