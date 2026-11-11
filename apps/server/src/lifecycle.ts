@@ -31,7 +31,7 @@ export async function startServer(config: AppConfig, host = config.password ? "0
       await app.mail.close();
       app.wechat?.stop();
       app.taskGraph.dispose();
-      try { await Promise.all([stopped, app.harness.close(app.ctx)]); }
+      try { await app.peers.close(); await Promise.all([stopped, app.harness.close(app.ctx)]); }
       finally {
         await app.notifications.close();
         app.wechatSettings.close(); app.teamsStore.close(); app.episodeStore.close(); app.modelSettings.close();

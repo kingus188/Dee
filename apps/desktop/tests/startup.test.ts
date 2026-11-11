@@ -12,7 +12,7 @@ const nativeRequire = createRequire(entry);
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 type MenuItem = { id?: string; label?: string; submenu?: MenuItem[]; click?: () => void };
 
-async function desktop(options: { notificationsSupported?: boolean; offline?: boolean; invalidEnvironment?: boolean; brokenPin?: boolean; noSavedConnection?: boolean; connectionError?: boolean; environment?: Record<string, string>; lan?: boolean; lanLoadFails?: boolean } = {}) {
+async function desktop(options: { localOnly?: boolean; notificationsSupported?: boolean; offline?: boolean; invalidEnvironment?: boolean; brokenPin?: boolean; noSavedConnection?: boolean; connectionError?: boolean; environment?: Record<string, string>; lan?: boolean; lanLoadFails?: boolean } = {}) {
   const windows: FakeWindow[] = [];
   const state = { offline: options.offline ?? false, notifications: 0, errors: 0, storageName: "", edits: [] as string[] };
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -26,7 +26,7 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
     destroyed = false;
     urls: string[] = [];
     webContents = Object.assign(new EventEmitter(), {
-      url: "", mainFrame: { url: "" },
+      url: "", mainFrame: { url: "" }, session: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} },
       getURL: () => this.webContents.url,
       setWindowOpenHandler: () => {},
       copy: () => state.edits.push("copy"), cut: () => state.edits.push("cut"), paste: () => state.edits.push("paste"),
@@ -56,6 +56,7 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
   }
   const paths = new Map<string, string>([["appData", "/synthetic-app-data"]]);
   const app = Object.assign(new EventEmitter(), {
+    commandLine: { getSwitchValue: () => "" },
     name: "Pi Durable Assistant", setName(name: string) { this.name = name; },
     requestSingleInstanceLock: () => true, whenReady: () => { state.storageName = app.name; return Promise.resolve(); }, isReady: () => true,
     getPath: (name: string) => paths.get(name) ?? "/synthetic-desktop-state",
@@ -66,7 +67,10 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
     setCertificateVerifyProc() {}, setPermissionRequestHandler() {}, setPermissionCheckHandler() {},
     webRequest: { onBeforeSendHeaders(handler: typeof headersHook) { headersHook = handler; } }, fetch: async () => new Response(),
   };
+  let openServer: (() => Promise<void>) | undefined;
+  let localWindow: (() => FakeWindow | undefined) | undefined;
   const electron = {
+    protocol: { registerSchemesAsPrivileged() {}, handle() {} }, net: { fetch: async () => new Response() },
     app, BrowserWindow: FakeWindow,
     dialog: { showErrorBox() { state.errors++; } },
     ipcMain: { handle(name: string, handler: (...args: unknown[]) => unknown) { handlers.set(name, handler); } },
@@ -80,6 +84,7 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
     exports: {}, URL, Buffer, console, setImmediate,
     process: { platform: "darwin", env: options.invalidEnvironment ? { ASSISTANT_WEB_URL: "invalid" } : options.environment ?? {} },
     require(specifier: string) {
+      if (specifier === "./agent-ipc.js") return { registerDesktopAgent: async (input: { openServer(): Promise<void>; getWindow(): FakeWindow | undefined }) => { openServer = input.openServer; localWindow = input.getWindow; return { close: async () => {} }; } };
       if (specifier === "electron") return electron;
       if (specifier === "./skills/catalog.js") return { LocalSkillCatalog: class {} };
       if (specifier === "./skills-ipc.js") return { registerLocalSkills() {} };
@@ -94,10 +99,11 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
     },
   }, { filename: fileURLToPath(entry) });
   await flush(); await flush();
+  if (!options.localOnly) { localWindow?.()?.destroy(); await openServer?.(); await flush(); }
   const main = () => windows.filter(w => !w.destroyed && w.options.title !== "连接 Dee").at(-1)!;
   const settings = () => windows.filter(w => !w.destroyed && w.options.title === "连接 Dee");
   const openSettings = () => main().webContents.emit("before-input-event", { preventDefault() {} }, { meta: true, key: ",", type: "keyDown" });
-  return { app, windows, main, settings, openSettings, state, handlers, flush, saved, headersHook,
+  return { openServer, app, windows, main, settings, openSettings, state, handlers, flush, saved, headersHook,
     menu: () => menu,
     mailStatus: () => handlers.get("desktop:notification-status")!({ sender: main().webContents, senderFrame: main().webContents.mainFrame }),
     reportMailStatus: (status: unknown) => reportMailStatus?.(status),
@@ -190,7 +196,7 @@ test("saved connection starts in the main window without a connection dialog", a
 
 for (const event of ["activate", "second-instance"]) {
   test(`${event} restores a minimized main window instead of opening connection settings`, async () => {
-    const d = await desktop(); const original = d.main(); original.minimize();
+    const d = await desktop({ localOnly: true }); const original = d.main(); original.minimize();
     d.app.emit(event); await d.flush();
     assert.equal(d.main(), original);
     assert.equal(original.isMinimized(), false);
@@ -198,10 +204,10 @@ for (const event of ["activate", "second-instance"]) {
     assert.equal(d.settings().length, 0);
   });
   test(`${event} recreates a closed main window with the saved connection`, async () => {
-    const d = await desktop(); const original = d.main(); original.close();
+    const d = await desktop({ localOnly: true }); const original = d.main(); original.close();
     d.app.emit(event); await d.flush(); await d.flush();
     assert.notEqual(d.main(), original);
-    assert.ok(d.main()?.urls.includes("https://assistant.example"));
+    assert.ok(d.main()?.urls.includes("dee://local/"));
     assert.equal(d.main()?.isVisible(), true);
     assert.equal(d.settings().length, 0);
   });
@@ -359,8 +365,8 @@ for (const noSavedConnection of [false, true]) {
     d.main().webContents.emit("will-navigate", { preventDefault: () => { prevented = true; } }, noSavedConnection ? "http://127.0.0.1:3000" : "https://assistant.example");
     assert.equal(prevented, true);
     d.main().close(); d.app.emit("activate"); await d.flush(); await d.flush();
-    assert.ok(d.main().urls.every(url => url.startsWith("data:")));
-    d.openSettings(); const settings = d.settings()[0]!;
+    assert.ok(d.main().urls.every(url => url === "dee://local/"));
+    await d.openServer?.(); d.openSettings(); const settings = d.settings()[0]!;
     const event = { sender: settings.webContents, senderFrame: settings.webContents.mainFrame };
     assert.equal((d.handlers.get("desktop:connection-save")!(event, { url: "https://assistant.example", username: "fixture", password: "fixture" }) as { ok: boolean }).ok, true);
     await d.handlers.get("desktop:connection-retry")!(event);

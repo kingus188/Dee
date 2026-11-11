@@ -1,6 +1,6 @@
 import type { Context, AttachedReplicatedState } from "@earendil-works/chord";
 import type { TaskGraph } from "@earendil-works/pi-durable";
-import type { Runtime } from "@assistant/runtime";
+import type { Runtime, PeerService } from "@assistant/runtime";
 import type { createTaskCenter } from "@assistant/features";
 import type { WechatChannel } from "@assistant/channel-wechat";
 import type { AppConfig } from "../config.js";
@@ -15,6 +15,7 @@ import type { openNotificationOutbox } from "../notification-outbox.js";
 import type { Pool } from "pg";
 import type { DailyReports } from "../daily-reports.js";
 export type AppContext = Runtime & {
+  peers: PeerService;
   config: AppConfig; ctx: Context; taskGraph: AttachedReplicatedState<TaskGraph>;
   tasks: ReturnType<typeof createTaskCenter>; wechat: WechatChannel | null;
   modelSettings: Awaited<ReturnType<typeof openModelSettings>>;

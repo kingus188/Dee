@@ -159,7 +159,7 @@ docker compose ps
 | 目录 | 职责 |
 | --- | --- |
 | `apps/web` | 小 D 的数字形象、对话和交互界面 |
-| `apps/desktop` | Electron API 客户端、连接配置与系统通知 |
+| `apps/desktop` | 本机 Pi Agent、独立模型配置、内置界面、双端委派、本机技能与系统通知 |
 | `apps/server` | API、数据、任务调度与消息通道集成 |
 | `packages/contracts` | 前后端共同使用的协议类型 |
 | `packages/runtime` | 模型接入、会话与持久化运行时 |

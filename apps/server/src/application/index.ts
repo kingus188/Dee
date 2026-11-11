@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
-import { createModelCatalog, openRuntime, Index } from "@assistant/runtime";
+import { createModelCatalog, createPeerService, openRuntime, Index, type Runtime } from "@assistant/runtime";
 import { createAssistant, createDailyReportTools, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway, createMailInbox } from "@assistant/features";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -24,6 +24,7 @@ import { createDailyReports } from "../daily-reports.js";
 import { existsSync } from "node:fs";
 import { applyExecutionResult } from "./daylight-execution.js";
 import type { Pool } from "pg";
+import { peerDevices, schedulePeer } from "../peer-api.js";
 
 export async function createApplication(config: AppConfig): Promise<AppContext> {
   if (config.production && !config.password) throw new Error("生产环境必须设置 DEMO_PASSWORD");
@@ -65,14 +66,19 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     const tasks = createTaskCenter(notify, run => applyExecutionResult(daylight!, run));
     const { models, agentModel, label: modelLabel, configured: modelConfigured } = await createModelCatalog(config.model, config.model.api === "faux" ? (await import("./faux.js")).fauxScript : undefined);
     if (config.wechat.enabled && !modelConfigured) throw new Error("启用微信通道前请在服务器配置模型，然后重启后端");
+    let peerRuntime: Runtime | undefined;
+    const peers = createPeerService({ nodeId: "server", configured: () => modelConfigured,
+      devices: async () => config.password && peerRuntime ? (await peerDevices(peerRuntime, ctx)).filter(item => item.online).map(item => item.deviceId) : [],
+    });
     const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
       // Old versions removed Index entries without a tombstone. Reconcile before
       // durable work resumes, retaining the runtime's existing model rebinding.
       beforeResume: async runtime => {
+        peers.bind(runtime, ctx); peerRuntime = runtime;
         await repairConversationTitles(runtime, ctx);
         episodeStore!.reconcileConversations((await runtime.harness.snapshot(Index, ctx))?.items.map(item => item.id) ?? []);
       },
-      extensions: [createDailyReportTools(dailyReports), createDaylight(daylight), createMailInbox(mail), createAssistant(notify, daylight), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query), records: rows => teamsStore!.records(rows),
+      extensions: [peers.extension, createDailyReportTools(dailyReports), createDaylight(daylight), createMailInbox(mail), createAssistant(notify, daylight), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query), records: rows => teamsStore!.records(rows),
         refresh: () => teamsSender.refresh?.() ?? Promise.resolve({ ok: false, lastSuccessAt: teamsSender.syncStatus?.().lastSuccessAt ?? null }),
         syncStatus: () => teamsSender.syncStatus?.() ?? { lastSuccessAt: null },
         read: createTeamsReadPort(teamsStore, teamsSender, config.offline) }), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender, config.offline)),
@@ -83,8 +89,14 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     try {
       await migrateLegacyTodos(runtime.harness, daylight, ctx);
       if (wechat) { await wechat.linkLegacyTeams(teamsStore.notificationIds()); await wechat.start(); }
+      if (modelConfigured) for (const job of await peers.list()) {
+        if (job.target === "server" && (job.status === "queued" || job.status === "running")) schedulePeer(peers, job.id, error => {
+          exitIfFatal(error);
+          console.error("双端任务等待恢复：", redact(error instanceof Error ? error.message : error));
+        });
+      }
       const taskGraph = await runtime.harness.taskGraph(ctx);
-      return { ...runtime, config, ctx, taskGraph, tasks, notifications, daylight, dailyReports, businessDatabase, wechat, modelSettings, wechatSettings, teamsStore, teamsSender, mail, episodeStore, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
+      return { ...runtime, peers, config, ctx, taskGraph, tasks, notifications, daylight, dailyReports, businessDatabase, wechat, modelSettings, wechatSettings, teamsStore, teamsSender, mail, episodeStore, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
     } catch (error) {
       wechat?.stop();
       await runtime.harness.close(ctx);

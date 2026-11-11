@@ -1,0 +1,52 @@
+/* Local agent reuses the existing desktop shell, chat and settings tokens. */
+#mascot-card.desktop-agent .desktop-agent-header { flex-wrap: wrap; gap: 8px 16px; padding-block: 8px; }
+#mascot-card.desktop-agent[data-desktop="darwin"] .desktop-agent-header { padding-left: 84px; }
+.desktop-agent-controls { flex-wrap: wrap; min-width: 0; }
+.desktop-agent-server { display: inline-flex; align-items: center; gap: 7px; color: var(--text-muted); font-size: 11px; }
+.desktop-agent-server .status-dot[data-connected="false"] { background: var(--text-muted); }
+.desktop-agent-workspace { flex: none; min-width: 0; padding: 0 var(--chat-gutter); border-bottom: 1px solid var(--dee-separator); }
+.desktop-agent-workspace .text-button { max-width: 100%; color: var(--text-muted); }
+.desktop-agent-workspace .icon { flex: none; }
+.desktop-agent-workspace span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-agent-error { flex: none; padding: 8px var(--chat-gutter); color: var(--danger); font-size: 13px; overflow-wrap: anywhere; max-height: 20dvh; overflow-y: auto; }
+.desktop-agent-composer { display: flex; align-items: flex-end; gap: 12px; }
+#mascot-card.desktop-agent .desktop-agent-composer .chat-textarea { width: 100%; padding: 4px; }
+.desktop-agent-composer .composer-actions { flex: none; }
+.desktop-agent-configure { margin-bottom: 8px; }
+.desktop-agent-busy { color: var(--text-muted); font-size: 13px; }
+#mascot-card.desktop-agent .desktop-agent-panel { position: relative; inset: auto; flex-basis: 320px; min-width: 0; overflow-y: auto; overscroll-behavior: contain; box-shadow: none; }
+.desktop-agent-panel > section { min-width: 0; }
+.desktop-agent-panel > section > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--dee-separator); }
+.desktop-model-form { padding: 16px; }
+.desktop-model-form fieldset { display: grid; gap: 14px; }
+.desktop-model-form label { flex-direction: column; align-items: stretch; gap: 6px; margin: 0; }
+.desktop-model-form .settings-save { margin-top: 16px; }
+.desktop-agent-job { margin: 0 16px; padding: 16px 0; border-bottom: 1px solid var(--dee-separator); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.desktop-agent-job > header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin-bottom: 8px; color: var(--text-muted); font-size: 11px; }
+.desktop-agent-job > header strong { font-weight: 500; }
+.desktop-agent-job [data-status="failed"] { color: var(--danger); }
+.desktop-agent-job [data-status="done"] { color: var(--success); }
+.desktop-agent-job details { margin-top: 10px; }
+.desktop-agent-job summary { min-height: 40px; padding-block: 8px; cursor: pointer; color: var(--text-muted); }
+.desktop-agent-job .md { min-width: 0; }
+.desktop-agent-job .md pre { max-width: 100%; overflow: auto; }
+.desktop-agent-job-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.desktop-agent-job-actions button:first-child { background: var(--primary-light); color: var(--primary); }
+.desktop-agent button:focus-visible, .desktop-agent summary:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+@media (max-width: 1000px) {
+  #mascot-card.desktop-agent > .workspace-frame { flex-direction: column; overflow-y: auto; }
+  #mascot-card.desktop-agent .chat-column { flex: 1 0 65dvh; min-height: 400px; }
+  #mascot-card.desktop-agent .desktop-agent-panel { flex: none; width: 100%; height: auto; border-left: 0; border-top: 1px solid var(--shell-divider); overflow: visible; }
+  .desktop-model-form fieldset { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .desktop-agent-controls { flex: 1 1 auto; }
+  .desktop-agent-controls .header-button { padding-inline: 8px; }
+}
+@media (max-width: 520px) {
+  #mascot-card.desktop-agent .desktop-agent-header { padding-inline: 16px; }
+  #mascot-card.desktop-agent[data-desktop] .desktop-agent-header { padding-top: 48px; }
+  #mascot-card.desktop-agent .desktop-agent-controls { padding-right: 0; }
+  .desktop-agent-controls { width: 100%; }
+  .desktop-agent-server { flex: 1 1 100%; }
+  .desktop-model-form fieldset { grid-template-columns: minmax(0, 1fr); }
+  .desktop-agent-controls button, .desktop-agent-job-actions button { min-height: 44px; }
+}

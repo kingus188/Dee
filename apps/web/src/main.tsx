@@ -1,5 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./ui/App.js";
+import { DesktopAgent } from "./desktop/DesktopAgent.js";
+import { desktopAgentBridge } from "./desktop/bridge.js";
 import { applyAppearance, readAppearance } from "./settings/appearance.js";
 
 await Promise.all(Array.from(document.querySelectorAll<HTMLLinkElement>('link[as="style"]'), link => {
@@ -11,4 +13,4 @@ await Promise.all(Array.from(document.querySelectorAll<HTMLLinkElement>('link[as
   });
 }));
 applyAppearance(readAppearance());
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(desktopAgentBridge() ? <DesktopAgent /> : <App />);

@@ -1,12 +1,15 @@
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { packager } from "@electron/packager";
+import { build } from "esbuild";
 import { root } from "./workspaces.js";
 import { verifyDesktopPackage } from "./desktop-smoke.js";
 import { buildMacLauncher } from "./desktop-launcher.js";
 
 const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 const name: string = manifest.productName;
+// The desktop must remain usable when its server is offline.
+await import("./build.js");
 const desktop = JSON.parse(await readFile(join(root, "apps/desktop/package.json"), "utf8"));
 const stage = await mkdtemp(join(root, ".build/desktop-stage-"));
 try {
@@ -14,11 +17,16 @@ try {
   await writeFile(join(stage, "package.json"), JSON.stringify({ name: manifest.name, productName: name, version: manifest.version, private: true, type: "module", main: "apps/desktop/dist/main.js" }, null, 2));
   await writeFile(join(stage, "LICENSE"), await readFile(join(root, "LICENSE"), "utf8") + "\nNative macOS launcher portions Copyright (c) 2022 Slack Technologies, Inc.; licensed under the MIT license above.\n");
   await cp(join(root, "apps/desktop/assets"), join(stage, "apps/desktop/assets"), { recursive: true });
-  for (const name of ["connection.html", "connection.js"]) await cp(join(root, "apps/desktop", name), join(stage, "apps/desktop", name));
+  for (const name of ["connection.html", "connection.js", "connection-status.html", "connection-status.js"]) await cp(join(root, "apps/desktop", name), join(stage, "apps/desktop", name));
   await mkdir(join(stage, "apps/desktop/dist"), { recursive: true });
   await cp(join(root, "apps/desktop/dist"), join(stage, "apps/desktop/dist"), {
     recursive: true, filter: path => !/\.(?:map|ts|tsbuildinfo)$/.test(path),
   });
+  // Bundle Pi and its installed runtime dependencies; never copy workspace data or credentials.
+  await build({ entryPoints: [join(root, "apps/desktop/dist/main.js")], outfile: join(stage, "apps/desktop/dist/main.js"),
+    bundle: true, format: "esm", platform: "node", target: "node22", packages: "bundle", external: ["electron"],
+    banner: { js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);' } });
+  await cp(join(root, "apps/web/dist"), join(stage, "apps/web/dist"), { recursive: true, filter: path => !/\.(?:map|ts|tsbuildinfo)$/.test(path) });
   const outputs = await packager({
     dir: stage, out: join(root, "dist/desktop"), name,
     executableName: name, appBundleId: "com.pi-durable.assistant",

@@ -1,4 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session, shell, protocol, net } from "electron";
+import { registerDesktopAgent } from "./agent-ipc.js";
+import type { openDesktopAgent } from "./local-agent.js";
+import { pathToFileURL } from "node:url";
 import { LocalSkillCatalog } from "./skills/catalog.js";
 import { registerLocalSkills } from "./skills-ipc.js";
 import { connectionStatusPage } from "./connection-status.js";
@@ -16,7 +19,7 @@ import { selectServer } from "./network.js";
 // Electron captures this name for safeStorage before ready; keep the existing keychain identity.
 app.setName("Pi Durable Assistant");
 // Keep existing connection settings, certificate pins and local skill state across the rename.
-const userData = join(app.getPath("appData"), "Pi Durable Assistant");
+const userData = app.commandLine.getSwitchValue("user-data-dir") || join(app.getPath("appData"), "Pi Durable Assistant");
 mkdirSync(userData, { recursive: true });
 app.setPath("userData", userData);
 const icon = fileURLToPath(new URL("../assets/icon.png", import.meta.url));
@@ -30,6 +33,25 @@ let password: string | undefined;
 let startupError: string | undefined;
 let stopNotifications = () => {};
 let initialized = false;
+const localUrl = "dee://local/";
+protocol.registerSchemesAsPrivileged([{ scheme: "dee", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+let localWindow: BrowserWindow | undefined;
+let localAgent: Awaited<ReturnType<typeof openDesktopAgent>> | undefined;
+let quitting = false;
+function showLocalWindow() {
+  if (localWindow && !localWindow.isDestroyed()) { if (localWindow.isMinimized()) localWindow.restore(); localWindow.show(); localWindow.focus(); return; }
+  const current = new BrowserWindow({ title: "Dee · 小 D", width: 1440, height: 920, minWidth: 720, minHeight: 560, icon,
+    titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 19 }, backgroundColor: "#f6f8fc",
+    webPreferences: { preload: fileURLToPath(new URL("./agent-preload.cjs", import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false } });
+  localWindow = current;
+  current.on("closed", () => { localWindow = undefined; });
+  current.webContents.setWindowOpenHandler(({ url }) => { if (isExternalUrl(url)) void shell.openExternal(url); return { action: "deny" }; });
+  current.webContents.on("will-navigate", (event, url) => { if (url.split("#")[0] !== localUrl) event.preventDefault(); });
+  current.webContents.on("will-redirect", event => event.preventDefault());
+  current.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  current.webContents.session.setPermissionCheckHandler(() => false);
+  void current.loadURL(localUrl).catch(error => console.error("Local workspace failed to load", error));
+}
 const desktopPartition = "persist:desktop-web";
 let mailNotificationLabel = "邮件提醒：等待服务连接";
 
@@ -139,10 +161,7 @@ async function connect(initialError = startupError) {
 
 function showMainWindow() {
   if (!initialized) return;
-  if (window && !window.isDestroyed()) {
-    if (window.isMinimized()) window.restore();
-    window.show(); window.focus();
-  } else void connect();
+  showLocalWindow();
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -150,7 +169,10 @@ else {
   app.on("second-instance", showMainWindow);
   app.on("activate", showMainWindow);
   app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-  app.on("before-quit", () => { stopNotifications(); });
+  app.on("before-quit", event => {
+    stopNotifications();
+    if (localAgent && !quitting) { event.preventDefault(); quitting = true; void localAgent.close().catch(error => console.error("Local Agent shutdown failed", error)).finally(() => app.quit()); }
+  });
   void app.whenReady().then(async () => {
     app.setName("Dee");
     app.dock?.setIcon(icon);
@@ -237,9 +259,33 @@ else {
       catalog: new LocalSkillCatalog({ home: app.getPath("home"), stateFile: join(app.getPath("userData"), "local-skills.json") }),
       getWindow: () => window, getOrigin: () => activeOrigin,
     });
+    const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
+    protocol.handle("dee", async request => {
+      const url = new URL(request.url);
+      if (url.hostname !== "local" || request.method !== "GET") return new Response("Not found", { status: 404 });
+      const relative = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+      if (relative.includes("\\") || relative.split("/").some(part => part === "..")) return new Response("Not found", { status: 404 });
+      const response = await net.fetch(pathToFileURL(join(webRoot, relative)).href);
+      const headers = new Headers(response.headers);
+      headers.set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'");
+      return new Response(response.body, { status: response.status, headers });
+    });
+    showLocalWindow();
+    localAgent = await registerDesktopAgent({ ipc: ipcMain, directory: app.getPath("userData"), localUrl,
+      getWindow: () => localWindow, serverId: () => config.url, openServer: () => connect(), openConnection: showConnection,
+      request: async (path, body, serverId) => {
+        if (serverId && serverId !== config.url) throw new Error("任务属于之前的服务器，请切回原服务器后继续");
+        const target = new URL(path, activeOrigin);
+        if (target.origin !== activeOrigin || !target.pathname.startsWith("/api/peers/")) throw new Error("委派服务器地址无效");
+        const response = await web.fetch(target.href, { method: body === undefined ? "GET" : "POST", redirect: "error", signal: AbortSignal.timeout(15000),
+          headers: { "content-type": "application/json", origin: activeOrigin, ...(basicAuth(config.username, password) ? { authorization: basicAuth(config.username, password)! } : {}) },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+        if (!response.ok) throw new Error(response.status === 401 ? "双端协作需要服务器认证，请检查连接设置" : `双端协作请求失败（${response.status}）`);
+        return response.json();
+      } });
     Menu.setApplicationMenu(null);
     initialized = true;
-    await connect(startupError);
+    showLocalWindow();
   }).catch(error => {
     console.error("Desktop initialization failed", error);
     initialized = true;

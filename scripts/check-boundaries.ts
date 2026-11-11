@@ -35,7 +35,7 @@ for (const workspace of workspacePaths()) {
   const folder = resolve(root, workspace), src = resolve(folder, "src");
   const pkg = JSON.parse(await readFile(resolve(folder, "package.json"), "utf8")) as { name: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
   const dependencies = new Set(Object.keys(pkg.dependencies ?? {}));
-  const allowed: Record<string, string[]> = { "packages/contracts": [], "packages/runtime": [], "packages/features": ["@assistant/runtime", "@assistant/contracts"], "packages/channel-wechat": ["@assistant/runtime"], "apps/web": ["@assistant/contracts"], "apps/desktop": ["@assistant/contracts"] };
+  const allowed: Record<string, string[]> = { "packages/contracts": [], "packages/runtime": [], "packages/features": ["@assistant/runtime", "@assistant/contracts"], "packages/channel-wechat": ["@assistant/runtime"], "apps/web": ["@assistant/contracts"], "apps/desktop": ["@assistant/contracts", "@assistant/runtime"] };
   for (const dependency of dependencies) {
     if (workspace === "packages/contracts" || (dependency.startsWith("@assistant/") && allowed[workspace] && !allowed[workspace].includes(dependency))) errors.push(pkg.name + ": 禁止依赖 " + dependency);
   }

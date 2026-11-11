@@ -15,6 +15,7 @@ import { teamsTriageApi } from "../teams-triage-api.js";
 import { teamsConversationsApi } from "../teams-conversations-api.js";
 import { createWorkspace } from "./workspace.js";
 import { createDaylightExecution } from "./daylight-execution.js";
+import { peerApi } from "../peer-api.js";
 
 // HTTP 与 WebSocket 共用用例和错误语义。
 export function createApi(context: AppContext) {
@@ -26,6 +27,8 @@ export function createApi(context: AppContext) {
   const { dailyReports } = context;
   async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}) {
     const path = url.pathname;
+    const peerResult = await peerApi(context, method, url, body);
+    if (peerResult) return peerResult;
     if (method === "GET" && path === "/api/goals") return { status: 200, data: { items: (await harness.snapshot(Goals, ctx))?.items ?? [] } };
     const newGoal = path.match(/^\/api\/conversations\/(\d+)\/goals$/);
     const goalControl = path.match(/^\/api\/goals\/([0-9a-f-]+)\/(resume|cancel|accept)$/i);

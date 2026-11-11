@@ -150,7 +150,7 @@ Future work focuses on identity, expression and sustained collaboration. These a
 | Directory | Responsibility |
 | --- | --- |
 | `apps/web` | Xiao D's avatar, workspace, conversation interface and interactions |
-| `apps/desktop` | Electron API client, connection settings, local skills and system notifications |
+| `apps/desktop` | Local Pi Agent with independent model configuration, bundled UI, bidirectional server delegation, local skills and system notifications |
 | `apps/server` | API backend, data, task scheduling and messaging integrations |
 | `packages/contracts` | Shared frontend/backend protocol types |
 | `packages/runtime` | Model integration, sessions and the durable runtime |

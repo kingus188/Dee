@@ -18,7 +18,9 @@ export function verifyDesktopPackage(directory: string, name: string) {
     import { pathToFileURL } from "node:url";
     const entry = pathToFileURL(process.argv[1]);
     const root = new URL("../../../", entry);
-    assert.deepEqual((await readdir(new URL("apps/", root))).sort(), ["desktop"]);
+    assert.deepEqual((await readdir(new URL("apps/", root))).sort(), ["desktop", "web"]);
+    await readFile(new URL("apps/web/dist/index.html", root));
+    await readFile(new URL("./agent-preload.cjs", entry));
     assert.deepEqual((await readdir(root)).sort(), ["LICENSE", "apps", "package.json"]);
     const icon = await readFile(new URL("../assets/icon.png", entry));
     assert.equal(icon.subarray(1, 4).toString(), "PNG");

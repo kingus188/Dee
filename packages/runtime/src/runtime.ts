@@ -7,13 +7,13 @@ import { AgentDoc, configure, Harness, createRegistry } from "@earendil-works/pi
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { Meta } from "./documents.js";
 
-export type RuntimeOptions = { dataDir: string; models: Models; agentModel: ModelRef; extensions: readonly Extension[]; onReport: (error: unknown) => void; resume?: boolean; beforeResume?: (runtime: Runtime) => Promise<void> };
+export type RuntimeOptions = { dataDir: string; models: Models; agentModel: ModelRef; extensions: readonly Extension[]; onReport: (error: unknown) => void; resume?: boolean; beforeResume?: (runtime: Runtime) => Promise<void>; env?: NonNullable<Parameters<typeof Harness.open>[1]>["env"] };
 export async function openRuntime(options: RuntimeOptions, context: Context): Promise<Runtime> {
   await mkdir(options.dataDir, { recursive: true });
   const registry = createRegistry();
   for (const extension of options.extensions) registry.install(extension);
   const storage = await openNodeSqliteStorage(join(options.dataDir, "agent.sqlite"));
-  const harness = await Harness.open(storage, { models: options.models, registry, onReport: options.onReport }, context);
+  const harness = await Harness.open(storage, { models: options.models, registry, env: options.env, onReport: options.onReport }, context);
   try {
     const root = await harness.root(context, { agent: { model: options.agentModel } });
     await root.commit(async (tx) => {
