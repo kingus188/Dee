@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../" : "../../", import.meta.url));
 const target = resolve(root, "apps/web/dist");
 await mkdir(target, { recursive: true });
-for (const name of ["index.html", "style.css", "tasks.css", "workspace.css", "chat.css", "teams-conversations.css", "daily-reports.css", "daylight.css", "task-workspace.css", "today.css", "inbox.css", "notifications.css", "notes.css", "editor.css", "desktop-agent.css", "prototype.css"]) {
+for (const name of ["index.html", "style.css", "tasks.css", "workspace.css", "chat.css", "teams-conversations.css", "daily-reports.css", "daylight.css", "task-workspace.css", "today.css", "inbox.css", "notifications.css", "notes.css", "editor.css", "desktop-agent.css", "lane-editor.css", "prototype.css"]) {
   const source = await readFile(resolve(root, "apps/web/public", name), "utf8");
   // Keep authored sizes intact while allowing one font preference across all pages.
   const content = name.endsWith(".css") ? source
@@ -56,7 +56,17 @@ await removeStaleModules(target, resolve(root, "apps/web/src"));
 const testOutput = resolve(root, "apps/web/dist-tests");
 if (existsSync(testOutput)) await removeStaleModules(testOutput, resolve(root, "apps/web/tests"));
 
+// Keep upstream TypeScript separate from the host type-checking contract.
+const laneKernel = resolve(root, "apps/web/vendor/open-markdown-lane/kernel.ts");
+await build({
+  entryPoints: [laneKernel], outfile: resolve(target, "editor/lane/kernel.js"),
+  bundle: true, packages: "external", format: "esm", platform: "browser", target: "es2023",
+});
+await copyFile(resolve(root, "apps/web/vendor/open-markdown-lane/LICENSE"), resolve(target, "assets/open-markdown-lane-LICENSE"));
 const result = await build({
+  plugins: [{ name: "lane-kernel", setup(context) {
+    context.onResolve({ filter: /^\.\/kernel\.js$/ }, args => args.importer.endsWith("/lane/LaneMarkdownEditor.tsx") ? { path: laneKernel } : undefined);
+  } }],
   entryPoints: { app: resolve(root, "apps/web/src/main.tsx") }, outdir: resolve(target, "assets"),
   entryNames: "[name]-[hash]", chunkNames: "chunk-[hash]", splitting: true, metafile: true,
   bundle: true, format: "esm", platform: "browser", target: "es2023", jsx: "automatic",

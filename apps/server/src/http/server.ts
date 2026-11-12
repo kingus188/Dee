@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import type { AppContext } from "../application/context.js";
 import { HttpError } from "../errors.js";
-import { secureMatch } from "./auth.js";
+import { pairedPeer, secureMatch } from "./auth.js";
 import { readBody, sendJson } from "./io.js";
 import { createRouter } from "./router.js";
 import { createApi } from "../application/api.js";
@@ -30,7 +30,10 @@ export function createHttpServer(context: AppContext) {
       return sendJson(res, isInputError ? 400 : 503, { error: isInputError ? error.message : "微信消息暂未接收，请重试" });
     }
   }
-	const authentication = browserSessions.authenticate(req);
+  const peerRoute = req.url?.split("?")[0].startsWith("/api/peers/");
+  const paired = peerRoute && pairedPeer(req, config);
+	const authentication = paired ? "peer" : browserSessions.authenticate(req);
+	if (peerRoute && !paired && !config.password) return sendJson(res, 401, { error: "双端协作需要设备配对" });
 	if (!authentication) {
 		res.writeHead(401, { "www-authenticate": 'Basic realm="pi-durable-assistant", charset="UTF-8"' });
 		return res.end("需要口令");

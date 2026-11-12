@@ -7,6 +7,7 @@ import { openTeamsArchive } from "./teams-archive-store.js";
 import { teamsInboxRecords } from "./teams-records.js";
 import { createTeamsNotificationBatches, type TeamsNotice } from "./teams-notification-batches.js";
 import { createTeamsTriageStore } from "./teams-triage-store.js";
+import { createTeamsDirectReplies } from "./teams-direct-replies.js";
 
 export type TeamsMessage = {
   id: string; chatId: string; chatType: string; senderId: string; senderName: string;
@@ -105,12 +106,15 @@ export function openTeamsStore(dataDir: string) {
 
   let notifications: ReturnType<typeof createTeamsNotificationBatches<ReturnType<typeof row>>>;
   let triage: ReturnType<typeof createTeamsTriageStore>;
+  let directReplies: ReturnType<typeof createTeamsDirectReplies>;
+  try { directReplies = createTeamsDirectReplies(db); } catch (error) { db.close(); throw error; }
   try { triage = createTeamsTriageStore(db); } catch (error) { db.close(); throw error; }
   try { notifications = createTeamsNotificationBatches(db, row, () => triage.settings().normalDigestMinutes * 60_000); } catch (error) { db.close(); throw error; }
   return {
     archive,
     notifications,
     triage,
+    directReplies,
     sourceRevision: sources.revision,
     sourceAllowed: sources.allowed,
     revokeMessage(chatId: string, messageId: string) {

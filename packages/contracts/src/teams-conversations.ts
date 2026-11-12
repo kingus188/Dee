@@ -1,6 +1,6 @@
 import type { TeamsTriageItem } from "./teams-triage.js";
 
-/** Read-only, online Teams views. Counts describe loaded pages, never unread state. */
+/** Online Teams views. Counts describe loaded pages, never unread state. */
 export type TeamsConversation = {
   id: string;
   title: string;
@@ -11,9 +11,17 @@ export type TeamsConversation = {
 };
 export type TeamsConversationList = {
   available: boolean;
+  canSend?: boolean;
   items: TeamsConversation[];
   nextCursor: string | null;
   fetchedAt: string;
+};
+export type TeamsConversationReply = { requestId: string; chatId: string; text: string };
+export type TeamsConversationReplyResult = {
+  requestId: string;
+  chatId: string;
+  state: "sending" | "sent" | "rejected" | "unknown";
+  error?: string;
 };
 export type TeamsConversationMedia = {
   id: string; name: string; kind: "image" | "file"; status: string; url?: string; previewUrl?: string;

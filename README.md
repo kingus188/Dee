@@ -53,9 +53,9 @@ These examples require a real model. Results depend on the selected model and th
 | “Which Teams messages still need my reply?” | Search Teams messages collected by the backend; account configuration and permissions are required |
 | “Show me today’s Outlook mail and read Zhang’s quotation.” | Query and read mail from the configured Microsoft 365 inbox; this is read-only |
 
-The web interface supports multiple conversations, conversation forks, streamed replies, and image and text attachments. The fixed workspace pages are Today, Daylight tasks, notifications, long-term memory, notes, local skills, daily reports, tasks and reminders, and settings. They do not display a chat composer. Notes, memories, remote skill records, reminders, schedules, background task instructions, daily reports and Daylight notes use the shared Tiptap document editor with Markdown source editing, nested lists and task lists, tables, formulas, code highlighting, images and footnotes.
+The web interface supports multiple conversations, conversation forks, streamed replies, and image and text attachments. The fixed workspace pages are Today, Daylight tasks, notifications, long-term memory, notes, local skills, daily reports, tasks and reminders, and settings. They do not display a chat composer. Notes, memories, remote skill records, reminders, schedules, background task instructions, daily reports and Daylight notes use the shared Open Markdown Lane document editor with Markdown source editing, nested lists and task lists, tables, formulas, code highlighting, images and footnotes.
 
-Opening, reading or switching editor modes does not rewrite the original text. Unchanged blocks keep their original Markdown; changed structures are serialized as Markdown. Source whitespace and line breaks are preserved where possible, and undo can return to the original source. Concurrent edits reject stale writes so the current text can be copied, reloaded and merged.
+Opening, reading or switching editor modes does not rewrite the original text. Edits update Markdown directly; unchanged lines retain their original line endings, and undo can return to the original source. Concurrent edits reject stale writes so the current text can be copied, reloaded and merged. Source provenance, integration contracts and validation are documented in [Lane editor integration](docs/LANE_EDITOR.md).
 
 Daylight stores projects and tasks in PostgreSQL and provides board, list and calendar views, priorities, due dates, labels, subtasks, drag sorting and rich-text notes. Agent tools and the UI use the same global data. Legacy SQLite Daylight data is imported once and retained as a read-only source. Older conversation todos are migrated once into a matching “History” project. The migration is idempotent.
 
@@ -150,7 +150,7 @@ Future work focuses on identity, expression and sustained collaboration. These a
 | Directory | Responsibility |
 | --- | --- |
 | `apps/web` | Xiao D's avatar, workspace, conversation interface and interactions |
-| `apps/desktop` | Local Pi Agent with independent model configuration, bundled UI, bidirectional server delegation, local skills and system notifications |
+| `apps/desktop` | Local Agents using their native configuration, bundled UI, bidirectional Pi server delegation, local skills and system notifications |
 | `apps/server` | API backend, data, task scheduling and messaging integrations |
 | `packages/contracts` | Shared frontend/backend protocol types |
 | `packages/runtime` | Model integration, sessions and the durable runtime |

@@ -86,3 +86,41 @@ test("tampered, duplicated, expired and other-server sessions cannot authorize r
   try { assert.equal((await fetch(server.origin + "/api/info", { headers: { cookie } })).status, 401); }
   finally { t.mock.timers.reset(); }
 });
+
+test("self-use mode allows anonymous HTTP and WebSocket with stale credentials while retaining origin and channel checks", { timeout: 15000 }, async t => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-self-use-"));
+  const config = readConfig({ NODE_ENV: "test", LLM_API: "faux", PI_OFFLINE: "1", DATA_DIR: dir, PORT: "0", DEMO_PASSWORD: password, AUTH_DISABLED: "1", NOTIFY_MODE: "off" });
+  const server = await startServer({ ...config, production: true }, "127.0.0.1");
+  t.after(async () => { await server.close(); await rm(dir, { recursive: true, force: true }); });
+  const origin = server.origin;
+  const stale = { authorization: "Basic " + Buffer.from("demo:old-password").toString("base64") };
+  for (const headers of [{}, stale]) {
+    for (const path of ["/", "/api/info"]) {
+      const response = await fetch(origin + path, { headers });
+      assert.equal(response.status, 200, path);
+      assert.equal(response.headers.get("www-authenticate"), null);
+      if (path === "/api/info") assert.equal(typeof (await response.json() as { pid: number }).pid, "number");
+      else assert.match(response.headers.get("content-type") ?? "", /text\/html/);
+    }
+  }
+  assert.equal((await fetch(origin + "/api/crash", { method: "POST", headers: { origin: "https://unrelated.invalid" } })).status, 403);
+  assert.equal((await fetch(origin + "/channels/wechat/incoming", { method: "POST" })).status, 401);
+  assert.equal(await rejectedSocket(origin, "", "https://unrelated.invalid"), 403);
+  const socket = new WebSocket(origin.replace(/^http/, "ws") + "/api/socket", { headers: { ...stale, origin }, handshakeTimeout: 3000 });
+  t.after(() => socket.terminate());
+  await once(socket, "open");
+  const received = once(socket, "message");
+  socket.send(JSON.stringify({ type: "request", id: "self-use-readonly", method: "GET", path: "/api/info" }));
+  const [data] = await received;
+  const response = JSON.parse(data.toString()) as { type: string; id: string; status: number };
+  assert.equal(response.type, "response");
+  assert.equal(response.id, "self-use-readonly");
+  assert.equal(response.status, 200);
+  const closed = once(socket, "close"); socket.close(1000); await closed;
+});
+
+test("production without a password still requires an explicit self-use opt-in", async () => {
+  for (const AUTH_DISABLED of [undefined, "0", "true"]) {
+    await assert.rejects(startServer(readConfig({ NODE_ENV: "production", AUTH_DISABLED })), /DEMO_PASSWORD/);
+  }
+});

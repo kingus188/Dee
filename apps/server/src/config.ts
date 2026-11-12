@@ -1,8 +1,12 @@
 export function readConfig(env: NodeJS.ProcessEnv) {
+  if (env.PEER_TOKEN && !/^[A-Za-z0-9_-]{43}$/.test(env.PEER_TOKEN)) throw new Error("PEER_TOKEN 格式无效");
   const api = env.LLM_API || "openai-completions";
   if (api === "faux" && env.NODE_ENV !== "test") throw new Error("模拟体验已停用，请配置真实模型；faux 仅供自动化测试使用");
+  const authDisabled = env.AUTH_DISABLED === "1";
   return {
-    port: Number(env.PORT || 3000), dataDir: env.DATA_DIR || "./data", password: env.DEMO_PASSWORD || "",
+    port: Number(env.PORT || 3000), dataDir: env.DATA_DIR || "./data", password: authDisabled ? "" : env.DEMO_PASSWORD || "",
+    authDisabled,
+    peerToken: env.PEER_TOKEN || "",
     databaseUrl: env.DATABASE_URL || process.env.DATABASE_URL || "", test: env.NODE_ENV === "test",
     production: env.NODE_ENV === "production",
     // PI_OFFLINE=1：无论数据库里怎么配，都强制关闭微信通道、Teams 发送和 Webhook 通知。测试和数据副本必须开启，避免连到真实账号。

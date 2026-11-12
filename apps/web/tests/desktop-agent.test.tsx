@@ -13,42 +13,216 @@ function snapshot(configured = true): DesktopAgentSnapshot {
 }
 function bridge(state: DesktopAgentSnapshot): DesktopAgentBridge {
   return {
-    snapshot: async () => structuredClone(state), saveModel: async () => ({ persistedKey: false }), send: async () => {},
+    snapshot: async () => structuredClone(state), send: async () => {},
     selectAgent: async () => {}, newSession: async () => {}, answerApproval: async () => {},
     chooseWorkspace: async () => {}, approve: async () => {}, reject: async () => {}, abort: async () => {},
     openServer: async () => {}, openConnection: async () => {},
   };
 }
 
-test("未配置模型禁止发送，密钥只经 IPC 提交且不回显", async t => {
-  const native = bridge(snapshot(false));
+test("明确目标的外部会话可在忙时批准排队，不要求 Pi 配置且不切换当前对话", async t => {
+  const state = snapshot(); state.agent = "codex"; state.busy = true; state.piConfigured = false;
+  state.messages = [{ id: "source", role: "user", text: "当前来源对话" }];
+  state.jobs = [{ id: "job", source: "server", target: state.nodeId, targetSession: { agent: "claude", sessionId: "target-session" }, task: "已有会话任务", status: "queued", createdAt: "now", updatedAt: "now" }];
+  const native = bridge(state);
+  const approve = t.mock.method(native, "approve", async () => { state.jobs[0]!.approved = true; });
+  const { dom, render } = await mount(t, <DesktopAgent />);
+  Object.defineProperty(dom.window, "desktopAgent", { value: native }); await render(<DesktopAgent />);
+  const document = dom.window.document;
+  const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === "批准 Claude Code 执行")!;
+  assert.ok(button, document.body.textContent!);
+  assert.equal(button.disabled, false); assert.match(document.body.textContent!, /target-session/);
+  await act(async () => button.click());
+  assert.equal(approve.mock.callCount(), 1); assert.match(document.body.textContent!, /等待空闲/);
+  assert.match(document.querySelector("#message-history")!.textContent!, /当前来源对话/);
+  assert.ok(!document.body.textContent!.includes("批准 Pi 执行"));
+});
+
+test("本机助手使用原生平台避让标题栏，不显示目录选择", async t => {
+  const native = { ...bridge(snapshot()), platform: "darwin" };
+  const { dom, render } = await mount(t, <DesktopAgent />);
+  Object.defineProperty(dom.window, "desktopAgent", { value: native });
+  await render(<DesktopAgent />);
+  const document = dom.window.document;
+  assert.equal(document.querySelector(".desktop-agent")!.getAttribute("data-desktop"), "darwin");
+  assert.equal(document.querySelector(".desktop-agent-workspace"), null);
+  assert.ok(!document.body.textContent!.includes("选择工作目录"));
+  assert.ok(!document.body.textContent!.includes("服务器工作区"));
+  const openServer = t.mock.method(native, "openServer", async () => {});
+  const server = [...document.querySelectorAll<HTMLButtonElement>(".desktop-agent-controls button")].find(button => button.textContent === "服务器")!;
+  await act(async () => server.click());
+  assert.equal(openServer.mock.callCount(), 1);
+});
+
+test("本机导航保留对话与草稿，服务器内容按路由打开，轮询不关闭更多菜单", async t => {
+  const state = snapshot();
+  state.serverConnected = true; state.collaboration = "ready";
+  state.messages = [{ id: "local", role: "user", text: "本机会话" }];
+  const native = bridge(state);
+  const { dom, render } = await mount(t, <DesktopAgent />);
+  Object.defineProperty(dom.window, "desktopAgent", { value: native });
+  await render(<DesktopAgent />);
+  const document = dom.window.document;
+  const frame = document.querySelector(".workspace-frame"), chat = document.querySelector(".chat-column");
+  const input = document.querySelector<HTMLTextAreaElement>("textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!.call(input, "尚未发送");
+    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  });
+  const open = t.mock.method(native, "openServer", async (_hash?: string) => {});
+  const send = t.mock.method(native, "send", async () => {});
+  const fresh = t.mock.method(native, "newSession", async () => {});
+  await act(async () => document.querySelector<HTMLAnchorElement>('[aria-label="继续对话"]')!.click());
+  assert.equal(open.mock.callCount(), 0);
+  for (const [label, hash] of [["Daylight 待办", "#tasks"], ["通知中心", "#activity"]]) {
+    await act(async () => document.querySelector<HTMLAnchorElement>(`[aria-label="${label}"]`)!.click());
+    assert.deepEqual(open.mock.calls.at(-1)!.arguments, [hash]);
+  }
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="更多菜单"]')!.click());
+  await render(<DesktopAgent />);
+  assert.equal(document.querySelector('[aria-label="更多菜单"]')!.getAttribute("aria-expanded"), "true");
+  await act(async () => document.querySelector<HTMLAnchorElement>('[aria-label="笔记"]')!.click());
+  assert.deepEqual(open.mock.calls.at(-1)!.arguments, ["#notes"]);
+  assert.equal(document.querySelector('[aria-label="更多菜单"]')!.getAttribute("aria-expanded"), "false");
+  assert.equal(document.querySelector(".workspace-frame"), frame);
+  assert.equal(document.querySelector(".chat-column"), chat);
+  assert.equal(input.value, "尚未发送");
+  assert.match(document.querySelector("#message-history")!.textContent!, /本机会话/);
+  assert.match(document.querySelector(".desktop-agent-server")!.textContent!, /双端已连接/);
+  assert.equal(send.mock.callCount(), 0); assert.equal(fresh.mock.callCount(), 0);
+  open.mock.mockImplementation(async () => { throw new Error("服务器未连接"); });
+  await act(async () => document.querySelector<HTMLAnchorElement>('[aria-label="Daylight 待办"]')!.click());
+  assert.match(document.querySelector('[role="alert"]')!.textContent!, /服务器未连接/);
+  assert.equal(input.disabled, false);
+});
+
+test("本机侧栏沿用原有展开和收起状态，切换不重建对话或丢失草稿", async t => {
+  const state = snapshot();
+  state.messages = [{ id: "local", role: "user", text: "正在继续的本机对话" }];
+  const native = bridge(state);
+  const { dom, render } = await mount(t, <DesktopAgent />);
+  Object.defineProperty(dom.window, "desktopAgent", { value: native });
+  await render(<DesktopAgent />);
+  const document = dom.window.document, shell = document.querySelector("#mascot-card"), frame = document.querySelector("main"), chat = document.querySelector(".chat-column");
+  const input = document.querySelector<HTMLTextAreaElement>(".chat-textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!.call(input, "还没发送");
+    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  });
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "true");
+  assert.match(document.querySelector(".history-list")!.textContent!, /正在继续的本机对话/);
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="收起历史对话"]')!.click());
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
+  assert.equal(dom.window.localStorage.getItem("dee.history.collapsed"), "true");
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="搜索对话"]')!.click());
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "true");
+  assert.equal(dom.window.localStorage.getItem("dee.history.collapsed"), "false");
+  assert.equal(document.querySelector("#mascot-card"), shell); assert.equal(document.querySelector("main"), frame); assert.equal(document.querySelector(".chat-column"), chat);
+  assert.equal(input.value, "还没发送");
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="收起历史对话"]')!.click());
+  await render(null); await render(<DesktopAgent />);
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
+});
+
+test("窄窗口侧栏使用原有覆盖布局，可用遮罩和 Escape 关闭并恢复焦点", async t => {
+  const { dom, render } = await mount(t, null);
+  Object.defineProperty(dom.window, "desktopAgent", { value: bridge(snapshot()) });
+  Object.defineProperty(dom.window, "matchMedia", { value: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) });
+  await render(<DesktopAgent />);
+  const document = dom.window.document;
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="展开历史对话"]')!.click());
+  assert.equal(document.querySelector('[aria-label="本机对话侧栏"]')!.getAttribute("aria-modal"), "true");
+  assert.ok(document.querySelector(".desktop-agent-content")!.hasAttribute("inert"));
+  await act(async () => document.querySelector<HTMLButtonElement>(".history-backdrop")!.click());
+  assert.equal(document.querySelector(".history-backdrop"), null);
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="展开历史对话"]')!.click());
+  await act(async () => document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
+  assert.equal(document.activeElement, document.querySelector(".sidebar-toggle"));
+  assert.equal(document.querySelector(".desktop-agent-content")!.hasAttribute("inert"), false);
+});
+
+test("本机侧栏与服务模式共用来源、搜索和分组布局，来源跳转不丢失本机对话", async t => {
+  const state = snapshot();
+  state.messages = [{ id: "local", role: "user", text: "本机待处理事项" }];
+  const native = bridge(state);
+  const openServer = t.mock.method(native, "openServer", async (_hash?: string) => {});
+  const { dom, render } = await mount(t, null);
+  Object.defineProperty(dom.window, "desktopAgent", { value: native });
+  await render(<DesktopAgent />);
+  const document = dom.window.document, chat = document.querySelector(".chat-column");
+  const panel = document.querySelector(".conversation-history")!;
+  assert.match(panel.querySelector(".history-search kbd")!.textContent!, /^(⌘K|Ctrl K)$/);
+  assert.equal(panel.querySelector(".history-heading")!.textContent, "当前对话");
+  assert.equal(panel.querySelector(".history-row-title")!.textContent, "本机待处理事项");
+  assert.equal(panel.querySelector(".conversation-new-button"), null, "Pi 不提供不支持的新会话操作");
+  const source = panel.querySelector<HTMLSelectElement>('[aria-label="切换对话来源"]')!;
+  assert.equal(source.value, "assistant");
+  await act(async () => {
+    source.value = "teams";
+    source.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  });
+  assert.deepEqual(openServer.mock.calls[0]!.arguments, ["#teams"]);
+  assert.equal(source.value, "assistant");
+  assert.equal(document.querySelector(".chat-column"), chat);
+  document.querySelector<HTMLTextAreaElement>("textarea")!.focus();
+  await act(async () => document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true })));
+  const search = panel.querySelector<HTMLInputElement>(".history-search input")!;
+  assert.equal(document.activeElement, search);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!.call(search, "不存在");
+    search.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  });
+  assert.equal(panel.querySelector(".history-list a"), null);
+  assert.match(panel.querySelector(".history-list")!.textContent!, /没有匹配的本机会话/);
+  await act(async () => document.querySelector<HTMLButtonElement>(".sidebar-toggle")!.click());
+  await act(async () => {
+    document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
+    await new Promise<void>(resolve => dom.window.requestAnimationFrame(() => resolve()));
+  });
+  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "true");
+  assert.equal(document.activeElement, search);
+  assert.equal(document.querySelector(".chat-column"), chat);
+});
+
+test("外部 Agent 的新会话沿用服务模式导航和侧栏入口，执行时禁用", async t => {
+  const state = snapshot();
+  state.agent = "codex";
+  const native = bridge(state), fresh = t.mock.method(native, "newSession", async () => {});
+  const { dom, render } = await mount(t, null);
+  Object.defineProperty(dom.window, "desktopAgent", { value: native });
+  await render(<DesktopAgent />);
+  const document = dom.window.document;
+  const buttons = [...document.querySelectorAll<HTMLButtonElement>(".workspace-compose, .conversation-new-button")];
+  assert.equal(buttons.length, 2);
+  for (const button of buttons) await act(async () => button.click());
+  assert.equal(fresh.mock.callCount(), 2);
+  await render(null);
+  state.busy = true;
+  await render(<DesktopAgent />);
+  assert.ok([...document.querySelectorAll<HTMLButtonElement>(".workspace-compose, .conversation-new-button")].every(button => button.disabled));
+});
+
+test("未配置 Pi 禁止发送，不再弹出或提供模型和密钥表单", async t => {
+  const state = snapshot(false);
+  state.error = "请先在 Pi 中选择默认模型，然后重新选择 Pi。";
+  const native = bridge(state);
   const { dom, render } = await mount(t, <DesktopAgent />);
   Object.defineProperty(dom.window, "desktopAgent", { value: native });
   await render(<DesktopAgent />);
   const document = dom.window.document;
   assert.equal(document.querySelector<HTMLButtonElement>('[aria-label="发送消息"]')!.disabled, true);
-  assert.ok(document.querySelector('[aria-label="本机模型设置"]'));
-  const secret = document.querySelector<HTMLInputElement>('[name="apiKey"]')!;
-  assert.equal(secret.type, "password"); assert.equal(secret.value, "");
-  const entered = String.fromCharCode(100, 117, 109, 109, 121);
-  secret.value = entered;
-  const save = t.mock.method(native, "saveModel", async () => ({ persistedKey: true }));
-  const original = globalThis.FormData, originalInput = globalThis.HTMLInputElement;
-  globalThis.FormData = dom.window.FormData;
-  globalThis.HTMLInputElement = dom.window.HTMLInputElement;
-  t.after(() => { globalThis.FormData = original; globalThis.HTMLInputElement = originalInput; });
-  await act(async () => { document.querySelector('[aria-label="本机模型设置"]')!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
-  assert.equal(save.mock.calls[0]!.arguments[0]!.apiKey, entered);
-  assert.equal(secret.value, "");
-  assert.ok(!document.body.textContent!.includes(entered));
+  assert.equal(document.querySelector('[aria-label="本机模型设置"]'), null);
+  assert.equal(document.querySelector('[name="apiKey"]'), null);
+  assert.equal(document.querySelector(".desktop-agent-panel"), null);
+  assert.match(document.querySelector('[role="alert"]')!.textContent!, /在 Pi 中选择默认模型/);
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="执行 Agent"]')!.click());
+  assert.equal(document.querySelector(".agent-picker-footer button"), null);
+  const select = t.mock.method(native, "selectAgent", async () => {});
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="选择 Pi"]')!.click());
+  assert.deepEqual(select.mock.calls[0]!.arguments, [{ kind: "pi" }]);
   assert.equal(dom.window.localStorage.length, 0);
-  save.mock.restore();
-  t.mock.method(native, "saveModel", async () => { throw new Error(entered); });
-  secret.value = entered;
-  await act(async () => { document.querySelector('[aria-label="本机模型设置"]')!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
-  assert.match(document.querySelector('[role="alert"]')!.textContent!, /模型保存失败/);
-  assert.ok(!document.body.textContent!.includes(entered));
-  assert.equal(secret.value, "");
 });
 
 test("发送防重复，未确认重试使用同一 UUID，服务端任务逐项批准或拒绝", async t => {
@@ -228,94 +402,4 @@ test("picker prevents duplicate switches and keeps the current selection after a
   assert.match(picker.textContent!, /Pi.*local-model/);
   assert.equal(picker.disabled, false);
   assert.equal(document.querySelector('[aria-label="选择 Pi"]')!.getAttribute("aria-pressed"), "true");
-});
-
-test("本机侧栏沿用原有展开和收起状态，切换不重建对话或丢失草稿", async t => {
-  const state = snapshot();
-  state.messages = [{ id: "local", role: "user", text: "正在继续的本机对话" }];
-  const native = bridge(state);
-  const { dom, render } = await mount(t, <DesktopAgent />);
-  Object.defineProperty(dom.window, "desktopAgent", { value: native });
-  await render(<DesktopAgent />);
-  const document = dom.window.document, shell = document.querySelector("#mascot-card"), frame = document.querySelector("main"), chat = document.querySelector(".chat-column");
-  const input = document.querySelector<HTMLTextAreaElement>(".chat-textarea")!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!.call(input, "还没发送");
-    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  });
-  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "true");
-  assert.match(document.querySelector(".history-list")!.textContent!, /正在继续的本机对话/);
-  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="收起历史对话"]')!.click());
-  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
-  assert.equal(dom.window.localStorage.getItem("dee.history.collapsed"), "true");
-  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="搜索对话"]')!.click());
-  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "true");
-  assert.equal(dom.window.localStorage.getItem("dee.history.collapsed"), "false");
-  assert.equal(document.querySelector("#mascot-card"), shell); assert.equal(document.querySelector("main"), frame); assert.equal(document.querySelector(".chat-column"), chat);
-  assert.equal(input.value, "还没发送");
-  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="收起历史对话"]')!.click());
-  await render(null); await render(<DesktopAgent />);
-  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
-});
-
-test("窄窗口侧栏使用原有覆盖布局，可用遮罩和 Escape 关闭并恢复焦点", async t => {
-  const { dom, render } = await mount(t, null);
-  Object.defineProperty(dom.window, "desktopAgent", { value: bridge(snapshot()) });
-  Object.defineProperty(dom.window, "matchMedia", { value: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) });
-  await render(<DesktopAgent />);
-  const document = dom.window.document;
-  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
-  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="展开历史对话"]')!.click());
-  assert.equal(document.querySelector('[aria-label="本机对话侧栏"]')!.getAttribute("aria-modal"), "true");
-  assert.ok(document.querySelector(".desktop-agent-content")!.hasAttribute("inert"));
-  await act(async () => document.querySelector<HTMLButtonElement>(".history-backdrop")!.click());
-  assert.equal(document.querySelector(".history-backdrop"), null);
-  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="展开历史对话"]')!.click());
-  await act(async () => document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
-  assert.equal(document.activeElement, document.querySelector(".sidebar-toggle"));
-  assert.equal(document.querySelector(".desktop-agent-content")!.hasAttribute("inert"), false);
-});
-
-test("本机侧栏与服务模式共用来源、搜索和分组布局，来源跳转不丢失本机对话", async t => {
-  const state = snapshot();
-  state.messages = [{ id: "local", role: "user", text: "本机待处理事项" }];
-  const native = bridge(state);
-  const openServer = t.mock.method(native, "openServer", async (_hash?: string) => {});
-  const { dom, render } = await mount(t, null);
-  Object.defineProperty(dom.window, "desktopAgent", { value: native });
-  await render(<DesktopAgent />);
-  const document = dom.window.document, chat = document.querySelector(".chat-column");
-  const panel = document.querySelector(".conversation-history")!;
-  assert.match(panel.querySelector(".history-search kbd")!.textContent!, /^(⌘K|Ctrl K)$/);
-  assert.equal(panel.querySelector(".history-heading")!.textContent, "当前对话");
-  assert.equal(panel.querySelector(".history-row-title")!.textContent, "本机待处理事项");
-  assert.equal(panel.querySelector(".conversation-new-button"), null, "Pi 不提供不支持的新会话操作");
-  const source = panel.querySelector<HTMLSelectElement>('[aria-label="切换对话来源"]')!;
-  assert.equal(source.value, "assistant");
-  await act(async () => {
-    source.value = "teams";
-    source.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-  });
-  assert.deepEqual(openServer.mock.calls[0]!.arguments, ["#teams"]);
-  assert.equal(source.value, "assistant");
-  assert.equal(document.querySelector(".chat-column"), chat);
-  document.querySelector<HTMLTextAreaElement>("textarea")!.focus();
-  await act(async () => document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true })));
-  const search = panel.querySelector<HTMLInputElement>(".history-search input")!;
-  assert.equal(document.activeElement, search);
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!.call(search, "不存在");
-    search.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  });
-  assert.equal(panel.querySelector(".history-list a"), null);
-  assert.match(panel.querySelector(".history-list")!.textContent!, /没有匹配的本机会话/);
-  await act(async () => document.querySelector<HTMLButtonElement>(".sidebar-toggle")!.click());
-  await act(async () => {
-    document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
-    await new Promise<void>(resolve => dom.window.requestAnimationFrame(() => resolve()));
-  });
-  assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "true");
-  assert.equal(document.activeElement, search);
-  assert.equal(document.querySelector(".chat-column"), chat);
 });

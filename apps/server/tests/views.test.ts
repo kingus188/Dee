@@ -66,3 +66,14 @@ test("recorded epoch and boundary timestamps are not replaced or inferred from e
   assert.deepEqual(view.entries.map(entry => entry.timestamp), timestamps);
   assert.deepEqual(view.entries.map(entry => entry.id), [0, 1, 2, 3, 4]);
 });
+
+test("peer continuations remain visible once alongside legacy passive results in their source thread", async () => {
+  const view = await simplify([
+    { id: 1, kind: "app.peer-result", data: { text: "legacy result" } },
+    { id: 2, kind: "app.peer-result", data: { jobId: "job", status: "done", result: "target result" }, model: [{ role: "user", content: "continuation from target result", timestamp: 1793964600123 }] },
+  ]);
+  assert.deepEqual(view.entries, [
+    { id: 1, kind: "assistant", text: "legacy result" },
+    { id: 2, kind: "user", text: "continuation from target result", attachments: [], timestamp: 1793964600123 },
+  ]);
+});

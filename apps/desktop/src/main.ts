@@ -1,5 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session, shell, protocol, net } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session, shell, protocol, net, safeStorage } from "electron";
 import { registerDesktopAgent } from "./agent-ipc.js";
+import { createAgentRequest, openPeerCredentials } from "./peer-connection.js";
 import type { openDesktopAgent } from "./local-agent.js";
 import { pathToFileURL } from "node:url";
 import { LocalSkillCatalog } from "./skills/catalog.js";
@@ -24,6 +25,10 @@ mkdirSync(userData, { recursive: true });
 app.setPath("userData", userData);
 const icon = fileURLToPath(new URL("../assets/icon.png", import.meta.url));
 const connectionPage = new URL("../connection.html", import.meta.url).href;
+const connectionStatusPageFile = new URL("../connection-status.html", import.meta.url).href;
+function isLocalConnectionPage(url: string) {
+  return url.split("?")[0] === connectionPage || url.split("?")[0] === connectionStatusPageFile;
+}
 let window: BrowserWindow | undefined;
 let settings: BrowserWindow | undefined;
 let config: ConnectionConfig = { url: "http://127.0.0.1:3000" };
@@ -38,18 +43,6 @@ protocol.registerSchemesAsPrivileged([{ scheme: "dee", privileges: { standard: t
 let localWindow: BrowserWindow | undefined;
 let localAgent: Awaited<ReturnType<typeof openDesktopAgent>> | undefined;
 let quitting = false;
-async function showServerWorkspace(hash = "") {
-  if (!window || window.isDestroyed() || !isAppUrl(window.webContents.getURL().split("#")[0] ?? "", activeOrigin)) await connect();
-  const current = window;
-  if (!current || current.isDestroyed()) throw new Error("服务器窗口未打开，请重试。");
-  if (hash) {
-    if (!isAppUrl(current.webContents.getURL().split("#")[0] ?? "", activeOrigin)) throw new Error("服务器未连接，请检查连接设置后重试。");
-    await current.loadURL(new URL(hash, activeOrigin).href);
-  }
-  if (current.isMinimized()) current.restore();
-  current.show(); current.focus();
-}
-
 function showLocalWindow() {
   if (localWindow && !localWindow.isDestroyed()) { if (localWindow.isMinimized()) localWindow.restore(); localWindow.show(); localWindow.focus(); return; }
   const current = new BrowserWindow({ title: "Dee · 小 D", width: 1440, height: 920, minWidth: 720, minHeight: 560, icon,
@@ -91,6 +84,12 @@ function showConnection() {
 
 function trustedSettings(event: IpcMainInvokeEvent) {
   return Boolean(settings && event.sender === settings.webContents && event.senderFrame === settings.webContents.mainFrame && event.senderFrame.url === connectionPage);
+}
+
+function trustedLocalConnection(event: IpcMainInvokeEvent) {
+  const frame = event.senderFrame;
+  return Boolean(frame && frame === event.sender.mainFrame && isLocalConnectionPage(frame.url) &&
+    ((settings && event.sender === settings.webContents) || (window && event.sender === window.webContents)));
 }
 
 async function connect(initialError = startupError) {
@@ -137,6 +136,10 @@ async function connect(initialError = startupError) {
   });
   current.webContents.on("did-finish-load", () => {
     if (window !== current || !isAppUrl(current.webContents.getURL().split("#")[0] ?? "", origin)) return;
+    if (/\\b(?:404|502|503|504)\\b|not found|cpolar/i.test(current.webContents.getTitle())) {
+      showFailure();
+      return;
+    }
     failed = false;
     stopNotifications();
     if (!Notification.isSupported()) {
@@ -150,7 +153,7 @@ async function connect(initialError = startupError) {
     }, (input, init) => session.fromPartition(desktopPartition).fetch(String(input), init), showMailNotificationStatus);
   });
   try {
-    await current.loadURL(connectionStatusPage(origin, initialError, !initialError));
+    await current.loadURL(connectionStatusPage(origin, initialError));
     if (initialError || window !== current) return;
     const selectedConfig = config;
     const selected = await selectServer(config, pin, basicAuth(config.username, password));
@@ -169,6 +172,18 @@ async function connect(initialError = startupError) {
     }
   } catch { showFailure(); }
   finally { loading = false; }
+}
+
+async function showServerWorkspace(hash = "") {
+  if (!window || window.isDestroyed() || !isAppUrl(window.webContents.getURL().split("#")[0] ?? "", activeOrigin)) await connect();
+  const current = window;
+  if (!current || current.isDestroyed()) throw new Error("服务器窗口未打开，请重试。");
+  if (hash) {
+    if (!isAppUrl(current.webContents.getURL().split("#")[0] ?? "", activeOrigin)) throw new Error("服务器未连接，请检查连接设置后重试。");
+    await current.loadURL(new URL(hash, activeOrigin).href);
+  }
+  if (current.isMinimized()) current.restore();
+  current.show(); current.focus();
 }
 
 function showMainWindow() {
@@ -223,7 +238,7 @@ else {
       event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame &&
       isAppUrl(event.senderFrame.url.split("#")[0] ?? "", activeOrigin));
     ipcMain.handle("desktop:connection-open", event => {
-      if (!trustedWorkspace(event)) throw new Error("Untrusted connection window");
+      if (!trustedWorkspace(event) && !trustedLocalConnection(event)) throw new Error("Untrusted connection window");
       showConnection();
     });
     ipcMain.handle("desktop:notification-status", event => {
@@ -253,18 +268,18 @@ else {
       try {
         if (!input || typeof input !== "object") throw new Error("连接配置无效");
         const value = input as Record<string, unknown>;
-        if (typeof value.url !== "string" || (value.username !== undefined && typeof value.username !== "string") || (value.password !== undefined && typeof value.password !== "string") || (value.lanUrl !== undefined && typeof value.lanUrl !== "string")) throw new Error("连接配置无效");
+        if (typeof value.url !== "string" || (value.username !== undefined && typeof value.username !== "string") || (value.password !== undefined && typeof value.password !== "string") || (value.lanUrl !== undefined && typeof value.lanUrl !== "string") || (value.rememberPassword !== undefined && typeof value.rememberPassword !== "boolean")) throw new Error("连接配置无效");
         if (typeof value.username === "string" && /[:\r\n]/.test(value.username)) throw new Error("用户名不得包含冒号或换行");
         const next: ConnectionConfig = { url: validateWebUrl(value.url), username: value.username as string | undefined,
           ...(value.lanUrl ? { lanUrl: value.lanUrl as string } : {}) };
         const nextPassword = value.password as string | undefined;
-        const saved = saveConnection(next, nextPassword);
+        const saved = saveConnection(next, value.rememberPassword === false ? undefined : nextPassword);
         config = next; activeOrigin = next.url; password = nextPassword; startupError = undefined;
         return { ok: true, persistedPassword: saved.persistedPassword };
       } catch { return { ok: false, error: "无法保存连接。请使用 HTTPS 或本机 HTTP 根地址，并检查配置目录权限。" }; }
     });
     ipcMain.handle("desktop:connection-retry", async event => {
-      if (!trustedSettings(event)) throw new Error("Untrusted connection window");
+      if (!trustedSettings(event) && !trustedLocalConnection(event)) throw new Error("Untrusted connection window");
       await connect();
     });
     registerLocalSkills({ ipc: ipcMain, dialog, shell,
@@ -283,18 +298,14 @@ else {
       return new Response(response.body, { status: response.status, headers });
     });
     showLocalWindow();
+    // The web session rewrites Authorization; peer credentials stay in a main-process-only session.
+    const peerTransport = session.fromPartition("desktop-peer");
+    peerTransport.setCertificateVerifyProc((request, callback) => callback(request.errorCode === 0 || isPinnedCertificate(activeOrigin, pin, request.hostname, request.certificate.data) ? 0 : -2));
     localAgent = await registerDesktopAgent({ ipc: ipcMain, directory: app.getPath("userData"), localUrl, searchPath: process.env.PATH, env: { ...process.env },
       getWindow: () => localWindow, serverId: () => config.url, openServer: showServerWorkspace, openConnection: showConnection,
-      request: async (path, body, serverId) => {
-        if (serverId && serverId !== config.url) throw new Error("任务属于之前的服务器，请切回原服务器后继续");
-        const target = new URL(path, activeOrigin);
-        if (target.origin !== activeOrigin || !target.pathname.startsWith("/api/peers/")) throw new Error("委派服务器地址无效");
-        const response = await web.fetch(target.href, { method: body === undefined ? "GET" : "POST", redirect: "error", signal: AbortSignal.timeout(15000),
-          headers: { "content-type": "application/json", origin: activeOrigin, ...(basicAuth(config.username, password) ? { authorization: basicAuth(config.username, password)! } : {}) },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-        if (!response.ok) throw new Error(response.status === 401 ? "双端协作需要服务器认证，请检查连接设置" : `双端协作请求失败（${response.status}）`);
-        return response.json();
-      } });
+      request: createAgentRequest({ origin: () => activeOrigin, serverId: () => config.url, username: () => config.username, password: () => password,
+        token: server => openPeerCredentials(app.getPath("userData"), safeStorage).get(server), fetch: (url, init) => peerTransport.fetch(url, init),
+        socket: (url, headers, origin) => new net.WebSocket(url, { session: peerTransport, headers, origin, useSessionCookies: false }) }) });
     Menu.setApplicationMenu(null);
     initialized = true;
     showLocalWindow();

@@ -7,12 +7,48 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { openAgentSettings } from "../dist/agent-settings.js";
 import { openDesktopAgent } from "../dist/local-agent.js";
+import { createModelCatalog } from "@assistant/runtime";
+import { PeerConnectionError } from "../dist/peer-connection.js";
+import type { AgentRequest } from "../dist/local-agent.js";
 
 async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): Promise<T> {
   const timeout = Date.now() + 15000;
   do { const value = await read(); if (ready(value)) return value; await new Promise(resolve => setTimeout(resolve, 20)); } while (Date.now() < timeout);
   throw new Error("Timed out waiting for local Agent");
 }
+test("WebSocket changes wake local collaboration without waiting for reconciliation and never approve execution", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dee-peer-push-")), settings = openAgentSettings(directory);
+  const config = { api: "openai-completions", baseUrl: "", model: "", apiKey: "", contextWindow: 128000, maxTokens: 8192 };
+  let receive!: (change: "connected" | "disconnected" | "tasks") => void, transportClosed = false, unsubscribed = false;
+  let items: Array<{ id: string; source: string; target: string; task: string; status: string; createdAt: string; updatedAt: string }> = [];
+  const request: AgentRequest = Object.assign(async (path: string) => path === "/api/info" ? {} : { items }, {
+    onChange(listener: typeof receive) { receive = listener; return () => { unsubscribed = true; }; }, close() { transportClosed = true; },
+  });
+  const agent = await openDesktopAgent({ directory, settings, request, confirm: async () => false,
+    loadModels: async () => ({ ...await createModelCatalog(config), model: { ...config, hasApiKey: false } }) });
+  try {
+    await until(() => agent.snapshot(), value => value.collaboration === "ready");
+    items = [{ id: randomUUID(), source: "server", target: settings.get().nodeId, task: "wait for approval", status: "queued", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    const deadline = Date.now() + 1000; receive("tasks");
+    while (!(await agent.snapshot()).jobs.length && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+    const snapshot = await agent.snapshot();
+    assert.equal(snapshot.jobs[0]?.status, "queued"); assert.equal(snapshot.busy, false);
+    receive("disconnected"); assert.equal((await agent.snapshot()).serverConnected, false);
+    receive("connected"); await until(() => agent.snapshot(), value => value.serverConnected && value.collaboration === "ready");
+  } finally { await agent.close(); await rm(directory, { recursive: true, force: true }); }
+  assert.equal(transportClosed, true); assert.equal(unsubscribed, true);
+});
+test("healthy server with missing collaboration is not reported disconnected", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dee-peer-health-"));
+  const settings = openAgentSettings(directory);
+  const config = { api: "openai-completions", baseUrl: "", model: "", apiKey: "", contextWindow: 128000, maxTokens: 8192 };
+  const agent = await openDesktopAgent({ directory, settings, loadModels: async () => ({ ...await createModelCatalog(config), model: { api: config.api, baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192, hasApiKey: false } }),
+    confirm: async () => false, request: async path => { if (path === "/api/info") return {}; throw new PeerConnectionError(404); } });
+  try {
+    const snapshot = await until(() => agent.snapshot(), value => value.collaboration === "unavailable");
+    assert.equal(snapshot.serverConnected, true); assert.match(snapshot.error!, /尚未启用双端/);
+  } finally { await agent.close(); await rm(directory, { recursive: true, force: true }); }
+});
 test("local Agent owns model, protects tools, persists approvals and returns one durable peer result", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dee-local-agent-"));
   let calls = 0, allow = false;
@@ -30,13 +66,14 @@ test("local Agent owns model, protects tools, persists approvals and returns one
   });
   await new Promise<void>(resolve => model.listen(0, "127.0.0.1", resolve));
   const port = (model.address() as { port: number }).port;
-  const storage = { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => "" };
-  const settings = openAgentSettings(directory, storage);
-  settings.saveModel({ api: "openai-completions", baseUrl: `http://127.0.0.1:${port}/v1`, model: "fixture", apiKey: "local-test-only", contextWindow: 128000, maxTokens: 8192 });
-  settings.saveWorkspace(directory); await writeFile(join(directory, "fixture.txt"), "本机资料");
+  const settings = openAgentSettings(directory);
+  const modelConfig = { api: "openai-completions", baseUrl: `http://127.0.0.1:${port}/v1`, model: "fixture", apiKey: "fixture-only", contextWindow: 128000, maxTokens: 8192 };
+  const loadModels = async () => ({ ...await createModelCatalog(modelConfig), model: { api: modelConfig.api, baseUrl: "", model: modelConfig.model, contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, hasApiKey: true } });
+  const workspace = settings.get().workspace!;
+  await writeFile(join(workspace, "fixture.txt"), "本机资料");
   const incoming = { id: randomUUID(), source: "server", target: settings.get().nodeId, task: "读取工作目录 fixture.txt", status: "queued", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   const completions: unknown[] = []; let confirms = 0;
-  const options = { directory, settings, confirm: async () => { confirms++; return allow; }, request: async (path: string, body?: unknown) => {
+  const options = { directory, settings, loadModels, confirm: async () => { confirms++; return allow; }, request: async (path: string, body?: unknown) => {
     if (path.includes("/complete")) { completions.push(body); return { item: { ...incoming, status: "done", result: "本机验证完成" } }; }
     return { items: [incoming] };
   } };
@@ -47,7 +84,7 @@ test("local Agent owns model, protects tools, persists approvals and returns one
     await agent.approve(incoming.id);
     const done = await until(() => agent.snapshot(), snapshot => snapshot.jobs[0]?.status === "done");
     assert.equal(done.jobs[0]?.result, "本机验证完成"); assert.equal(confirms, 1);
-    assert.equal(calls, 2); assert.equal(await readFile(join(directory, "fixture.txt"), "utf8"), "本机资料");
+    assert.equal(calls, 2); assert.equal(await readFile(join(workspace, "fixture.txt"), "utf8"), "本机资料");
     await agent.close(); agent = await openDesktopAgent(options);
     await until(() => agent.snapshot(), snapshot => snapshot.jobs[0]?.status === "done");
     assert.equal(calls, 2, "reopening cannot repeat completed tools or generation");

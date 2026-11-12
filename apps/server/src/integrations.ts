@@ -85,9 +85,9 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
     refresh: () => active ? track(collector.refresh()) : Promise.resolve({ ok: false, lastSuccessAt: collector.status().lastSuccessAt }),
     status: collector.status,
   };
-  teamsSender.send = async (chatId, text) => {
+  teamsSender.send = async (chatId, text, canSend) => {
     if (!active) throw new TeamsSendRejectedError("Teams 集成已停止，尚未开始发送");
-    await track(sendTeamsMessage(sendToken, chatId, text, store, controller.signal));
+    await track(sendTeamsMessage(sendToken, chatId, text, store, controller.signal, canSend));
   };
   teamsSender.refresh = sync.refresh;
   teamsSender.syncStatus = sync.status;

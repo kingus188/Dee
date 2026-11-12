@@ -33,6 +33,17 @@ test("unavailable and basic_text storage never persist a password", () => {
   }
 });
 
+test("session-only connection never calls secure storage without a password to persist", () => {
+  const unavailable: CredentialStorage = {
+    isEncryptionAvailable: () => { throw new Error("keychain must not be called"); },
+    encryptString: () => { throw new Error("keychain must not be called"); },
+    decryptString: () => { throw new Error("keychain must not be called"); },
+  };
+  const encoded = encodeConnection({ url: "http://127.0.0.1:3000" }, undefined, unavailable);
+  assert.equal(encoded.persistedPassword, false);
+  assert.equal(JSON.parse(encoded.text).encryptedPassword, undefined);
+});
+
 test("LAN aliases round-trip without changing the configured server or encrypted credential", () => {
   const config = { url: "https://assistant.example", username: "demo", lanUrl: "https://192.168.31.5:3443" };
   const encoded = encodeConnection(config, "fixture secret", storage);

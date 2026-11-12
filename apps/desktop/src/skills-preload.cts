@@ -8,6 +8,11 @@ contextBridge.exposeInMainWorld("desktopServer", {
   notificationStatus: () => ipcRenderer.invoke("desktop:notification-status"),
 });
 
+contextBridge.exposeInMainWorld("desktopConnection", {
+  openSettings: () => ipcRenderer.invoke("desktop:connection-open"),
+  retry: () => ipcRenderer.invoke("desktop:connection-retry"),
+});
+
 // Only the configured service's top frame may invoke these handlers; paths stay in the main process.
 contextBridge.exposeInMainWorld("localSkills", {
   version: 1,

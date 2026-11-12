@@ -41,7 +41,8 @@ export async function openAcp(options: DriverOptions): Promise<AgentDriver> {
       const init = await ctx.request(acp.methods.agent.initialize, { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
       loading = true;
       if (sessionId && !init.agentCapabilities?.loadSession) throw new Error("该 ACP Agent 不支持恢复，请新建会话后继续");
-      const session = sessionId ? await ctx.request(acp.methods.agent.session.load, { sessionId, cwd: options.cwd, mcpServers: [] }) : await ctx.request(acp.methods.agent.session.new, { cwd: options.cwd, mcpServers: [] });
+      const mcpServers: acp.McpServer[] = options.peerMcp ? [{ name: "dee_peers", command: options.peerMcp.command, args: options.peerMcp.args, env: Object.entries(options.peerMcp.env).map(([name, value]) => ({ name, value })) }] : [];
+      const session = sessionId ? await ctx.request(acp.methods.agent.session.load, { sessionId, cwd: options.cwd, mcpServers }) : await ctx.request(acp.methods.agent.session.new, { cwd: options.cwd, mcpServers });
       if (!sessionId) sessionId = string(object(session).sessionId);
       if (!sessionId) throw new Error("ACP 未返回会话标识");
       const modes = session?.modes?.availableModes;

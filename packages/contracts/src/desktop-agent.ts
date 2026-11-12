@@ -1,7 +1,9 @@
-export type DesktopModelInput = {
-  api: string; baseUrl: string; model: string; apiKey?: string; contextWindow: number; maxTokens: number;
-};
 export type DesktopAgentKind = "pi" | "codex" | "claude" | "acp";
+export type DesktopConversation = {
+  sessionId: string; agent: DesktopAgentKind;
+  messages: Array<{ id: string; role: "user" | "assistant"; text: string }>;
+};
+export type DesktopConversationUpload = DesktopConversation & { deviceId: string; revision: number };
 export type ExternalAgentConfig = { executable: string; args: string[]; mode?: string };
 export type DesktopAgentSelection = { kind: DesktopAgentKind; config?: ExternalAgentConfig };
 export type AgentQuestion = { id: string; text: string; options?: string[]; secret?: boolean };
@@ -16,6 +18,11 @@ export type DesktopPeerJob = {
   id: string; source: string; target: string; task: string;
   status: "queued" | "running" | "done" | "failed";
   result?: string; createdAt: string; updatedAt: string;
+  sourceSession?: { agent: DesktopAgentKind; sessionId: string };
+  targetSession?: { agent: DesktopAgentKind; sessionId: string };
+  deliveryError?: string;
+  resultDelivered?: boolean;
+  approved?: boolean;
 };
 export type DesktopAgentSnapshot = {
   agent?: DesktopAgentKind;
@@ -23,19 +30,23 @@ export type DesktopAgentSnapshot = {
   external?: ExternalAgentState;
   piConfigured?: boolean;
   configured: boolean;
-  model: Omit<DesktopModelInput, "apiKey"> & { hasApiKey: boolean };
+  model: { api: string; baseUrl: string; model: string; contextWindow: number; maxTokens: number; hasApiKey: boolean };
   workspace: string | null; nodeId: string; busy: boolean;
   messages: Array<{ id: string; role: "user" | "assistant"; text: string }>;
   jobs: DesktopPeerJob[]; serverConnected: boolean; error?: string;
+  collaboration?: "connecting" | "ready" | "pairing" | "unavailable" | "offline";
 };
 export type DesktopAgentBridge = {
   platform?: string;
   snapshot(): Promise<DesktopAgentSnapshot>;
-  saveModel(input: DesktopModelInput): Promise<{ persistedKey: boolean }>;
   selectAgent(input: DesktopAgentSelection): Promise<void>;
   newSession(): Promise<void>;
   answerApproval(input: AgentApprovalAnswer): Promise<void>;
   send(input: { id: string; text: string }): Promise<void>;
+  peerSessions?(node?: string): Promise<Array<{ agent: DesktopAgentKind; sessionId: string; status?: string }>>;
+  readPeerSession?(input: { node: string; session: { agent: DesktopAgentKind; sessionId: string } }): Promise<DesktopConversation>;
+  sendPeer?(input: Pick<DesktopPeerJob, "id" | "source" | "target" | "task" | "sourceSession" | "targetSession">): Promise<DesktopPeerJob>;
+  peerStatus?(id: string): Promise<DesktopPeerJob>;
   chooseWorkspace(): Promise<void>;
   approve(id: string): Promise<void>;
   reject(id: string): Promise<void>;

@@ -17,6 +17,18 @@ async function temporary(run: (directory: string) => Promise<void>) {
   try { await run(directory); } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
+test("Finder-style PATH discovers nvm Agents while explicit PATH retains priority", async () => temporary(async directory => {
+  const name = `dee-nvm-fixture-${randomUUID()}`;
+  const older = join(directory, ".nvm/versions/node/v22.19.0/bin"), newer = join(directory, ".nvm/versions/node/v24.14.1/bin");
+  for (const bin of [older, newer]) {
+    await mkdir(bin, { recursive: true }); await writeFile(join(bin, name), "#!/bin/sh\n"); await chmod(join(bin, name), 0o700);
+  }
+  assert.equal(resolveAgentExecutable(name, "/usr/bin:/bin", directory), join(newer, name));
+  assert.equal(resolveAgentExecutable(name, older, directory), join(older, name));
+  assert.equal(resolveAgentExecutable(join(older, name), "", directory), join(older, name));
+  assert.throws(() => resolveAgentExecutable(name, "", join(directory, "missing-home")), /找不到/);
+}));
+
 test("GUI-launched npm Agents find their sibling interpreter and retain explicit environment", { skip: process.platform === "win32" }, async () => temporary(async directory => {
   const originalPath = process.env.PATH;
   const executable = join(directory, "agent"), interpreter = join(directory, "dee-fixture-interpreter");
@@ -195,6 +207,58 @@ createInterface({ input: process.stdin }).on('line', line => {
   assert.ok(!events.some(event => event.type === "text" && event.text === "stale"));
 }));
 
+for (const allow of [false, true]) test(`Codex 0.167.1 MCP tool elicitation uses explicit single-call user approval (${allow})`, async () => temporary(async directory => {
+  const bin = await executable(directory, `
+import {createInterface} from 'node:readline';
+import {appendFileSync} from 'node:fs';
+const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
+createInterface({input:process.stdin}).on('line',line=>{
+ const m=JSON.parse(line);appendFileSync('mcp-calls.jsonl',line+'\\n');
+ if(m.method==='initialize')send({id:m.id,result:{}});
+ if(m.method==='thread/start')send({id:m.id,result:{thread:{id:'native'}}});
+ if(m.method==='turn/start'){
+  send({id:'mcp-approval',method:'mcpServer/elicitation/request',params:{threadId:'native',turnId:'turn',serverName:'dee_peers',mode:'form',_meta:{codex_approval_kind:'mcp_tool_call',persist:['session','always'],tool_name:'peer_sessions',tool_params:{}},message:'Allow peer_sessions?',requestedSchema:{type:'object',properties:{}}}});
+  send({id:m.id,result:{turn:{id:'turn'}}});
+ }
+ if(m.id==='mcp-approval')send({method:'turn/completed',params:{threadId:'native',turn:{id:'turn',status:'completed'}}});
+});`);
+  let asks = 0;
+  const config = options(directory, bin, []);
+  const driver = await openCodex({ ...config, ask: async request => { asks++; assert.match(request.title, /MCP/); assert.match(request.detail, /dee_peers/); assert.match(request.detail, /peer_sessions/); return { id: "approval", allow }; } });
+  try { await driver.send("call peer_sessions", randomUUID()); } finally { await driver.close(); }
+  assert.equal(asks, 1, "MCP tool approval must reach the user approval callback");
+  const calls = (await readFile(join(directory, "mcp-calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  assert.equal(calls.find(call => call.method === "thread/start").params.approvalPolicy, "untrusted");
+  assert.deepEqual(calls.find(call => call.id === "mcp-approval" && !call.method).result, allow ? { action: "accept", content: {} } : { action: "decline" });
+}));
+
+test("Codex declines unrelated MCP elicitations and rejects stale turns without granting permissions", async () => temporary(async directory => {
+  const bin = await executable(directory, `
+import {createInterface} from 'node:readline';
+import {appendFileSync} from 'node:fs';
+let responses=0;const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
+createInterface({input:process.stdin}).on('line',line=>{
+ const m=JSON.parse(line);appendFileSync('mcp-calls.jsonl',line+'\\n');
+ if(m.method==='initialize')send({id:m.id,result:{}});
+ if(m.method==='thread/start')send({id:m.id,result:{thread:{id:'native'}}});
+ if(m.method==='turn/start'){
+  send({id:m.id,result:{turn:{id:'turn'}}});
+  const params={threadId:'native',turnId:'turn',serverName:'dee_peers',mode:'form',_meta:{codex_approval_kind:'mcp_tool_call',tool_name:'peer_sessions'},requestedSchema:{type:'object',properties:{}}};
+  send({id:'stale',method:'mcpServer/elicitation/request',params:{...params,turnId:'old-turn'}});
+  send({id:'unrelated',method:'mcpServer/elicitation/request',params:{...params,_meta:{}}});
+  send({id:'form',method:'mcpServer/elicitation/request',params:{...params,requestedSchema:{type:'object',properties:{secret:{type:'string'}}}}});
+ }
+ if(['stale','unrelated','form'].includes(m.id)&&!m.method&&++responses===3)send({method:'turn/completed',params:{threadId:'native',turn:{id:'turn',status:'completed'}}});
+});`);
+  let asks = 0;
+  const driver = await openCodex({ ...options(directory, bin, []), ask: async () => { asks++; return { id: "must-not-ask", allow: true }; } });
+  try { await driver.send("fixture", randomUUID()); } finally { await driver.close(); }
+  assert.equal(asks, 0);
+  const replies = (await readFile(join(directory, "mcp-calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line)).filter(call => !call.method);
+  assert.ok(replies.find(call => call.id === "stale").error);
+  for (const id of ["unrelated", "form"]) assert.deepEqual(replies.find(call => call.id === id).result, { action: "decline" });
+}));
+
 test("generic ACP supports literal arguments, native mode, permissions and multiple turns", async () => temporary(async directory => {
   const bin = await executable(directory, `
 import { createInterface } from 'node:readline';
@@ -230,11 +294,46 @@ test("Claude SDK keeps its permission callback, streams content and resumes nati
     })() as Query;
     iterator.close = () => { closed++; }; return iterator;
   };
-  const driver = await openClaude(options(directory, process.execPath, events), fakeQuery);
+  const config = options(directory, process.execPath, events);
+  config.peerMcp = { command: process.execPath, args: ["--version"], env: { DEE_FIXTURE: "mcp" } };
+  const driver = await openClaude(config, fakeQuery);
   try { await driver.send("one", randomUUID()); await driver.send("two", randomUUID()); } finally { await driver.close(); }
   assert.equal(calls[0]!.options!.permissionMode, "default");
   assert.equal(calls[0]!.options!.includePartialMessages, true);
   assert.equal(calls[1]!.options!.resume, "claude-native");
+  assert.deepEqual(calls[0]!.options!.mcpServers, { dee_peers: config.peerMcp });
+  assert.deepEqual(calls[1]!.options!.mcpServers, { dee_peers: config.peerMcp });
   assert.equal(closed, 2);
   assert.ok(events.some(event => event.type === "text" && event.delta));
+}));
+
+test("ACP native resume keeps its peer MCP binding and rejects permission without replaying loaded history", async () => temporary(async directory => {
+  const bin = await executable(directory, `
+import {createInterface} from 'node:readline';
+const send=m=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',...m})+'\\n');
+let pending;
+createInterface({input:process.stdin}).on('line',line=>{
+ const m=JSON.parse(line);
+ if(m.method==='initialize')send({id:m.id,result:{protocolVersion:1,agentCapabilities:{loadSession:true}}});
+ if(m.method==='session/new')throw Error('unexpected new session');
+ if(m.method==='session/load'){
+  if(m.params.sessionId!=='existing-acp'||m.params.mcpServers[0]?.name!=='dee_peers'||m.params.mcpServers[0]?.env[0]?.value!=='mcp')throw Error('wrong session or MCP binding');
+  send({method:'session/update',params:{sessionId:'existing-acp',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'old history must not duplicate'}}}});
+  send({id:m.id,result:{}});
+ }
+ if(m.method==='session/prompt'){
+  pending=m.id;
+  send({id:'permission',method:'session/request_permission',params:{sessionId:'existing-acp',toolCall:{toolCallId:'tool',title:'fixture'},options:[{optionId:'once',name:'Allow',kind:'allow_once'},{optionId:'deny',name:'Deny',kind:'reject_once'}]}});
+ }
+ if(m.id==='permission'){
+  if(m.result?.outcome?.optionId!=='deny')throw Error('permission bypass');
+  send({method:'session/update',params:{sessionId:'existing-acp',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'resumed answer'}}}});
+  send({id:pending,result:{stopReason:'end_turn'}});
+ }
+});`);
+  const events: AgentEvent[] = [], config = options(directory, bin, events);
+  config.sessionId = "existing-acp"; config.peerMcp = { command: process.execPath, args: ["--version"], env: { DEE_FIXTURE: "mcp" } };
+  const driver = await openAcp(config);
+  try { await driver.send("continue", randomUUID()); } finally { await driver.close(); }
+  assert.deepEqual(events.filter(event => event.type === "text").map(event => event.text), ["resumed answer"]);
 }));

@@ -24,6 +24,7 @@ export async function openClaude(options: DriverOptions, runQuery = query): Prom
           ...(sessionId ? { resume: sessionId } : {}), persistSession: true,
           permissionMode: "default", permissionPromptToolName: undefined,
           settingSources: ["user", "project", "local"], includePartialMessages: true,
+          ...(options.peerMcp ? { mcpServers: { dee_peers: options.peerMcp } } : {}),
           systemPrompt: { type: "preset", preset: "claude_code" },
           spawnClaudeCodeProcess: input => {
             const process = spawnAgent(input.command, input.args, input.cwd ?? options.cwd, options.searchPath, input.env);

@@ -12,6 +12,7 @@ import { createHttpServer } from "../dist/http/server.js";
 import type { AppContext } from "../dist/application/context.js";
 import type { AddressInfo } from "node:net";
 import { readConfig } from "../dist/config.js";
+import { createApi } from "../dist/application/api.js";
 
 test("HTTP peer routes retain authentication and same-origin checks", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "pi-peer-http-"));
@@ -43,6 +44,25 @@ test("HTTP peer routes retain authentication and same-origin checks", async () =
 });
 
 const device = "desktop-" + randomUUID(), other = "desktop-" + randomUUID();
+test("self-use webpages remain open while peer routes require independent pairing and preserve origin checks", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "pi-peer-paired-")), token = "c".repeat(43);
+  const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, fauxAssistantMessage("完成"));
+  const peers = createPeerService({ nodeId: "server", configured: () => true });
+  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], onReport: () => {} }, ctx); peers.bind(runtime, ctx);
+  const app = { ...runtime, peers, ctx, config: readConfig({ NODE_ENV: "test", AUTH_DISABLED: "1", PEER_TOKEN: token }), wechat: null, exitIfFatal: () => {}, redact: String } as unknown as AppContext;
+  const http = createHttpServer(app); await new Promise<void>(resolve => http.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(http.address() as AddressInfo).port}`, path = `/api/peers/tasks?deviceId=${device}`;
+  try {
+    await assert.rejects(createApi(app).dispatch("GET", new URL(origin + "/api/peers/devices")), { status: 401 });
+    assert.equal((await fetch(origin + path)).status, 401);
+    assert.equal((await fetch(origin + path, { headers: { authorization: "Bearer wrong" } })).status, 401);
+    assert.equal((await fetch(origin + path, { headers: { authorization: "Bearer " + token } })).status, 200);
+    assert.equal((await fetch(origin + "/api/peers/tasks", { method: "POST", headers: { authorization: "Bearer " + token, origin: "https://outside.invalid", "content-type": "application/json" }, body: "{}" })).status, 403);
+  } finally {
+    http.closeSockets(); http.closeAllConnections(); await new Promise<void>(resolve => http.close(() => resolve()));
+    await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true });
+  }
+});
 test("peer API validates routing, persists desktop waiting, and only accepts target completion", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "pi-peer-api-"));
   const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, fauxAssistantMessage("服务器完成"));
@@ -60,7 +80,9 @@ test("peer API validates routing, persists desktop waiting, and only accepts tar
     const outbound = await peers.submit({ id: randomUUID(), source: "server", target: device, task: "等待本机确认" });
     await assert.rejects(call("GET", `tasks/${outbound.id}?deviceId=${other}`), { status: 404 });
     await assert.rejects(call("POST", `tasks/${outbound.id}/complete`, { deviceId: other, status: "done", result: "伪造" }), { status: 404 });
-    assert.equal((await call("GET", `tasks?deviceId=${other}`))?.data.items?.length, 0);
+    const unrelated = await call("GET", `tasks?deviceId=${other}`);
+    assert.ok(unrelated && "items" in unrelated.data && Array.isArray(unrelated.data.items));
+    assert.equal(unrelated.data.items.length, 0);
     const result = { deviceId: device, status: "done", result: "本机结果" };
     const done = await call("POST", `tasks/${outbound.id}/complete`, result);
     assert.equal(done?.status, 200);

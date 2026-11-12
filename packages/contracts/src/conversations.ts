@@ -37,6 +37,7 @@ export type ConversationNotes = { todos: { text: string; done: boolean }[]; memo
 export type NotesEditRequest = { notes: ConversationNotes; base: ConversationNotes };
 export type ConversationView = {
   conversationId: number; entries: ViewEntry[]; live: LiveView; busy: boolean; inbox: number;
+  readOnly?: boolean;
   /** Display source of this Dee conversation, not an external inbox or a send permission. */
   channel?: string;
   notes: ConversationNotes;

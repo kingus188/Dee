@@ -1,12 +1,22 @@
 import { execFile, spawn } from "node:child_process";
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, readdirSync, statSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
 
-export function resolveAgentExecutable(executable: string, searchPath = ""): string {
+function nvmBins(home: string): string[] {
+  const directory = join(home, ".nvm/versions/node");
+  try {
+    return readdirSync(directory, { withFileTypes: true }).filter(entry => entry.isDirectory())
+      .sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true })).map(entry => join(directory, entry.name, "bin"));
+  } catch (error) {
+    if (["ENOENT", "EACCES", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return [];
+    throw error;
+  }
+}
+export function resolveAgentExecutable(executable: string, searchPath = "", home = homedir()): string {
   if (!executable.trim() || /[\r\n\0]/.test(executable)) throw new Error("请先配置 Agent 可执行文件");
   const paths = isAbsolute(executable) ? [executable] : executable.includes("/") || executable.includes("\\") ? [] :
-    [...searchPath.split(delimiter).filter(isAbsolute), join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].flatMap(directory => process.platform === "win32" ? [join(directory, executable), join(directory, `${executable}.exe`)] : [join(directory, executable)]);
+    [...searchPath.split(delimiter).filter(isAbsolute), join(home, ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", ...nvmBins(home)].flatMap(directory => process.platform === "win32" ? [join(directory, executable), join(directory, `${executable}.exe`)] : [join(directory, executable)]);
   for (const path of paths) {
     try { accessSync(path, constants.X_OK); if (statSync(path).isFile()) return path; } catch (error) {
       if (!["ENOENT", "EACCES", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;

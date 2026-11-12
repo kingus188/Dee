@@ -6,7 +6,7 @@ import { startEpisodeJob } from "./episode-job.js";
 import { conversationBatches, episodeSourceAllowed, teamsBatches } from "./episode-sources.js";
 import { startServerIntegrations } from "./integrations.js";
 
-export async function startServer(config: AppConfig, host = config.password ? "0.0.0.0" : "127.0.0.1", env: NodeJS.ProcessEnv = {}) {
+export async function startServer(config: AppConfig, host = config.password || config.authDisabled ? "0.0.0.0" : "127.0.0.1", env: NodeJS.ProcessEnv = {}) {
   const app = await createApplication(config);
   const server = createHttpServer(app);
   // 情景摘要需要真实模型；未配置模型时不启动。

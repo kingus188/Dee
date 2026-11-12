@@ -8,6 +8,7 @@ import { createServer } from "node:http";
 import { openExternalAgents, type DriverFactory, type ExternalBinding } from "../dist/agents/service.js";
 import { openDesktopAgent } from "../dist/local-agent.js";
 import { openAgentSettings } from "../dist/agent-settings.js";
+import { createModelCatalog } from "@assistant/runtime";
 
 const kinds = ["codex", "claude", "acp"] as const;
 const recall = "RECALL";
@@ -143,8 +144,9 @@ test("desktop public entry switches Pi ↔ Codex, restores local memory and expo
     res.end(`data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify({ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>(resolve => model.listen(0, "127.0.0.1", resolve));
-  const settings = openAgentSettings(directory, { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => "" });
-  settings.saveModel({ api: "openai-completions", baseUrl: `http://127.0.0.1:${(model.address() as { port: number }).port}/v1`, model: "fixture", apiKey: "fixture-only-not-a-real-key", contextWindow: 128000, maxTokens: 4096 });
+  const settings = openAgentSettings(directory);
+  const modelConfig = { api: "openai-completions", baseUrl: `http://127.0.0.1:${(model.address() as { port: number }).port}/v1`, model: "fixture", apiKey: "fixture-only", contextWindow: 128000, maxTokens: 4096 };
+  const loadModels = async () => ({ ...await createModelCatalog(modelConfig), model: { api: modelConfig.api, baseUrl: "", model: modelConfig.model, contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, hasApiKey: true } });
   settings.saveWorkspace(directory);
   const bin = join(directory, "codex-fixture.mjs");
   await writeFile(bin, `#!${process.execPath}
@@ -173,7 +175,7 @@ createInterface({input:process.stdin}).on("line",line=>{
  }
 });`);
   await chmod(bin, 0o755);
-  const options = { directory, settings, confirm: async () => false, request: async () => ({ items: [] }) };
+  const options = { directory, settings, loadModels, confirm: async () => false, request: async () => ({ items: [] }) };
   let agent: Awaited<ReturnType<typeof openDesktopAgent>> | undefined;
   try {
     agent = await openDesktopAgent(options);

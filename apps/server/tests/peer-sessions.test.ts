@@ -1,0 +1,51 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
+import { createModelCatalog, createPeerService, Index, openRuntime } from "@assistant/runtime";
+import type { ConversationId } from "@earendil-works/pi-durable";
+import { DesktopTranscript } from "../dist/desktop-conversations.js";
+import { peerApi } from "../dist/peer-api.js";
+
+test("peer API catalogs empty sessions, validates addresses, limits reads and never executes desktop history on server", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dee-session-api-"));
+  const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, fauxAssistantMessage("done"));
+  let runtime: Awaited<ReturnType<typeof openRuntime>>;
+  const peers = createPeerService({ nodeId: "server", configured: () => true, canAddressSession: async session => !(await runtime.harness.snapshot(DesktopTranscript, Number(session.sessionId.slice(3)) as ConversationId, ctx))?.value });
+  runtime = await openRuntime({ dataDir: directory, ...catalog, extensions: [peers.extension], onReport: () => {} }, ctx); peers.bind(runtime, ctx);
+  const context = { ...runtime, ctx, peers, config: { password: "fixture" }, exitIfFatal: () => {}, redact: String };
+  const call = (method: string, path: string, body?: Record<string, unknown>) => peerApi(context, method, new URL("http://localhost/api/peers/" + path), body);
+  const deviceId = "desktop-" + randomUUID(), session = { agent: "claude" as const, sessionId: randomUUID() };
+  try {
+    await call("POST", "sessions", { deviceId, items: [{ ...session, status: "idle", nativeId: "must-not-store" }] });
+    const list = await call("GET", `sessions?nodeId=${deviceId}`);
+    assert.match(JSON.stringify(list), /syncedAt/); assert.doesNotMatch(JSON.stringify(list), /nativeId|must-not-store/);
+    const empty = await call("GET", `sessions?nodeId=${deviceId}&agent=claude&sessionId=${session.sessionId}`);
+    assert.deepEqual((empty!.data as { item: { messages: unknown[] } }).item.messages, []);
+    for (const items of [[session, session], [{ ...session, agent: ["claude"] }], [{ ...session, status: "bogus" }]]) await assert.rejects(call("POST", "sessions", { deviceId, items }), { status: 400 });
+    await assert.rejects(call("GET", "sessions?sessionId=pi-1"), { status: 400 });
+    const upload = { deviceId, ...session, revision: 1, messages: [{ id: "one", role: "user", text: "x".repeat(100000) }] };
+    const saved = await call("POST", "conversations", upload), mirror = (saved!.data as { id: number }).id;
+    const read = await call("GET", `sessions?nodeId=${deviceId}&agent=claude&sessionId=${session.sessionId}`);
+    const transcript = (read!.data as { item: { truncated: boolean; messages: Array<{ text: string }> } }).item;
+    assert.equal(transcript.truncated, true); assert.equal(transcript.messages[0]!.text.length, 64000);
+    const input = { id: randomUUID(), source: deviceId, sourceSession: session, target: "server", targetSession: { agent: "pi", sessionId: `pi-${mirror}` }, task: "must stay on desktop" };
+    await assert.rejects(call("POST", "messages", input), { status: 409 });
+    await runtime.root.commit(async tx => { const index = await tx.doc(Index); index.items = index.items.filter(item => item.id !== mirror); }, ctx);
+    assert.ok(!(await peers.sessions()).some(item => item.sessionId === `pi-${mirror}`), "removed mirrors cannot become executable Pi targets");
+    const mirrorSource = await peers.submit({ id: randomUUID(), source: "server", sourceSession: { agent: "pi", sessionId: `pi-${mirror}` }, target: deviceId, targetSession: session, task: "cannot wake a mirrored source" });
+    await assert.rejects(peers.complete(mirrorSource.id, { status: "done", result: "untrusted mirrored result" }), { status: 404 });
+    assert.equal((await peers.get(mirrorSource.id))!.resultDelivered, undefined);
+    assert.equal(await runtime.root.commit(tx => tx.submissionByRequest(mirror as ConversationId, `peer-result:${mirrorSource.id}`), ctx), undefined);
+    await assert.rejects(call("GET", `sessions?nodeId=${deviceId}&agent=claude&sessionId=${session.sessionId}`), { status: 404 });
+    const targetSession = { agent: "pi", sessionId: `pi-${runtime.root.id}` };
+    const admission = { ...input, id: randomUUID(), source: "server", sourceSession: targetSession, target: deviceId, targetSession: session };
+    assert.equal((await call("POST", "messages", admission))!.status, 202);
+    assert.equal((await peers.get(admission.id))!.status, "queued");
+    await assert.rejects(call("POST", "messages", { ...admission, targetSession: { agent: "codex", sessionId: randomUUID() } }), { status: 409 });
+  } finally { await peers.close(); await runtime.harness.close(ctx); await rm(directory, { recursive: true, force: true }); }
+});

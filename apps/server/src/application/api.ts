@@ -1,4 +1,5 @@
 import { Index, Meta } from "@assistant/runtime";
+import type { ConversationId } from "@earendil-works/pi-durable";
 import { personalError, EditConflictError, Notes, editNotesInTx, Goals, createGoalInTx, controlGoalInTx } from "@assistant/features";
 import type { AppContext } from "./context.js";
 import { HttpError } from "../errors.js";
@@ -13,9 +14,11 @@ import { daylightApi } from "../daylight-api.js";
 import { notificationApi } from "../notification-api.js";
 import { teamsTriageApi } from "../teams-triage-api.js";
 import { teamsConversationsApi } from "../teams-conversations-api.js";
+import { teamsConversationReplyApi } from "../teams-conversation-reply-api.js";
 import { createWorkspace } from "./workspace.js";
 import { createDaylightExecution } from "./daylight-execution.js";
 import { peerApi } from "../peer-api.js";
+import { DesktopTranscript } from "../desktop-conversations.js";
 
 // HTTP 与 WebSocket 共用用例和错误语义。
 export function createApi(context: AppContext) {
@@ -25,10 +28,12 @@ export function createApi(context: AppContext) {
   const workspace = createWorkspace(context, conversations, tasks);
    const daylightExecution = createDaylightExecution(context, conversations, tasks);
   const { dailyReports } = context;
-  async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}) {
+  async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}, peerAuthorized = false) {
     const path = url.pathname;
-    const peerResult = await peerApi(context, method, url, body);
+    const peerResult = await peerApi(context, method, url, body, peerAuthorized);
     if (peerResult) return peerResult;
+    const desktopWrite = method === "POST" && path.match(/^\/api\/conversations\/(\d+)\/(?!archive$|restore$|remove$)/);
+    if (desktopWrite && (await harness.snapshot(DesktopTranscript, Number(desktopWrite[1]) as ConversationId, ctx))?.value) throw new HttpError(409, "这是本机对话历史，请在原本机 Agent 中继续");
     if (method === "GET" && path === "/api/goals") return { status: 200, data: { items: (await harness.snapshot(Goals, ctx))?.items ?? [] } };
     const newGoal = path.match(/^\/api\/conversations\/(\d+)\/goals$/);
     const goalControl = path.match(/^\/api\/goals\/([0-9a-f-]+)\/(resume|cancel|accept)$/i);
@@ -67,6 +72,8 @@ export function createApi(context: AppContext) {
     if (notificationResult) return notificationResult;
     const conversationsResult = await teamsConversationsApi(context, method, url);
     if (conversationsResult) return conversationsResult;
+    const replyResult = await teamsConversationReplyApi(context, method, url, body);
+    if (replyResult) return replyResult;
     const teamsResult = await teamsTriageApi(context, method, url, body);
     if (teamsResult) return teamsResult;
     if (method === "GET" && path === "/api/daily-reports") return { status: 200, data: await dailyReports.list() };

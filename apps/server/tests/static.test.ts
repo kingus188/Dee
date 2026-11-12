@@ -80,6 +80,7 @@ test("built index and every referenced stylesheet and script are served over HTT
   assert.equal(html, await readFile(new URL("index.html", dist), "utf8"));
   const assets = [...new Set([...html.matchAll(/\b(?:src|href)=["'](\/[^"']+\.(?:css|js))["']/g)].map(match => match[1]!))];
   assert.ok(assets.includes("/teams-conversations.css"));
+  assert.ok(assets.includes("/lane-editor.css"));
   assert.ok(assets.some(path => /^\/assets\/app-[A-Z0-9]{8}\.js$/.test(path)));
   for (const path of assets) {
     const expected = await readFile(new URL(path.slice(1), dist));

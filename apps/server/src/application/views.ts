@@ -7,6 +7,7 @@ import { Notes, Reminders, Delegations, BackgroundJobs, Parents, splitUserConten
 import type { AppContext } from "./context.js";
 import { enrichTeamsRecordView } from "../teams-records.js";
 import { createTeamsForwardView } from "../teams-forward-view.js";
+import { DesktopTranscript } from "../desktop-conversations.js";
 export function createViews({ harness, ctx, taskGraph, redact, teamsStore }: AppContext) {
 const teamsForwardView = createTeamsForwardView({ harness, ctx, teamsStore });
 const contentText = (content: Message["content"] | undefined) =>
@@ -14,10 +15,16 @@ const contentText = (content: Message["content"] | undefined) =>
 
 // 把 Harness 的视图压成前端要的样子
 async function simplifyView(conversationId: ConversationId, value: ConversationView): Promise<ClientView> {
+	const desktop = (await harness.snapshot(DesktopTranscript, conversationId, ctx))?.value;
+	if (desktop) return {
+		conversationId, channel: "desktop", readOnly: true,
+		entries: desktop.messages.map((message, index) => ({ id: index + 1, kind: message.role, text: message.text })),
+		live: {}, busy: false, inbox: 0, notes: { todos: [], memos: [] }, usage: null, tasks: [], reminders: [], subagents: [], parentId: null,
+	};
 	const entries: ViewEntry[] = [];
 	const forwarded = await teamsForwardView(conversationId, value.entries ?? []);
 	for (const entry of value.entries ?? []) {
-        if (entry.kind === "app.goal-report" && entry.data && typeof entry.data === "object" && "text" in entry.data && typeof entry.data.text === "string") {
+        if (["app.goal-report", "app.peer-result"].includes(entry.kind) && entry.data && typeof entry.data === "object" && "text" in entry.data && typeof entry.data.text === "string") {
           entries.push({ id: entry.id, kind: "assistant", text: entry.data.text });
           continue;
         }
@@ -26,7 +33,7 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
 		// Preserve recorded message time only; legacy entries must not inherit the current or conversation time.
 		const time = Number.isFinite(message.timestamp) && Number.isFinite(new Date(message.timestamp).getTime())
 			? { timestamp: message.timestamp } : {};
-		if (entry.kind === "pi.user" && message.role === "user") {
+		if (["pi.user", "app.peer-result"].includes(entry.kind) && message.role === "user") {
 			const split = splitUserContent(message.content);
 			const { attachments } = split;
 			for (const a of attachments) {

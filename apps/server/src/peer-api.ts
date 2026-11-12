@@ -1,7 +1,9 @@
 import type { Context } from "@earendil-works/chord";
 import { defineDoc } from "@earendil-works/pi-durable";
-import { PEER_DEVICE_ID, PEER_JOB_ID, PeerError, type PeerCompletion, type PeerJob, type PeerService, type Runtime } from "@assistant/runtime";
+import { PEER_DEVICE_ID, PEER_JOB_ID, PeerError, validPeerSession, type PeerSubmission, type PeerCompletion, type PeerJob, type PeerService, type Runtime } from "@assistant/runtime";
 import { HttpError } from "./errors.js";
+import { DesktopTranscript, desktopPeerSessions, saveDesktopConversation, savePeerSessionCatalog } from "./desktop-conversations.js";
+import type { ConversationId } from "@earendil-works/pi-durable";
 
 type Device = { deviceId: string; lastSeenAt: string };
 const Devices = defineDoc<{ items: Device[] }>({ kind: "app.peer-devices", version: 1, scope: "session", initial: () => ({ items: [] }) });
@@ -22,12 +24,29 @@ export function schedulePeer(peers: PeerService, id: string, report: (error: unk
 }
 
 /** Shared API authentication is required; deviceId is a routing filter, not device identity proof. */
-export async function peerApi(context: Runtime & { ctx: Context; peers: PeerService; config: { password: string }; exitIfFatal(error: unknown): void; redact(value: unknown): string }, method: string, url: URL, body: Record<string, unknown> = {}) {
+export async function peerApi(context: Runtime & { ctx: Context; peers: PeerService; config: { password: string; peerToken?: string }; exitIfFatal(error: unknown): void; redact(value: unknown): string }, method: string, url: URL, body: Record<string, unknown> = {}, paired = false) {
   if (!url.pathname.startsWith("/api/peers/")) return undefined;
   // The global self-use/anonymous mode cannot authorize remote delegation.
-  if (!context.config.password) throw new HttpError(401, "双端委派需要先配置服务器认证口令");
+  if (!context.config.password && !(context.config.peerToken && paired)) throw new HttpError(401, "双端委派需要服务器认证或设备配对");
   const { peers, ctx } = context;
   try {
+    if (method === "POST" && url.pathname === "/api/peers/conversations") return { status: 200, data: await saveDesktopConversation(context, body) };
+    if (method === "POST" && url.pathname === "/api/peers/sessions") return { status: 200, data: await savePeerSessionCatalog(context, body) };
+    if (method === "GET" && url.pathname === "/api/peers/sessions") {
+      const node = url.searchParams.get("nodeId") ?? "server";
+      const sessionId = url.searchParams.get("sessionId"), agent = url.searchParams.get("agent");
+      const session = sessionId === null && agent === null ? undefined : { agent, sessionId };
+      if (session && !validPeerSession(session)) throw new HttpError(400, "Agent 会话地址无效");
+      const value = node === "server" ? session ? await peers.readSession(session) : await peers.sessions() : await desktopPeerSessions(context, deviceId(node), session);
+      return { status: 200, data: session ? { item: value } : { items: value } };
+    }
+    if (method === "POST" && url.pathname === "/api/peers/messages") {
+      if (!validPeerSession(body.sourceSession) || !validPeerSession(body.targetSession)) throw new HttpError(400, "必须指定来源与目标 Agent 会话");
+      if (body.target === "server" && body.targetSession.agent === "pi" && (await context.harness.snapshot(DesktopTranscript, Number(body.targetSession.sessionId.slice(3)) as ConversationId, ctx))?.value) throw new HttpError(409, "本机历史只能在原本机 Agent 继续执行");
+      const item = await peers.submit(body as PeerSubmission);
+      if (item.target === "server") schedulePeer(peers, item.id, error => { context.exitIfFatal(error); });
+      return { status: 202, data: { item } };
+    }
     if (method === "GET" && url.pathname === "/api/peers/devices") return { status: 200, data: { items: await peerDevices(context, ctx) } };
     if (url.pathname === "/api/peers/tasks") {
       if (method === "GET") {
@@ -46,7 +65,7 @@ export async function peerApi(context: Runtime & { ctx: Context; peers: PeerServ
       if (method === "POST") {
         const source = deviceId(body.source);
         if (body.target !== "server" || typeof body.id !== "string" || typeof body.task !== "string") throw new HttpError(400, "仅接受 desktop-UUID 委派至 server 的任务");
-        const item = await peers.submit({ id: body.id, source, target: "server", task: body.task });
+        const item = await peers.submit({ id: body.id, source, target: "server", task: body.task, ...(body.sourceSession ? { sourceSession: body.sourceSession as PeerSubmission["sourceSession"] } : {}), ...(body.targetSession ? { targetSession: body.targetSession as PeerSubmission["targetSession"] } : {}) });
         // Admission commits before scheduling; a retry or restart finds the same job.
         schedulePeer(peers, item.id, error => {
           context.exitIfFatal(error);

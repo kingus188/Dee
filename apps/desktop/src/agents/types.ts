@@ -1,4 +1,5 @@
 import type { AgentActivity, AgentApproval, AgentApprovalAnswer, ExternalAgentConfig } from "@assistant/contracts";
+import type { PeerMcp } from "./peer-tools.js";
 
 export type AgentEvent = { type: "session"; id: string } | { type: "text"; id: string; text: string; delta?: boolean } | { type: "activity"; activity: AgentActivity };
 export type AgentDriver = { send(text: string, requestId: string): Promise<void>; abort(): Promise<void>; close(): Promise<void> };
@@ -6,6 +7,7 @@ export type DriverOptions = {
   cwd: string; config: ExternalAgentConfig; sessionId?: string; signal: AbortSignal;
   searchPath?: string;
   env?: NodeJS.ProcessEnv;
+  peerMcp?: PeerMcp;
   emit(event: AgentEvent): void;
   ask(request: Omit<AgentApproval, "id">, signal?: AbortSignal): Promise<AgentApprovalAnswer>;
   failed(error: Error): void;

@@ -28,7 +28,8 @@
     <label for="password">BasicAuth 口令</label>
     <input id="password" type="password" autocomplete="current-password" aria-describedby="password-hint">
     <p id="password-hint" class="hint">口令仅以系统安全存储加密后保存；系统安全存储不可用时，仅保留在当前会话内。留空可连接无需鉴权的服务。</p>
-    <button type="submit">保存并连接</button>
+    <label><input id="remember-password" type="checkbox" checked style="width:auto"> 保存口令</label>
+    <button type="submit">连接</button>
     <button type="button" id="retry">使用已存配置重试</button>
     <p id="status" role="status" aria-live="polite"></p>
   </form>

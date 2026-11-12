@@ -22,7 +22,7 @@ function channel(socket: WebSocket) {
   socket.on("message", data => {
     const message: ServerMessage = JSON.parse(data.toString());
     if (message.type === "response") { requests.get(message.id)?.(message); requests.delete(message.id); }
-    else { views.push(message.data); if (views.length > 100) views.shift(); }
+    else if (message.event === "view") { views.push(message.data); if (views.length > 100) views.shift(); }
   });
   return {
     async request(path: string, body?: unknown) {

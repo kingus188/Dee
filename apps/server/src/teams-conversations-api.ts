@@ -40,7 +40,7 @@ export async function teamsConversationsApi(context: Context, method: string, ur
   const cursor = url.searchParams.get("cursor") || undefined;
   if (cursor && cursor.length > 16_384) throw new HttpError(400, "Teams 分页地址过长，请从第一页重新读取");
   if (url.pathname === "/api/teams/conversations") {
-    if (!available) return { status: 200, data: { available: false, items: [], nextCursor: null, fetchedAt } satisfies TeamsConversationList };
+    if (!available) return { status: 200, data: { available: false, canSend: false, items: [], nextCursor: null, fetchedAt } satisfies TeamsConversationList };
     const path = "/me/chats?$expand=members&$top=50";
     try {
       if (cursor) graphPageUrl(path, cursor);
@@ -56,7 +56,7 @@ export async function teamsConversationsApi(context: Context, method: string, ur
           ...(timestamp(value.lastUpdatedDateTime) ? { updatedAt: value.lastUpdatedDateTime } : {}),
           ...(preview ? { preview } : {}), sourceUrl: safeTeamsSourceUrl(value.webUrl) };
       }).filter(item => store.sourceAllowed(`teams:${item.id}`));
-      return { status: 200, data: { available: true, items, nextCursor: result.nextCursor, fetchedAt } satisfies TeamsConversationList };
+      return { status: 200, data: { available: true, canSend: !!sender.send, items, nextCursor: result.nextCursor, fetchedAt } satisfies TeamsConversationList };
     } catch (error) { mapError(error); }
   }
   if (!available) throw new HttpError(503, "Teams 在线读取未连接，请先连接账号");

@@ -25,3 +25,6 @@ export function secureMatch(given: unknown, expected: unknown) {
   const b = Buffer.from(String(expected || ""));
   return a.length === b.length && b.length > 0 && timingSafeEqual(a, b);
 }
+export function pairedPeer(req: IncomingMessage, config: { peerToken?: string }): boolean {
+  return !!config.peerToken && secureMatch(req.headers.authorization, `Bearer ${config.peerToken}`);
+}

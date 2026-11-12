@@ -25,9 +25,10 @@ import { existsSync } from "node:fs";
 import { applyExecutionResult } from "./daylight-execution.js";
 import type { Pool } from "pg";
 import { peerDevices, schedulePeer } from "../peer-api.js";
+import { DesktopTranscript, desktopPeerSessions } from "../desktop-conversations.js";
 
 export async function createApplication(config: AppConfig): Promise<AppContext> {
-  if (config.production && !config.password) throw new Error("生产环境必须设置 DEMO_PASSWORD");
+  if (config.production && !config.password && !config.authDisabled) throw new Error("生产环境必须设置 DEMO_PASSWORD，或显式设置 AUTH_DISABLED=1 启用自用免登录模式");
   const modelSettings = await openModelSettings(config.dataDir, config.model, config.modelCatalogFile);
   let wechatSettings: ReturnType<typeof openWechatSettings> | undefined;
   let teamsStore: ReturnType<typeof openTeamsStore> | undefined;
@@ -53,7 +54,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     // 默认放在数据目录下；数据目录可能在读配置之后才被宿主改写，所以这里再推导。
     const materialsRoot = config.materialsRoot || join(config.dataDir, "materials");
     const teamsSender: TeamsSender = {};
-    const redact = modelSettings.redact;
+    const redact = (value: unknown) => { const message = modelSettings.redact(value); return config.peerToken ? message.split(config.peerToken).join("[redacted]") : message; };
     const exitIfFatal = (error: unknown) => {
       if (error instanceof Error && /poisoned|SessionFailed|session_failed/i.test(error.name + " " + error.message)) {
         console.error("存储不可用，进程退出等待重启：", redact(error.message));
@@ -68,7 +69,13 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     if (config.wechat.enabled && !modelConfigured) throw new Error("启用微信通道前请在服务器配置模型，然后重启后端");
     let peerRuntime: Runtime | undefined;
     const peers = createPeerService({ nodeId: "server", configured: () => modelConfigured,
-      devices: async () => config.password && peerRuntime ? (await peerDevices(peerRuntime, ctx)).filter(item => item.online).map(item => item.deviceId) : [],
+      devices: async () => (config.password || config.peerToken) && peerRuntime ? (await peerDevices(peerRuntime, ctx)).filter(item => item.online).map(item => item.deviceId) : [],
+      remoteSessions: async (node, session) => {
+        if (!peerRuntime || !(config.password || config.peerToken)) throw new Error("协作需要设备配对");
+        return desktopPeerSessions({ ...peerRuntime, ctx }, node, session);
+      },
+      canAddressSession: async session => Boolean(peerRuntime) && !(await peerRuntime!.harness.snapshot(DesktopTranscript, Number(session.sessionId.slice(3)) as import("@earendil-works/pi-durable").ConversationId, ctx))?.value,
+      report: error => { exitIfFatal(error); console.error("协作任务等待恢复：", redact(error instanceof Error ? error.message : error)); },
     });
     const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
       // Old versions removed Index entries without a tombstone. Reconcile before
@@ -89,8 +96,8 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     try {
       await migrateLegacyTodos(runtime.harness, daylight, ctx);
       if (wechat) { await wechat.linkLegacyTeams(teamsStore.notificationIds()); await wechat.start(); }
-      if (modelConfigured) for (const job of await peers.list()) {
-        if (job.target === "server" && (job.status === "queued" || job.status === "running")) schedulePeer(peers, job.id, error => {
+      for (const job of await peers.list()) {
+        if ((modelConfigured && job.target === "server" && (job.status === "queued" || job.status === "running")) || (job.source === "server" && job.sourceSession && (job.status === "done" || job.status === "failed"))) schedulePeer(peers, job.id, error => {
           exitIfFatal(error);
           console.error("双端任务等待恢复：", redact(error instanceof Error ? error.message : error));
         });

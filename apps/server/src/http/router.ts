@@ -3,7 +3,7 @@ import type { EntryId } from "@earendil-works/pi-durable";
 import type { AppContext } from "../application/context.js";
 import { createApi } from "../application/api.js";
 import { HttpError } from "../errors.js";
-import { sameOrigin } from "./auth.js";
+import { pairedPeer, sameOrigin } from "./auth.js";
 import { readBody, sendJson } from "./io.js";
 import { createEventStream } from "./events.js";
 
@@ -38,9 +38,10 @@ export function createRouter(context: AppContext, api = createApi(context)) {
     }
     // notes 同时携带新正文和 base；两份 128000 字正文加 JSON 转义仍有明确上限。
     const bodyLimit = /^\/api\/conversations\/\d+\/messages$/.test(path) || path === "/api/daylight/tasks/save" ? 14_000_000
+      : path === "/api/peers/conversations" ? 24 * 1024 * 1024
       : /^\/api\/conversations\/\d+\/notes$/.test(path) ? 2_000_000 : 100_000;
     const body = method === "POST" ? await readBody(req, bodyLimit) : {};
-    const result = await api.dispatch(method, url, body);
+    const result = await api.dispatch(method, url, body, pairedPeer(req, context.config));
     sendJson(res, result.status, result.data);
   };
 }
