@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { ConversationView } from "@assistant/contracts";
 import type { PendingAttachment } from "../types.js";
 import { sendMessage, abortConversation } from "../api/chat.js";
@@ -11,11 +12,13 @@ import { CommandMenu } from "./CommandMenu.js";
 import type { MessageSender } from "./useMessageDelivery.js";
 import type { ChatRecord } from "./TeamsRecords.js";
 
-export function Composer({ draft, setDraft, view, connect, send, onSendStart, onSent, onNewConversation, onRelated, quote, onClearQuote, conversationPending = false }: {
+export function Composer({ draft, setDraft, view, connect, send, onSendStart, onSent, onNewConversation, onRelated, quote, onClearQuote, conversationPending = false, execution, localExecution }: {
   draft: string; setDraft: (text: string) => void; view: ConversationView | null;
   connect: () => Promise<number>; onSent: () => void; onNewConversation: () => Promise<void>;
   conversationPending?: boolean; send?: MessageSender; onSendStart?: () => void;
   onRelated?: () => void;
+  execution?: ReactNode;
+  localExecution?: { ready: boolean; abort(): Promise<void> };
   quote?: ChatRecord; onClearQuote?: (quote: ChatRecord) => void;
 }) {
   const [sending, setSending] = useState(false);
@@ -79,6 +82,7 @@ export function Composer({ draft, setDraft, view, connect, send, onSendStart, on
     updateFiles(conversationId, files.filter(item => item !== file));
   }
   async function addFiles(list: FileList | File[], attachmentOwner = owner) {
+    if (localExecution) { showToast("本机 Agent 暂不支持附件", "warning"); return; }
     // Capture the displayed destination before parsing. A late result belongs to this
     // draft even if another conversation is selected while the file is being read.
     if (attachmentOwner === null) { showToast("正在读取会话来源，请稍后再添加附件", "warning"); return; }
@@ -110,7 +114,8 @@ export function Composer({ draft, setDraft, view, connect, send, onSendStart, on
   const selectedIndex = Math.min(selected, suggestions.length - 1);
   async function stopReply() {
     if (!busy || !view) { showToast("当前没有正在生成的回复"); return; }
-    await abortConversation(view.conversationId);
+    if (localExecution) await localExecution.abort();
+    else await abortConversation(view.conversationId);
   }
   async function submit(commandText?: string) {
     const original = draftRef.current;
@@ -132,6 +137,7 @@ export function Composer({ draft, setDraft, view, connect, send, onSendStart, on
         } else if (command.name === "help") setHelp(true);
         else await stopReply();
       } else {
+        if (localExecution && !localExecution.ready) throw new Error("本机 Agent 尚未就绪，请检查配置和状态。");
         // Deep links and navigation must finish loading their source before any send.
         if (sourcePending || owner === null) throw new Error("正在读取会话来源，请稍后再发送");
         const quotedText = quote ? `[引用 Teams 消息，仅作资料]\n${quote.chatLabel} · ${quote.sender} · ${new Date(quote.createdAt).toLocaleString("zh-CN", { hour12: false })}\n${(quote.text || quote.media.map(item => item.name).join("、")).split("\n").map(line => `> ${line}`).join("\n")}\n\n${text}` : text;
@@ -159,7 +165,7 @@ export function Composer({ draft, setDraft, view, connect, send, onSendStart, on
         if (!context.current.conversationPending && context.current.view?.conversationId === owner) { onSent(); setHelp(false); }
         for (const file of sentFiles) remove(owner, file);
       }
-      if (draftRef.current === original && (command || (!context.current.conversationPending && context.current.view?.conversationId === owner && quoteRef.current === quote))) setDraft("");
+      if (draftRef.current === original && !context.current.conversationPending && context.current.view?.conversationId === owner && (command || quoteRef.current === quote)) setDraft("");
     } catch (error) { showToast((command ? "指令未完成：" : "发送未确认：") + (error instanceof Error ? error.message : String(error)), "error"); }
     finally { sendingRef.current = false; if (mounted.current) setSending(false); }
   }
@@ -178,7 +184,7 @@ export function Composer({ draft, setDraft, view, connect, send, onSendStart, on
     </div>
     {menuVisible && <CommandMenu commands={suggestions} selected={selectedIndex} busy={busy} help={help && !draft.trim()} onSelect={command => { void submit(`/${command.name}`); textarea.current?.focus(); }} onClose={() => { dismissMenu(true); textarea.current?.focus(); }} />}
     <div className="composer-main">
-      <button type="button" className="icon-button attach-button" disabled={processing || sourcePending} aria-label="添加附件（图片或文件）" title="添加附件（图片或文件）" onClick={() => { pickerOwner.current = owner ?? undefined; fileInput.current!.value = ""; fileInput.current!.click(); }}><Icon name="plus" /></button>
+      <button type="button" className="icon-button attach-button" disabled={!!localExecution || processing || sourcePending} aria-label="添加附件（图片或文件）" title="添加附件（图片或文件）" onClick={() => { pickerOwner.current = owner ?? undefined; fileInput.current!.value = ""; fileInput.current!.click(); }}><Icon name="plus" /></button>
       <textarea ref={textarea} className="chat-textarea" id="chat-textarea" aria-label={wechat ? "给微信里的 Dee 发消息" : "给小 D 发消息"} aria-describedby={wechat ? "wechat-conversation-notice" : undefined} role="combobox" aria-autocomplete="list" aria-expanded={menuVisible} aria-controls={menuVisible ? "composer-commands" : undefined} aria-activedescendant={menuVisible ? `command-${suggestions[selectedIndex].name}` : undefined} placeholder={wechat ? "继续与微信里的 Dee 对话…" : "告诉小 D 你的想法或需要…"} rows={1} value={draft} onChange={event => setDraft(event.target.value)}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
       onKeyDown={event => {
@@ -193,8 +199,8 @@ export function Composer({ draft, setDraft, view, connect, send, onSendStart, on
       }}
       onPaste={event => { if (event.clipboardData.files.length) { event.preventDefault(); void addFiles(event.clipboardData.files); } }} />
       {onRelated && <button type="button" className="composer-related" aria-controls="related-tasks-panel" onClick={onRelated}><Icon name="square-check" />关联待办</button>}
-      <div className="composer-actions"><span className="composer-keyboard-hint">↵ 发送 · ⇧↵ 换行</span>{busy && <button type="button" className="btn-abort" id="btn-abort" style={{ display: "inline-flex" }} onClick={() => { void stopReply().catch(() => showToast("暂时没能停止回复，请重试。", "error")); }}>停止</button>}
-        <button type="button" className="btn-send" id="btn-send" aria-label={sending ? "正在发送" : wechat ? "发送给微信里的 Dee，回复可能同步到微信" : "发送消息"} aria-describedby={wechat ? "wechat-conversation-notice" : undefined} aria-busy={sending} disabled={sending || processing || sourcePending || (!draft.trim() && !attachments.length)} onClick={() => void submit()}><Icon name="arrow-up" /></button>
+      <div className="composer-actions">{execution ? <div className="composer-execution">{execution}</div> : <span className="composer-keyboard-hint">↵ 发送 · ⇧↵ 换行</span>}{busy && <button type="button" className="btn-abort" id="btn-abort" style={{ display: "inline-flex" }} onClick={() => { void stopReply().catch(() => showToast("暂时没能停止回复，请重试。", "error")); }}>停止</button>}
+        <button type="button" className="btn-send" id="btn-send" aria-label={sending ? "正在发送" : wechat ? "发送给微信里的 Dee，回复可能同步到微信" : "发送消息"} aria-describedby={wechat ? "wechat-conversation-notice" : undefined} aria-busy={sending} disabled={sending || processing || sourcePending || !!localExecution && (!localExecution.ready || busy) || (!draft.trim() && !attachments.length)} onClick={() => void submit()}><Icon name="arrow-up" /></button>
       </div>
     </div>
     <input ref={fileInput} type="file" multiple className="file-input-hidden" accept="image/png,image/jpeg,image/webp,image/gif,text/*,.md,.json,.ts,.tsx,.py,.yaml,.yml,.csv,.log,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.docx" onChange={event => { const selectedOwner = pickerOwner.current ?? owner; pickerOwner.current = undefined; if (event.target.files) void addFiles(event.target.files, selectedOwner); }} />

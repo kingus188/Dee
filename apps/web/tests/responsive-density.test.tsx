@@ -143,6 +143,14 @@ test("短窗口的指令选择只滚动菜单，不移动页面或已聚焦的�
   assert.equal(doc.activeElement, draft);
 });
 
+test("执行目标和模型与发送按钮共用工具栏，不额外占据输入框底部一行", async t => {
+  const { dom } = await mount(t, <Composer {...props} execution={<button type="button">本机 · Pi</button>} />);
+  const doc = dom.window.document, actions = doc.querySelector(".composer-actions")!;
+  assert.ok(actions.contains(doc.querySelector(".composer-execution")), "执行控件必须在发送工具栏内");
+  assert.equal(doc.querySelector(".composer-main")?.lastElementChild, actions);
+  assert.equal(actions.lastElementChild?.id, "btn-send", "发送按钮保持在工具栏末尾");
+});
+
 test("微信提示与附件有独立容器，快捷菜单和输入不在该滚动区域内", async t => {
   const { dom } = await mount(t, <Composer {...props} draft="/" view={{ ...props.view, channel: "wechat" }} />);
   const doc = dom.window.document, context = doc.querySelector(".composer-context")!;

@@ -12,8 +12,11 @@ const nativeRequire = createRequire(entry);
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 type MenuItem = { id?: string; label?: string; submenu?: MenuItem[]; click?: () => void };
 
-async function desktop(options: { localOnly?: boolean; notificationsSupported?: boolean; offline?: boolean; invalidEnvironment?: boolean; brokenPin?: boolean; noSavedConnection?: boolean; connectionError?: boolean; environment?: Record<string, string>; lan?: boolean; lanLoadFails?: boolean } = {}) {
+async function desktop(options: { notificationsSupported?: boolean; offline?: boolean; invalidEnvironment?: boolean; brokenPin?: boolean; noSavedConnection?: boolean; connectionError?: boolean; environment?: Record<string, string>; lan?: boolean; lanLoadFails?: boolean } = {}) {
   const windows: FakeWindow[] = [];
+  let agentRegistered = false;
+  let agentWindow: (() => FakeWindow | undefined) | undefined;
+  let localProtocolRegistered = false;
   const state = { offline: options.offline ?? false, notifications: 0, errors: 0, storageName: "", edits: [] as string[] };
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const saved: { config: { url: string; username?: string }; secret?: string }[] = [];
@@ -37,6 +40,11 @@ async function desktop(options: { localOnly?: boolean; notificationsSupported?: 
       super(); this.visible = options.show !== false; windows.push(this);
     }
     async loadURL(url: string) {
+      if (!url.startsWith("file:")) assert.equal(agentRegistered, true, "Agent IPC must be ready before App loads");
+      if (url.startsWith("dee:")) {
+        assert.equal(this.options.webPreferences?.partition, "persist:desktop-web");
+        assert.equal(localProtocolRegistered, true, "dee handler must belong to the workspace session");
+      }
       this.urls.push(url); this.webContents.url = url; this.webContents.mainFrame.url = url;
       if ((state.offline && url.startsWith("https:")) || (options.lanLoadFails && url.startsWith("https://192.168.31.5:3443"))) {
         this.webContents.emit("did-fail-load", {}, -109, "ERR_ADDRESS_UNREACHABLE", url, true);
@@ -65,11 +73,11 @@ async function desktop(options: { localOnly?: boolean; notificationsSupported?: 
     quit() {}, dock: { setIcon() {} },
   });
   const web = {
+    protocol: { handle(scheme: string) { assert.equal(scheme, "dee"); localProtocolRegistered = true; } },
     setCertificateVerifyProc() {}, setPermissionRequestHandler() {}, setPermissionCheckHandler() {},
     webRequest: { onBeforeSendHeaders(handler: typeof headersHook) { headersHook = handler; } }, fetch: async () => new Response(),
   };
   let openServer: ((hash?: string) => Promise<void>) | undefined;
-  let localWindow: (() => FakeWindow | undefined) | undefined;
   const electron = {
     protocol: { registerSchemesAsPrivileged() {}, handle() {} }, net: { fetch: async () => new Response() },
     app, BrowserWindow: FakeWindow,
@@ -85,7 +93,7 @@ async function desktop(options: { localOnly?: boolean; notificationsSupported?: 
     exports: {}, URL, Buffer, console, setImmediate,
     process: { platform: "darwin", env: options.invalidEnvironment ? { ASSISTANT_WEB_URL: "invalid" } : options.environment ?? {} },
     require(specifier: string) {
-      if (specifier === "./agent-ipc.js") return { registerDesktopAgent: async (input: { openServer(hash?: string): Promise<void>; getWindow(): FakeWindow | undefined }) => { openServer = input.openServer; localWindow = input.getWindow; return { close: async () => {} }; } };
+      if (specifier === "./agent-ipc.js") return { registerDesktopAgent: async (input: { openServer(hash?: string): Promise<void>; getWindow(): FakeWindow | undefined }) => { openServer = input.openServer; agentWindow = input.getWindow; agentRegistered = true; return { close: async () => {} }; } };
       if (specifier === "electron") return electron;
       if (specifier === "./skills/catalog.js") return { LocalSkillCatalog: class {} };
       if (specifier === "./skills-ipc.js") return { registerLocalSkills() {} };
@@ -100,23 +108,26 @@ async function desktop(options: { localOnly?: boolean; notificationsSupported?: 
     },
   }, { filename: fileURLToPath(entry) });
   await flush(); await flush();
-  if (!options.localOnly) { localWindow?.()?.destroy(); await openServer?.(); await flush(); }
+  // Observe startup itself; never destroy or replace a workspace on behalf of the app.
   const main = () => windows.filter(w => !w.destroyed && w.options.title !== "连接 Dee").at(-1)!;
   const settings = () => windows.filter(w => !w.destroyed && w.options.title === "连接 Dee");
   const openSettings = () => main().webContents.emit("before-input-event", { preventDefault() {} }, { meta: true, key: ",", type: "keyDown" });
-  return { openServer, app, windows, main, settings, openSettings, state, handlers, flush, saved, headersHook,
+  return { openServer, agentWindow, app, windows, main, settings, openSettings, state, handlers, flush, saved, headersHook,
     menu: () => menu,
     mailStatus: () => handlers.get("desktop:notification-status")!({ sender: main().webContents, senderFrame: main().webContents.mainFrame }),
     reportMailStatus: (status: unknown) => reportMailStatus?.(status),
   };
 }
 
-test("local navigation reuses the server window and leaves the local Agent alive", async () => {
-  const d = await desktop({ localOnly: true, lan: true });
+test("startup and server navigation use one workspace with its local Agent bridge", async () => {
+  const d = await desktop({ lan: true });
   const local = d.main();
+  assert.equal(local.webContents.getURL(), "https://192.168.31.5:3443");
+  assert.equal(d.agentWindow!(), local);
   await d.openServer!("#tasks");
+  assert.equal(d.windows.length, 1);
   const server = d.main();
-  assert.notEqual(local, server); assert.equal(local.destroyed, false);
+  assert.equal(local, server); assert.equal(local.destroyed, false);
   assert.equal(server.webContents.getURL(), "https://192.168.31.5:3443/#tasks");
   const count = d.windows.length;
   server.minimize();
@@ -130,7 +141,7 @@ test("local navigation reuses the server window and leaves the local Agent alive
 });
 
 test("server navigation reports offline state and retries when the network returns", async () => {
-  const d = await desktop({ localOnly: true, offline: true });
+  const d = await desktop({ offline: true });
   const local = d.main();
   await assert.rejects(d.openServer!("#tasks"), /服务器未连接/);
   assert.equal(local.destroyed, false);
@@ -226,7 +237,7 @@ test("saved connection starts in the main window without a connection dialog", a
 
 for (const event of ["activate", "second-instance"]) {
   test(`${event} restores a minimized main window instead of opening connection settings`, async () => {
-    const d = await desktop({ localOnly: true }); const original = d.main(); original.minimize();
+    const d = await desktop(); const original = d.main(); original.minimize();
     d.app.emit(event); await d.flush();
     assert.equal(d.main(), original);
     assert.equal(original.isMinimized(), false);
@@ -234,21 +245,25 @@ for (const event of ["activate", "second-instance"]) {
     assert.equal(d.settings().length, 0);
   });
   test(`${event} recreates a closed main window with the saved connection`, async () => {
-    const d = await desktop({ localOnly: true }); const original = d.main(); original.close();
+    const d = await desktop(); const original = d.main(); original.close();
     d.app.emit(event); await d.flush(); await d.flush();
     assert.notEqual(d.main(), original);
-    assert.ok(d.main()?.urls.includes("dee://local/"));
+    assert.ok(d.main()?.urls.includes("https://assistant.example"));
     assert.equal(d.main()?.isVisible(), true);
     assert.equal(d.settings().length, 0);
   });
 }
 
-test("startup network failure stays in a visible main window with retry, not a settings popup", async () => {
+test("startup network failure loads the offline App in the same workspace with settings available", async () => {
   const d = await desktop({ offline: true });
   assert.equal(d.settings().length, 0);
   assert.equal(d.main().isVisible(), true);
-  const page = decodeURIComponent(d.main().urls.at(-1)!);
-  assert.match(page, /重新连接/); assert.match(page, /https:\/\/assistant.example/);
+  assert.equal(d.main().webContents.getURL(), "dee://local/");
+  assert.equal(d.agentWindow!(), d.main());
+  assert.equal(d.windows.length, 1);
+  d.handlers.get("desktop:connection-open")!({ sender: d.main().webContents, senderFrame: d.main().webContents.mainFrame });
+  assert.equal(d.settings().length, 1);
+  d.settings()[0]!.close();
   d.state.offline = false; await d.main().loadURL("https://assistant.example"); await flush(); await flush();
   assert.equal(d.state.notifications, 1);
   assert.equal(d.settings().length, 0);
@@ -269,7 +284,7 @@ test("failed manual retry returns to the main window rather than reopening setti
   await d.handlers.get("desktop:connection-retry")!({ sender: settings.webContents, senderFrame: settings.webContents.mainFrame });
   assert.equal(d.main().isVisible(), true);
   assert.equal(d.settings().length, 0);
-  assert.match(decodeURIComponent(d.main().urls.at(-1)!), /重新连接/);
+  assert.equal(d.main().webContents.getURL(), "dee://local/");
 });
 
 for (const options of [{ invalidEnvironment: true }, { brokenPin: true }, { environment: { ASSISTANT_SERVER_URL: "invalid", ASSISTANT_WEB_URL: "https://legacy.example" } }]) {
@@ -288,9 +303,15 @@ test("subframe errors, aborted loads, and stale windows leave the current main w
   assert.equal(d.settings().length, 0);
   d.openSettings(); const settings = d.settings()[0]!;
   await d.handlers.get("desktop:connection-retry")!({ sender: settings.webContents, senderFrame: settings.webContents.mainFrame });
+  old.close(); d.app.emit("activate"); await d.flush(); await d.flush();
   const current = d.main();
+  const urls = [...current.urls];
   old.webContents.emit("did-fail-load", {}, -109, "old main", "https://assistant.example", true);
   assert.equal(d.main(), current); assert.equal(current.isVisible(), true);
+  assert.deepEqual(current.urls, urls);
+  for (const name of ["desktop:connection-open", "desktop:server-connect", "desktop:notification-status"]) {
+    assert.throws(() => d.handlers.get(name)!({ sender: old.webContents, senderFrame: old.webContents.mainFrame }), /Untrusted/);
+  }
   assert.equal(d.settings().length, 0);
 });
 
@@ -335,9 +356,25 @@ test("settings page switches the native server without carrying previous credent
   assert.equal(d.saved[0]!.config.username, undefined);
   assert.equal(d.saved[0]!.secret, undefined);
   await d.flush(); await d.flush();
-  assert.equal(original.isDestroyed(), true);
+  assert.equal(original.isDestroyed(), false);
+  assert.equal(d.main(), original);
   assert.ok(d.main().urls.includes("https://backend.example"));
-  assert.throws(() => d.handlers.get("desktop:server-connect")!(event, "https://stale.example"), /Untrusted server connection window/);
+  const stale = { sender: {}, senderFrame: original.webContents.mainFrame };
+  assert.throws(() => d.handlers.get("desktop:server-connect")!(stale, "https://stale.example"), /Untrusted server connection window/);
+});
+
+test("offline workspace reconnects to the same configured server without replacing its window", async () => {
+  const d = await desktop();
+  const current = d.main();
+  current.webContents.mainFrame.url = "dee://local/#settings";
+  const before = current.urls.length;
+  const result = d.handlers.get("desktop:server-connect")!({ sender: current.webContents, senderFrame: current.webContents.mainFrame }, "https://assistant.example") as { ok: boolean };
+  assert.equal(result.ok, true);
+  await d.flush(); await d.flush();
+  assert.equal(d.main(), current);
+  assert.ok(current.urls.length > before);
+  assert.equal(current.urls.at(-1), "https://assistant.example");
+  assert.equal(d.saved.length, 0, "重连同一服务器不能清除原账号配置");
 });
 
 test("server switch only accepts a trusted top frame and a valid backend root", async () => {
@@ -385,16 +422,18 @@ test("unsupported native notifications do not claim shared deliveries and leave 
   assert.equal(d.state.notifications, 0);
 });
 for (const noSavedConnection of [false, true]) {
-  test(`connection read failure never navigates to a backend or falls back to another app (${noSavedConnection})`, async () => {
+  test(`connection read failure skips backend and opens the offline workspace (${noSavedConnection})`, async () => {
     const d = await desktop({ connectionError: true, noSavedConnection });
     assert.equal(d.settings().length, 0);
-    assert.ok(d.main().urls.every(url => url.startsWith("file:")));
-    assert.match(new URL(d.main().urls.at(-1)!).searchParams.get("message")!, /连接读取失败/);
+    assert.ok(d.main().urls.every(url => url.startsWith("file:") || url === "dee://local/"));
+    assert.equal(d.main().urls.at(-1), "dee://local/");
+    assert.match(new URL(d.main().urls.find(url => url.startsWith("file:"))!).searchParams.get("message")!, /连接读取失败/);
     let prevented = false;
     d.main().webContents.emit("will-navigate", { preventDefault: () => { prevented = true; } }, noSavedConnection ? "http://127.0.0.1:3000" : "https://assistant.example");
     assert.equal(prevented, true);
     d.main().close(); d.app.emit("activate"); await d.flush(); await d.flush();
-    assert.ok(d.main().urls.every(url => url === "dee://local/"));
+    assert.equal(d.main().urls.at(-1), "dee://local/");
+    assert.ok(d.main().urls.every(url => url.startsWith("file:") || url === "dee://local/"));
     await d.openServer?.(); d.openSettings(); const settings = d.settings()[0]!;
     const event = { sender: settings.webContents, senderFrame: settings.webContents.mainFrame };
     assert.equal((d.handlers.get("desktop:connection-save")!(event, { url: "https://assistant.example", username: "fixture", password: "fixture" }) as { ok: boolean }).ok, true);

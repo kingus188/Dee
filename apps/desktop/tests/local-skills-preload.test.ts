@@ -13,7 +13,22 @@ test("skills preload exposes only named operations and never a generic IPC or fi
       ipcRenderer: { invoke: (...args: unknown[]) => { calls.push(args); return Promise.resolve(null); } },
     };
   } });
-  assert.deepEqual([...bridges.keys()].sort(), ["desktopConnection", "desktopServer", "localSkills"]);
+  assert.deepEqual([...bridges.keys()].sort(), ["desktopAgent", "desktopConnection", "desktopServer", "localSkills"]);
+  const agent = bridges.get("desktopAgent")!;
+  assert.equal(agent.platform, "darwin");
+  const operations: [string, string, unknown[]][] = [
+    ["snapshot", "snapshot", []], ["selectAgent", "select-agent", ["native"]], ["newSession", "new-session", []],
+    ["answerApproval", "answer-approval", [{ id: "approval", allow: true }]], ["send", "send", [{ text: "hello" }]],
+    ["peerSessions", "peer-sessions", ["server"]], ["readPeerSession", "read-peer-session", [{ id: "session" }]],
+    ["sendPeer", "send-peer", [{ text: "relay" }]], ["peerStatus", "peer-status", ["peer"]],
+    ["chooseWorkspace", "choose-workspace", []], ["approve", "approve", ["approval"]], ["reject", "reject", ["approval"]],
+    ["abort", "abort", []], ["openServer", "open-server", ["#tasks"]], ["openConnection", "open-connection", []],
+  ];
+  assert.deepEqual(Object.keys(agent).sort(), ["platform", ...operations.map(([name]) => name)].sort());
+  for (const [method, channel, args] of operations) {
+    await agent[method]!(...args);
+    assert.deepEqual(calls.shift(), [`desktop:agent:${channel}`, ...args]);
+  }
   const server = bridges.get("desktopServer")!;
   assert.deepEqual(Object.keys(server), ["platform", "connect", "openSettings", "notificationStatus"]);
   assert.equal(server.platform, "darwin");

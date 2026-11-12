@@ -1,7 +1,7 @@
 import type { CardGroup } from "../chat/cards.js";
 
 export type WorkspacePage = "home" | "chat" | "teams" | "daylight" | "activity" | "data" | "reports" | "settings";
-export type WorkspaceRoute = { page: WorkspacePage; group: CardGroup | null; conversationId?: number; chatId?: string; taskId?: string; skillSource?: "remote" };
+export type WorkspaceRoute = { page: WorkspacePage; group: CardGroup | null; conversationId?: number; chatId?: string; taskId?: string; skillSource?: "remote"; execution?: "local" | "server" };
 const groups: Record<string, CardGroup> = { memory: "memory", skills: "skills", notes: "notes", schedules: "tasks" };
 
 export function readWorkspaceRoute(hash: string): WorkspaceRoute {
@@ -23,6 +23,7 @@ export function readWorkspaceRoute(hash: string): WorkspaceRoute {
     }
     return { page: "teams", group: null };
   }
+  if (name === "chat" && rawId === "local" && extra === undefined) return { page: "chat", group: null, execution: "local" };
   const id = rawId && /^\d+$/.test(rawId) ? Number(rawId) : undefined;
   const conversationId = id !== undefined && Number.isSafeInteger(id) && id > 0 ? id : undefined;
   if (Object.hasOwn(groups, name)) return { page: "data", group: groups[name], conversationId };
@@ -32,6 +33,7 @@ export function readWorkspaceRoute(hash: string): WorkspaceRoute {
 }
 
 export function workspaceHash(route: WorkspaceRoute): string {
+  if (route.page === "chat" && route.execution === "local") return "#chat/local";
   if (route.page === "data" && route.group === "skills" && route.skillSource === "remote") return "#skills/remote";
   const name = route.page === "data" ? route.group === "tasks" ? "schedules" : route.group ?? "memory" : route.page === "home" ? "today" : route.page === "daylight" ? "tasks" : route.page;
   if (route.page === "teams" && route.chatId) return `#teams/${encodeURIComponent(route.chatId)}`;

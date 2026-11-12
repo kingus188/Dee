@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
+import { JSDOM } from "jsdom";
 
 const root = new URL("../dist/", import.meta.url);
 test("React 浏览器产物已打包，不依赖 npm 裸导入或内联按钮入口", async () => {
@@ -26,6 +27,30 @@ test("workspace stylesheets and current React Lucide icons are packaged", async 
   assert.ok((await readFile(new URL("today.css", root))).length > 0);
   assert.ok((await readFile(new URL("teams-conversations.css", root))).length > 0);
   assert.match(await readFile(new URL("index.html", root), "utf8"), /href="\/teams-conversations\.css"/);
+});
+
+test("本地和已发布首页必须按源码顺序加载全部共享样式，不能只上传 CSS 文件", async () => {
+  const styles = (html: string) => {
+    const dom = new JSDOM(html, { url: "https://release.example" });
+    try {
+      return [...dom.window.document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"], link[rel="preload"][as="style"]')].map(link => new URL(link.href).pathname);
+    } finally { dom.window.close(); }
+  };
+  const source = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+  const required = styles(source);
+  assert.ok(required.includes("/desktop-agent.css"));
+  const verify = (html: string) => {
+    const loaded = styles(html).filter(path => required.includes(path));
+    assert.deepEqual(loaded, required, "入口遗漏样式或改变了覆盖顺序");
+  };
+  verify(source);
+  assert.throws(() => verify(source.replace(/<link[^>]+href="\/desktop-agent\.css"[^>]*>/, "")), /入口遗漏样式/);
+  verify(await readFile(new URL("index.html", root), "utf8"));
+  if (process.env.WEB_RELEASE_ORIGIN) {
+    const response = await fetch(new URL("/", process.env.WEB_RELEASE_ORIGIN), { signal: AbortSignal.timeout(15000) });
+    assert.equal(response.status, 200);
+    verify(await response.text());
+  }
 });
 
 test("打包后跨页面字号受同一偏好控制，组件尺寸不缩放外框或原生按钮空间", async () => {

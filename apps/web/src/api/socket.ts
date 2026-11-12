@@ -21,7 +21,10 @@ export class ApiClient {
   private rejectConnection: ((error: Error) => void) | undefined;
   private state: ConnectionState = "connecting";
 
-  constructor(private readonly url: () => string = () => `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/socket`) {}
+  constructor(private readonly url: () => string = () => {
+    if (window.location.protocol === "dee:") throw new Error("服务器未连接，请在连接设置中重试。");
+    return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/api/socket`;
+  }) {}
   onView(listener: (view: ConversationView) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   onConnection(listener: (state: ConnectionState) => void) {
     this.connectionListeners.add(listener); listener(this.state);
@@ -33,11 +36,14 @@ export class ApiClient {
     if (this.closed) return Promise.reject(new Error("连接已关闭"));
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
     if (this.connecting) return this.connecting;
+    let url: string;
+    try { url = this.url(); }
+    catch (cause) { this.notify("disconnected"); return Promise.reject(cause); }
     clearTimeout(this.retryTimer); this.retryTimer = undefined;
     this.notify("connecting");
     this.connecting = new Promise<void>((resolve, reject) => {
       this.rejectConnection = reject;
-      const socket = new WebSocket(this.url());
+      const socket = new WebSocket(url);
       this.socket = socket;
       this.connectTimer = setTimeout(() => {
         if (this.socket === socket && socket.readyState !== WebSocket.OPEN) {

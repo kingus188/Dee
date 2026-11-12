@@ -8,6 +8,7 @@ type Options = {
   shell: Pick<Shell, "showItemInFolder">;
   catalog: LocalSkillCatalog;
   getWindow(): BrowserWindow | undefined;
+  localUrl?: string;
   getOrigin(): string;
 };
 
@@ -15,7 +16,7 @@ export function registerLocalSkills(options: Options) {
   function trusted(event: IpcMainInvokeEvent) {
     const window = options.getWindow();
     if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame ||
-      !isAppUrl(event.senderFrame.url.split("#")[0] ?? "", options.getOrigin())) throw new Error("Untrusted local skills window");
+      (event.senderFrame.url.split("#")[0] !== options.localUrl && !isAppUrl(event.senderFrame.url.split("#")[0] ?? "", options.getOrigin()))) throw new Error("Untrusted local skills window");
     return window;
   }
   let changing = false;

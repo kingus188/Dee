@@ -1,9 +1,32 @@
 import test from "node:test";
+import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { act } from "react";
 import type { DesktopAgentBridge, DesktopAgentSnapshot, DesktopAgentSelection } from "@assistant/contracts";
-import { DesktopAgent } from "../dist/desktop/DesktopAgent.js";
-import { mount } from "./dom.js";
+import { App as DesktopAgent } from "../dist/ui/App.js";
+import { apiClient } from "../dist/api/socket.js";
+import { mount as mountDom } from "./dom.js";
+
+async function mount(t: TestContext) {
+  t.mock.method(apiClient, "connect", async () => {});
+  t.mock.method(apiClient, "onConnection", () => () => {});
+  t.mock.method(apiClient, "onView", () => () => {});
+  t.mock.method(apiClient, "subscribeConversation", async () => {});
+  t.mock.method(apiClient, "request", async (path: string) => {
+    if (path === "/api/conversations") return [];
+    if (path === "/api/personal") return { memory: [], skills: [], knowledge: { enabled: false, allow: [] } };
+    if (path === "/api/workspace/activities") return { items: [], total: 0, truncated: false };
+    if (path === "/api/notifications/reads") return { keys: [] };
+    if (path === "/api/teams/conversations") return { available: false, items: [], nextCursor: null, fetchedAt: "2026-11-12T00:00:00Z" };
+    if (path === "/api/daylight") return { projects: [], tasks: [] };
+    throw new Error(`Unexpected test API request: ${path}`);
+  });
+  // Tests install the native bridge after creating the DOM. Do not initialize App's
+  // execution preference until that bridge is present; later renders keep one shell.
+  const mounted = await mountDom(t, null);
+  mounted.dom.window.history.replaceState(null, "", "#chat/local");
+  return mounted;
+}
 
 function snapshot(configured = true): DesktopAgentSnapshot {
   return {
@@ -26,7 +49,7 @@ test("明确目标的外部会话可在忙时批准排队，不要求 Pi 配置�
   state.jobs = [{ id: "job", source: "server", target: state.nodeId, targetSession: { agent: "claude", sessionId: "target-session" }, task: "已有会话任务", status: "queued", createdAt: "now", updatedAt: "now" }];
   const native = bridge(state);
   const approve = t.mock.method(native, "approve", async () => { state.jobs[0]!.approved = true; });
-  const { dom, render } = await mount(t, <DesktopAgent />);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native }); await render(<DesktopAgent />);
   const document = dom.window.document;
   const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === "批准 Claude Code 执行")!;
@@ -38,14 +61,14 @@ test("明确目标的外部会话可在忙时批准排队，不要求 Pi 配置�
   assert.ok(!document.body.textContent!.includes("批准 Pi 执行"));
 });
 
-test("断线仅在 header 显示警告图标，详情可访问且本机输入仍可用", async t => {
+test("断线仅在 composer 显示警告图标，详情可访问且本机输入仍可用", async t => {
   const state = snapshot();
   state.error = "服务器连接中断，正在自动重连；本机对话已保留。";
-  const { dom, render } = await mount(t, null);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: bridge(state) });
   await render(<DesktopAgent />);
   const document = dom.window.document;
-  const warning = document.querySelector<HTMLElement>(".desktop-agent-header [role='alert']");
+  const warning = document.querySelector<HTMLElement>(".composer-execution [role='alert']");
   assert.ok(warning);
   assert.equal(warning.title, state.error);
   assert.equal(warning.getAttribute("aria-label"), state.error);
@@ -58,15 +81,16 @@ test("断线仅在 header 显示警告图标，详情可访问且本机输入仍
   state.serverConnected = true; state.collaboration = "ready"; delete state.error;
   await render(<DesktopAgent />);
   assert.equal(document.querySelector("[role='alert']"), null);
-  assert.match(document.querySelector(".desktop-agent-server")!.textContent!, /双端已连接/);
+  assert.equal(document.querySelector<HTMLSelectElement>('[aria-label="对话执行模式"]')!.value, "local");
+  assert.equal(document.querySelectorAll("#mascot-card").length, 1);
 });
 
-test("本机 header 为 Pi 和外部 Agent 提供新对话，失败保留草稿且重复点击只提交一次", async t => {
+test("共用导航为 Pi 和外部 Agent 提供新对话，失败保留草稿且重复点击只提交一次", async t => {
   for (const agent of ["pi", "codex"] as const) await t.test(agent, async t => {
     const state = snapshot(); state.agent = agent;
     state.messages = [{ id: "old", role: "user", text: "旧对话" }];
     const native = bridge(state);
-    const { dom, render } = await mount(t, null);
+    const { dom, render } = await mount(t);
     Object.defineProperty(dom.window, "desktopAgent", { value: native });
     await render(<DesktopAgent />);
     const document = dom.window.document, input = document.querySelector<HTMLTextAreaElement>("textarea")!;
@@ -74,8 +98,8 @@ test("本机 header 为 Pi 和外部 Agent 提供新对话，失败保留草稿�
       Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!.call(input, "未发送草稿");
       input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
     });
-    const button = document.querySelector<HTMLButtonElement>('.desktop-agent-header [aria-label="新对话"]');
-    assert.ok(button); assert.ok(button.querySelector("svg use")); assert.equal(button.textContent, "");
+    const button = document.querySelector<HTMLButtonElement>('.workspace-compose');
+    assert.ok(button); assert.ok(button.querySelector("svg use")); assert.equal(button.getAttribute("aria-label"), "新对话");
     const fresh = t.mock.method(native, "newSession", async () => { throw new Error("新建失败"); });
     await act(async () => button.click());
     assert.equal(input.value, "未发送草稿");
@@ -84,29 +108,34 @@ test("本机 header 为 Pi 和外部 Agent 提供新对话，失败保留草稿�
     fresh.mock.mockImplementation(async () => { state.messages = []; });
     await act(async () => { button.click(); button.click(); });
     assert.equal(fresh.mock.callCount(), 2);
-    assert.equal(document.querySelector("#message-history")!.textContent, "");
+    assert.ok(document.querySelector("#message-history .chat-welcome"));
+    assert.doesNotMatch(document.querySelector("#message-history")!.textContent!, /旧对话/);
+    await act(async () => new Promise<void>(resolve => dom.window.requestAnimationFrame(() => resolve())));
     assert.equal(input.value, ""); assert.equal(document.activeElement, input);
     state.busy = true;
     await render(null); await render(<DesktopAgent />);
-    assert.equal(document.querySelector<HTMLButtonElement>('.desktop-agent-header [aria-label="新对话"]')!.disabled, true);
+    assert.equal(document.querySelector<HTMLButtonElement>('.workspace-compose')!.disabled, true);
     await render(null);
   });
 });
 
 test("本机助手使用原生平台避让标题栏，不显示目录选择", async t => {
   const native = { ...bridge(snapshot()), platform: "darwin" };
-  const { dom, render } = await mount(t, <DesktopAgent />);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native });
   await render(<DesktopAgent />);
   const document = dom.window.document;
-  assert.equal(document.querySelector(".desktop-agent")!.getAttribute("data-desktop"), "darwin");
+  assert.equal(document.querySelector("#mascot-card")!.getAttribute("data-desktop"), "darwin");
   assert.equal(document.querySelector(".desktop-agent-workspace"), null);
   assert.ok(!document.body.textContent!.includes("选择工作目录"));
   assert.ok(!document.body.textContent!.includes("服务器工作区"));
   const openServer = t.mock.method(native, "openServer", async () => {});
-  const server = [...document.querySelectorAll<HTMLButtonElement>(".desktop-agent-controls button")].find(button => button.textContent === "服务器")!;
-  await act(async () => server.click());
-  assert.equal(openServer.mock.callCount(), 1);
+  const server = document.querySelector<HTMLSelectElement>('[aria-label="对话执行模式"]')!;
+  await act(async () => { server.value = "server"; server.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
+  assert.equal(document.querySelector<HTMLSelectElement>('[aria-label="对话执行模式"]')!.value, "server");
+  assert.equal(dom.window.location.hash, "#chat");
+  assert.equal(document.querySelectorAll("#mascot-card").length, 1);
+  assert.equal(openServer.mock.callCount(), 0);
 });
 
 test("本机导航保留对话与草稿，服务器内容按路由打开，轮询不关闭更多菜单", async t => {
@@ -114,7 +143,7 @@ test("本机导航保留对话与草稿，服务器内容按路由打开，轮�
   state.serverConnected = true; state.collaboration = "ready";
   state.messages = [{ id: "local", role: "user", text: "本机会话" }];
   const native = bridge(state);
-  const { dom, render } = await mount(t, <DesktopAgent />);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native });
   await render(<DesktopAgent />);
   const document = dom.window.document;
@@ -131,31 +160,39 @@ test("本机导航保留对话与草稿，服务器内容按路由打开，轮�
   assert.equal(open.mock.callCount(), 0);
   for (const [label, hash] of [["Daylight 待办", "#tasks"], ["通知中心", "#activity"]]) {
     await act(async () => document.querySelector<HTMLAnchorElement>(`[aria-label="${label}"]`)!.click());
-    assert.deepEqual(open.mock.calls.at(-1)!.arguments, [hash]);
+    assert.equal(dom.window.location.hash, hash);
+    assert.equal(open.mock.callCount(), 0);
   }
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="更多菜单"]')!.click());
   await render(<DesktopAgent />);
   assert.equal(document.querySelector('[aria-label="更多菜单"]')!.getAttribute("aria-expanded"), "true");
   await act(async () => document.querySelector<HTMLAnchorElement>('[aria-label="笔记"]')!.click());
-  assert.deepEqual(open.mock.calls.at(-1)!.arguments, ["#notes"]);
+  assert.equal(dom.window.location.hash, "#notes");
+  assert.equal(open.mock.callCount(), 0);
   assert.equal(document.querySelector('[aria-label="更多菜单"]')!.getAttribute("aria-expanded"), "false");
   assert.equal(document.querySelector(".workspace-frame"), frame);
   assert.equal(document.querySelector(".chat-column"), chat);
   assert.equal(input.value, "尚未发送");
+  await act(async () => document.querySelector<HTMLAnchorElement>('[aria-label="继续对话"]')!.click());
+  assert.equal(dom.window.location.hash, "#chat/local");
+  assert.equal(document.querySelector<HTMLTextAreaElement>("textarea"), input);
   assert.match(document.querySelector("#message-history")!.textContent!, /本机会话/);
-  assert.match(document.querySelector(".desktop-agent-server")!.textContent!, /双端已连接/);
+  assert.equal(document.querySelector<HTMLSelectElement>('[aria-label="对话执行模式"]')!.value, "local");
+  assert.equal(document.querySelectorAll("#mascot-card").length, 1);
   assert.equal(send.mock.callCount(), 0); assert.equal(fresh.mock.callCount(), 0);
-  open.mock.mockImplementation(async () => { throw new Error("服务器未连接"); });
-  await act(async () => document.querySelector<HTMLAnchorElement>('[aria-label="Daylight 待办"]')!.click());
-  assert.match(document.querySelector('.desktop-agent-header [role="alert"]')!.getAttribute("aria-label")!, /服务器未连接/);
-  assert.equal(input.disabled, false);
+  await act(async () => document.querySelector<HTMLAnchorElement>('[aria-label="继续对话"]')!.click());
+  assert.equal(dom.window.location.hash, "#chat/local");
+  state.serverConnected = false; state.error = "服务器未连接";
+  await render(null); await render(<DesktopAgent />);
+  assert.match(document.querySelector('.composer-execution [role="alert"]')!.getAttribute("aria-label")!, /服务器未连接/);
+  assert.equal(document.querySelector<HTMLTextAreaElement>("textarea")!.disabled, false);
 });
 
 test("本机侧栏沿用原有展开和收起状态，切换不重建对话或丢失草稿", async t => {
   const state = snapshot();
   state.messages = [{ id: "local", role: "user", text: "正在继续的本机对话" }];
   const native = bridge(state);
-  const { dom, render } = await mount(t, <DesktopAgent />);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native });
   await render(<DesktopAgent />);
   const document = dom.window.document, shell = document.querySelector("#mascot-card"), frame = document.querySelector("main"), chat = document.querySelector(".chat-column");
@@ -180,22 +217,22 @@ test("本机侧栏沿用原有展开和收起状态，切换不重建对话或�
 });
 
 test("窄窗口侧栏使用原有覆盖布局，可用遮罩和 Escape 关闭并恢复焦点", async t => {
-  const { dom, render } = await mount(t, null);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: bridge(snapshot()) });
   Object.defineProperty(dom.window, "matchMedia", { value: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) });
   await render(<DesktopAgent />);
   const document = dom.window.document;
   assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="展开历史对话"]')!.click());
-  assert.equal(document.querySelector('[aria-label="本机对话侧栏"]')!.getAttribute("aria-modal"), "true");
-  assert.ok(document.querySelector(".desktop-agent-content")!.hasAttribute("inert"));
+  assert.equal(document.querySelector('[aria-label="历史对话侧栏"]')!.getAttribute("aria-modal"), "true");
+  assert.ok(document.querySelector("#workspace")!.hasAttribute("inert"));
   await act(async () => document.querySelector<HTMLButtonElement>(".history-backdrop")!.click());
   assert.equal(document.querySelector(".history-backdrop"), null);
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="展开历史对话"]')!.click());
   await act(async () => document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   assert.equal(document.querySelector(".conversation-sidebar")!.getAttribute("data-expanded"), "false");
   assert.equal(document.activeElement, document.querySelector(".sidebar-toggle"));
-  assert.equal(document.querySelector(".desktop-agent-content")!.hasAttribute("inert"), false);
+  assert.equal(document.querySelector("#workspace")!.hasAttribute("inert"), false);
 });
 
 test("本机侧栏与服务模式共用来源、搜索和分组布局，来源跳转不丢失本机对话", async t => {
@@ -203,13 +240,13 @@ test("本机侧栏与服务模式共用来源、搜索和分组布局，来源�
   state.messages = [{ id: "local", role: "user", text: "本机待处理事项" }];
   const native = bridge(state);
   const openServer = t.mock.method(native, "openServer", async (_hash?: string) => {});
-  const { dom, render } = await mount(t, null);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native });
   await render(<DesktopAgent />);
   const document = dom.window.document, chat = document.querySelector(".chat-column");
   const panel = document.querySelector(".conversation-history")!;
   assert.match(panel.querySelector(".history-search kbd")!.textContent!, /^(⌘K|Ctrl K)$/);
-  assert.equal(panel.querySelector(".history-heading")!.textContent, "当前对话");
+  assert.equal(panel.querySelector(".history-heading")!.textContent, "本机");
   assert.equal(panel.querySelector(".history-row-title")!.textContent, "本机待处理事项");
   assert.ok(panel.querySelector(".conversation-new-button"), "Pi 和外部 Agent 共用新对话入口");
   const source = panel.querySelector<HTMLSelectElement>('[aria-label="切换对话来源"]')!;
@@ -218,7 +255,11 @@ test("本机侧栏与服务模式共用来源、搜索和分组布局，来源�
     source.value = "teams";
     source.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   });
-  assert.deepEqual(openServer.mock.calls[0]!.arguments, ["#teams"]);
+  assert.equal(openServer.mock.callCount(), 0);
+  assert.equal(dom.window.location.hash, "#teams");
+  await act(async () => document.querySelector<HTMLAnchorElement>('[aria-label="继续对话"]')!.click());
+  assert.equal(dom.window.location.hash, "#chat/local");
+  assert.match(document.querySelector("#message-history")!.textContent!, /本机待处理事项/);
   assert.equal(source.value, "assistant");
   assert.equal(document.querySelector(".chat-column"), chat);
   document.querySelector<HTMLTextAreaElement>("textarea")!.focus();
@@ -230,7 +271,7 @@ test("本机侧栏与服务模式共用来源、搜索和分组布局，来源�
     search.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   });
   assert.equal(panel.querySelector(".history-list a"), null);
-  assert.match(panel.querySelector(".history-list")!.textContent!, /没有匹配的本机会话/);
+  assert.match(panel.querySelector(".history-list")!.textContent!, /没有匹配的对话/);
   await act(async () => document.querySelector<HTMLButtonElement>(".sidebar-toggle")!.click());
   await act(async () => {
     document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
@@ -245,7 +286,7 @@ test("外部 Agent 的新会话沿用服务模式导航和侧栏入口，执行�
   const state = snapshot();
   state.agent = "codex";
   const native = bridge(state), fresh = t.mock.method(native, "newSession", async () => {});
-  const { dom, render } = await mount(t, null);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native });
   await render(<DesktopAgent />);
   const document = dom.window.document;
@@ -263,7 +304,7 @@ test("未配置 Pi 禁止发送，不再弹出或提供模型和密钥表单", a
   const state = snapshot(false);
   state.error = "请先在 Pi 中选择默认模型，然后重新选择 Pi。";
   const native = bridge(state);
-  const { dom, render } = await mount(t, <DesktopAgent />);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native });
   await render(<DesktopAgent />);
   const document = dom.window.document;
@@ -271,13 +312,17 @@ test("未配置 Pi 禁止发送，不再弹出或提供模型和密钥表单", a
   assert.equal(document.querySelector('[aria-label="本机模型设置"]'), null);
   assert.equal(document.querySelector('[name="apiKey"]'), null);
   assert.equal(document.querySelector(".desktop-agent-panel"), null);
-  assert.match(document.querySelector('.desktop-agent-header [role="alert"]')!.getAttribute("aria-label")!, /在 Pi 中选择默认模型/);
+  assert.match(document.querySelector('.composer-execution [role="alert"]')!.getAttribute("aria-label")!, /在 Pi 中选择默认模型/);
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="执行 Agent"]')!.click());
   assert.equal(document.querySelector(".agent-picker-footer button"), null);
   const select = t.mock.method(native, "selectAgent", async () => {});
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="选择 Pi"]')!.click());
   assert.deepEqual(select.mock.calls[0]!.arguments, [{ kind: "pi" }]);
-  assert.equal(dom.window.localStorage.length, 0);
+  for (let i = 0; i < dom.window.localStorage.length; i++) {
+    const key = dom.window.localStorage.key(i)!;
+    assert.doesNotMatch(key, /api.?key|secret|token|credential/i);
+    assert.doesNotMatch(dom.window.localStorage.getItem(key)!, /api.?key|secret|token|credential|example\.invalid|local-model/i);
+  }
 });
 
 test("发送防重复，未确认重试使用同一 UUID，服务端任务逐项批准或拒绝", async t => {
@@ -290,7 +335,7 @@ test("发送防重复，未确认重试使用同一 UUID，服务端任务逐项
   );
   state.messages = [{ id: "assistant-1", role: "assistant", text: "**本机回复** <script>alert(1)</script>" }];
   const native = bridge(state);
-  const { dom, render } = await mount(t, <DesktopAgent />);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native });
   let reject!: (error: Error) => void;
   const send = t.mock.method(native, "send", () => new Promise<void>((_, fail) => { reject = fail; }));
@@ -302,16 +347,13 @@ test("发送防重复，未确认重试使用同一 UUID，服务端任务逐项
     Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "检查文件");
     textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   });
-  const form = document.querySelector("form")!;
-  await act(async () => {
-    form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
-    form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
-  });
+  const sendButton = document.querySelector<HTMLButtonElement>("#btn-send")!;
+  await act(async () => { sendButton.click(); sendButton.click(); });
   assert.equal(send.mock.callCount(), 1);
   await act(async () => reject(new Error("发送结果未确认")));
-  assert.match(document.querySelector('.desktop-agent-header [role="alert"]')!.getAttribute("aria-label")!, /发送结果未确认/);
+  assert.match(document.querySelector('.composer-execution [role="alert"]')!.getAttribute("aria-label")!, /发送结果未确认/);
   assert.equal(textarea.value, "检查文件");
-  await act(async () => { form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
+  await act(async () => sendButton.click());
   assert.equal(send.mock.callCount(), 2);
   assert.equal(send.mock.calls[0]!.arguments[0]!.id, send.mock.calls[1]!.arguments[0]!.id);
   assert.match(send.mock.calls[0]!.arguments[0]!.id, /^[\da-f-]{36}$/i);
@@ -325,7 +367,7 @@ test("发送防重复，未确认重试使用同一 UUID，服务端任务逐项
   assert.equal(buttons.length, 2);
   await act(async () => buttons[0]!.click()); assert.equal(approve.mock.calls[0]!.arguments[0], "job-1");
   await act(async () => buttons[1]!.click()); assert.equal(deny.mock.calls[0]!.arguments[0], "job-1");
-  assert.equal(document.querySelector("#message-history strong")!.textContent, "小 D");
+  assert.equal(document.querySelector("#message-history .assistant-identity strong")!.textContent, "Dee");
   assert.equal(document.querySelector("#message-history script"), null);
 });
 
@@ -333,7 +375,7 @@ test("轮询不重叠，卸载后未完成的 snapshot 不再安排下一轮", a
   const native = bridge(snapshot());
   let resolve!: (state: DesktopAgentSnapshot) => void;
   const read = t.mock.method(native, "snapshot", () => new Promise<DesktopAgentSnapshot>(done => { resolve = done; }));
-  const { dom, render } = await mount(t, <DesktopAgent />);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native });
   t.mock.timers.enable({ apis: ["setTimeout"] });
   await render(<DesktopAgent />);
@@ -351,13 +393,13 @@ test("external Agent selection does not require Pi API settings and displays bou
   state.external = { status: "waiting", sessionId: "native-hidden", activities: [{ id: "command", title: "读取工作区", status: "running" }], approvals: [{ id: "approval", title: "Codex 请求执行命令", detail: "<script>secret()</script>" }] };
   const native = bridge(state);
   const answer = t.mock.method(native, "answerApproval", async () => { state.external!.approvals = []; state.external!.status = "running"; });
-  const { dom, render } = await mount(t, <DesktopAgent />);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native });
   await render(<DesktopAgent />);
   const document = dom.window.document;
   assert.equal(document.querySelector('[name="apiKey"]'), null);
   assert.equal(document.querySelector<HTMLButtonElement>('[aria-label="执行 Agent"]')!.disabled, true);
-  assert.match(document.body.textContent!, /等待你处理/);
+  const waiting = document.body.textContent!;
   assert.ok(!document.body.textContent!.includes("native-hidden"));
   assert.equal(document.querySelector(".desktop-agent-request script"), null);
   assert.equal(document.querySelector(".desktop-agent-request pre")!.textContent, "<script>secret()</script>");
@@ -366,40 +408,41 @@ test("external Agent selection does not require Pi API settings and displays bou
   assert.equal(answer.mock.callCount(), 1);
   assert.deepEqual(answer.mock.calls[0]!.arguments[0], { id: "approval", allow: false });
   assert.equal(document.querySelector(".desktop-agent-request"), null);
+  assert.match(waiting, /等待你处理/);
 });
 
-test("switching to Claude uses the Agent bridge and keeps Pi model form out of the external settings", async t => {
+for (const [kind, name] of [["claude", "Claude Code"]] as const) test(`switching to ${name} uses the Agent bridge and keeps Pi model form out of the external settings`, async t => {
   const state = snapshot(), native = bridge(state);
-  const select = t.mock.method(native, "selectAgent", async (input: DesktopAgentSelection) => { state.agent = input.kind; state.agentConfig = { executable: "claude", args: [] }; });
-  const { dom, render } = await mount(t, <DesktopAgent />);
+  const select = t.mock.method(native, "selectAgent", async (input: DesktopAgentSelection) => { state.agent = input.kind; state.agentConfig = { executable: kind, args: [] }; });
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native }); await render(<DesktopAgent />);
   const document = dom.window.document, picker = document.querySelector<HTMLButtonElement>('[aria-label="执行 Agent"]')!;
   await act(async () => picker.click());
-  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="选择 Claude Code"]')!.click());
-  assert.equal(select.mock.calls[0]!.arguments[0]!.kind, "claude");
+  await act(async () => document.querySelector<HTMLButtonElement>(`[aria-label="选择 ${name}"]`)!.click());
+  assert.equal(select.mock.calls[0]!.arguments[0]!.kind, kind);
   assert.equal(picker.getAttribute("aria-expanded"), "false");
-  assert.match(picker.textContent!, /Claude Code.*默认模型/);
+  assert.match(picker.textContent!, new RegExp(`${name}.*默认模型`));
   assert.equal(document.activeElement, picker);
-  const settingsButton = [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Agent 设置")!;
+  const settingsButton = document.querySelector<HTMLButtonElement>('[aria-label="Agent 设置"]')!;
   await act(async () => settingsButton.click());
   assert.ok(document.querySelector('[aria-label="外部 Agent 设置"]'));
   assert.equal(document.querySelector('[name="apiKey"]'), null);
-  assert.equal(document.querySelector<HTMLInputElement>('[name="executable"]')!.value, "claude");
+  assert.equal(document.querySelector<HTMLInputElement>('[name="executable"]')!.value, kind);
 });
 
 test("composer picker filters real Agent options, supports keyboard navigation and dismisses without sending", async t => {
   const state = snapshot(), native = bridge(state);
   const send = t.mock.method(native, "send", async () => {});
   const select = t.mock.method(native, "selectAgent", async (input: DesktopAgentSelection) => { state.agent = input.kind; });
-  const { dom, render } = await mount(t, <DesktopAgent />);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native }); await render(<DesktopAgent />);
   const document = dom.window.document, picker = document.querySelector<HTMLButtonElement>('[aria-label="执行 Agent"]')!;
-  assert.ok(picker.closest("form.input-box-wrapper"));
+  assert.ok(picker.closest(".input-box-wrapper .composer-execution"));
   assert.equal(document.querySelector(".desktop-agent-workspace [aria-label='执行 Agent']"), null);
   await act(async () => picker.click());
   const search = document.querySelector<HTMLInputElement>('[aria-label="搜索 Agent 或模型"]')!;
   assert.equal(document.activeElement, search);
-  assert.equal(document.querySelectorAll(".agent-picker-option").length, 4);
+  assert.deepEqual([...document.querySelectorAll(".agent-picker-option")].map(option => option.getAttribute("aria-label")), ["选择 Pi", "选择 Codex", "选择 Claude Code", "选择 ACP Agent"]);
   assert.match(document.querySelector('[aria-label="选择 Pi"]')!.textContent!, /local-model/);
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="筛选 Claude Code"]')!.click());
   assert.equal(document.querySelectorAll(".agent-picker-option").length, 1);
@@ -441,7 +484,7 @@ test("picker prevents duplicate switches and keeps the current selection after a
   const native = bridge(snapshot());
   let fail!: (error: Error) => void;
   const select = t.mock.method(native, "selectAgent", () => new Promise<void>((_, reject) => { fail = reject; }));
-  const { dom, render } = await mount(t, <DesktopAgent />);
+  const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native }); await render(<DesktopAgent />);
   const document = dom.window.document, picker = document.querySelector<HTMLButtonElement>('[aria-label="执行 Agent"]')!;
   await act(async () => picker.click());
@@ -453,7 +496,7 @@ test("picker prevents duplicate switches and keeps the current selection after a
   assert.equal(picker.disabled, true);
   assert.ok([...document.querySelectorAll<HTMLButtonElement>(".agent-picker-option")].every(button => button.disabled));
   await act(async () => fail(new Error("切换失败")));
-  assert.match(document.querySelector('.desktop-agent-header [role="alert"]')!.getAttribute("aria-label")!, /切换失败/);
+  assert.match(document.querySelector('.composer-execution [role="alert"]')!.getAttribute("aria-label")!, /切换失败/);
   assert.match(picker.textContent!, /Pi.*local-model/);
   assert.equal(picker.disabled, false);
   assert.equal(document.querySelector('[aria-label="选择 Pi"]')!.getAttribute("aria-pressed"), "true");

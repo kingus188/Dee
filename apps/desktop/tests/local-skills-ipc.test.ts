@@ -22,7 +22,7 @@ function fixture() {
   };
   registerLocalSkills({
     ipc: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler); } },
-    catalog, getWindow: () => window, getOrigin: () => "https://assistant.example",
+    catalog, getWindow: () => window, getOrigin: () => "https://assistant.example", localUrl: "dee://local/",
     dialog: { showOpenDialog: async () => { calls.push("picker"); return picker ? picker() : selected; } },
     shell: { showItemInFolder: (path: string) => { calls.push(`show:${path}`); } },
   } as unknown as Options);
@@ -36,6 +36,16 @@ function fixture() {
 test("local skill IPC accepts the configured top frame with a workspace hash", async () => {
   const f = fixture(); await f.invoke("list"); await f.invoke("read", undefined, "skill_id"); await f.invoke("reveal", undefined, "skill_id");
   assert.deepEqual(f.calls, ["list", "read:skill_id", "reveal", "show:/known/skill/SKILL.md"]);
+});
+
+test("offline workspace uses the same local skill handlers and rejects other local pages", async () => {
+  const f = fixture(); f.frame.url = "dee://local/#skills";
+  await f.invoke("list");
+  assert.deepEqual(f.calls, ["list"]);
+  for (const url of ["dee://other/#skills", "dee://local/foreign", "dee://local/?foreign=1"]) {
+    f.frame.url = url;
+    await assert.rejects(async () => f.invoke("list"), /Untrusted local skills window/);
+  }
 });
 
 test("every local skill handler rejects other windows, subframes, changed origins and closed windows before side effects", async () => {

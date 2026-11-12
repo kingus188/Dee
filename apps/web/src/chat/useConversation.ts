@@ -9,7 +9,7 @@ import { useMessageDelivery } from "./useMessageDelivery.js";
 
 export function useConversation(initialId?: number) {
   const [view, setView] = useState<ConversationView | null>(null);
-  const [connection, setConnection] = useState<ConnectionState>("connecting");
+  const [connection, setConnection] = useState<ConnectionState>(window.location.protocol === "dee:" ? "disconnected" : "connecting");
   const [info, setInfo] = useState<ServerInfo | null>(null);
   const [recoveredUntil, setRecoveredUntil] = useState(0);
   const id = useRef<number | null>(initialId ?? null), subscribed = useRef(false), selection = useRef(0);
@@ -47,6 +47,7 @@ export function useConversation(initialId?: number) {
     })().finally(() => { creating.current = null; });
   }
   useEffect(() => {
+    if (window.location.protocol === "dee:") return;
     let mounted = true;
     let previousBoots: number | undefined;
     let frames = Promise.resolve(), revision = 0;

@@ -3,9 +3,9 @@ import { dialog } from "electron";
 import { openAgentSettings } from "./agent-settings.js";
 import { openDesktopAgent } from "./local-agent.js";
 import type { AgentRequest } from "./local-agent.js";
-import { validateServerRoute } from "./policy.js";
+import { isAppUrl, validateServerRoute } from "./policy.js";
 
-export async function registerDesktopAgent(options: { ipc: IpcMain; directory: string; getWindow(): BrowserWindow | undefined; localUrl: string; request: AgentRequest; serverId?: () => string; searchPath?: string; env?: NodeJS.ProcessEnv; openServer(hash?: string): Promise<void>; openConnection(): void }) {
+export async function registerDesktopAgent(options: { ipc: IpcMain; directory: string; getWindow(): BrowserWindow | undefined; getOrigin(): string; localUrl: string; request: AgentRequest; serverId?: () => string; searchPath?: string; env?: NodeJS.ProcessEnv; openServer(hash?: string): Promise<void>; openConnection(): void }) {
   const settings = openAgentSettings(options.directory);
   const agent = await openDesktopAgent({ directory: options.directory, settings, request: options.request, serverId: options.serverId, searchPath: options.searchPath, env: options.env, confirm: async (tool, args) => {
     const window = options.getWindow();
@@ -15,7 +15,9 @@ export async function registerDesktopAgent(options: { ipc: IpcMain; directory: s
   } });
   function trusted(event: IpcMainInvokeEvent) {
     const window = options.getWindow();
-    if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url.split("#")[0] !== options.localUrl) throw new Error("Untrusted local Agent window");
+    if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error("Untrusted local Agent window");
+    const url = event.senderFrame.url.split("#")[0] ?? "";
+    if (url !== options.localUrl && !isAppUrl(url, options.getOrigin())) throw new Error("Untrusted local Agent window");
   }
   const handlers: Record<string, (input: never) => unknown> = {
     snapshot: () => agent.snapshot(), "select-agent": input => agent.selectAgent(input), "new-session": () => agent.newSession(), "answer-approval": input => agent.answerApproval(input), send: input => agent.send(input), approve: input => agent.approve(input), reject: input => agent.reject(input), abort: () => agent.abort(),

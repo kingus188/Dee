@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { act } from "react";
 import { apiClient } from "../dist/api/socket.js";
 import { ConversationHistory } from "../dist/ui/ConversationHistory.js";
-import { DesktopSidebar, useDesktopSidebar } from "../dist/desktop/DesktopSidebar.js";
 import type { DesktopAgentSnapshot } from "@assistant/contracts";
 import { mount } from "./dom.js";
 
@@ -42,8 +41,9 @@ test("本机侧栏使用真实 Agent 状态和目录，等待批准不误标为�
     model: { api: "", baseUrl: "", model: "", contextWindow: 0, maxTokens: 0, hasApiKey: false },
     external: { status: "waiting", activities: [], approvals: [] },
   };
+  t.mock.method(apiClient, "request", async () => []);
   function Sidebar({ snapshot }: { snapshot: DesktopAgentSnapshot }) {
-    return <DesktopSidebar sidebar={useDesktopSidebar()} snapshot={snapshot} onOpen={() => {}} onTeams={() => {}} />;
+    return <ConversationHistory active currentId={null} onOpen={() => {}} onClose={() => {}} local={{ title: snapshot.messages[0]!.text, current: true, busy: snapshot.busy, detail: snapshot.workspace!.split("/").at(-1), status: snapshot.external?.status === "idle" ? undefined : snapshot.external?.status, open: () => {} }} />;
   }
   const { dom, render } = await mount(t, <Sidebar snapshot={state} />);
   const doc = dom.window.document;

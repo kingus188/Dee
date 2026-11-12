@@ -40,23 +40,11 @@ let stopNotifications = () => {};
 let initialized = false;
 const localUrl = "dee://local/";
 protocol.registerSchemesAsPrivileged([{ scheme: "dee", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
-let localWindow: BrowserWindow | undefined;
 let localAgent: Awaited<ReturnType<typeof openDesktopAgent>> | undefined;
 let quitting = false;
-function showLocalWindow() {
-  if (localWindow && !localWindow.isDestroyed()) { if (localWindow.isMinimized()) localWindow.restore(); localWindow.show(); localWindow.focus(); return; }
-  const current = new BrowserWindow({ title: "Dee · 小 D", width: 1440, height: 920, minWidth: 720, minHeight: 560, icon,
-    titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 19 }, backgroundColor: "#f6f8fc",
-    webPreferences: { preload: fileURLToPath(new URL("./agent-preload.cjs", import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false } });
-  localWindow = current;
-  current.on("closed", () => { localWindow = undefined; });
-  current.webContents.setWindowOpenHandler(({ url }) => { if (isExternalUrl(url)) void shell.openExternal(url); return { action: "deny" }; });
-  current.webContents.on("will-navigate", (event, url) => { if (url.split("#")[0] !== localUrl) event.preventDefault(); });
-  current.webContents.on("will-redirect", event => event.preventDefault());
-  current.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  current.webContents.session.setPermissionCheckHandler(() => false);
-  void current.loadURL(localUrl).catch(error => console.error("Local workspace failed to load", error));
-}
+let connecting = 0;
+let loading = false;
+let failed = false;
 const desktopPartition = "persist:desktop-web";
 let mailNotificationLabel = "邮件提醒：等待服务连接";
 
@@ -92,11 +80,25 @@ function trustedLocalConnection(event: IpcMainInvokeEvent) {
     ((settings && event.sender === settings.webContents) || (window && event.sender === window.webContents)));
 }
 
-async function connect(initialError = startupError) {
+function isWorkspaceUrl(url: string) {
+  const page = url.split("#")[0] ?? "";
+  return page === localUrl || (!startupError && isAppUrl(page, activeOrigin));
+}
+
+async function showFailure(current: BrowserWindow) {
+  if (window !== current || current.isDestroyed() || failed) return;
+  failed = true;
   stopNotifications();
   setMailNotificationLabel("等待服务连接");
-  settings?.close();
-  if (window) { window.destroy(); window = undefined; }
+  try { await current.loadURL(localUrl); }
+  catch (error) {
+    console.error("Local workspace failed to load", error);
+    await current.loadURL(connectionStatusPage(activeOrigin, "本机工作区加载失败，请打开连接设置或重新连接。"));
+  }
+}
+
+function workspace() {
+  if (window && !window.isDestroyed()) return window;
   const current = new BrowserWindow({ title: "Dee · 你的个人智能助手", width: 1440, height: 920, minWidth: 720, minHeight: 560, icon,
     frame: false, titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 19 },
     titleBarOverlay: { color: "#f6f8fc", symbolColor: "#49546a", height: 52 }, backgroundColor: "#f6f8fc",
@@ -114,30 +116,21 @@ async function connect(initialError = startupError) {
       if (action) { event.preventDefault(); action(); }
     }
   });
-  let origin = config.url;
-  let failed = false, loading = true;
-  const showFailure = () => {
-    if (window !== current || current.isDestroyed() || failed) return;
-    failed = true;
-    stopNotifications();
-    setMailNotificationLabel("等待服务连接");
-    void current.loadURL(connectionStatusPage(origin, "服务暂时未连接。请确认网络和服务状态，然后重新连接；已保存的连接配置会继续保留。"))
-      .catch(error => console.error("Desktop connection status page failed to load", error));
-  };
   current.on("closed", () => { if (window === current) window = undefined; });
-  current.webContents.on("will-navigate", (event, url) => { if (initialError || !isAppUrl(url, origin)) event.preventDefault(); });
-  current.webContents.on("will-redirect", (event, url) => { if (initialError || !isAppUrl(url, origin)) event.preventDefault(); });
+  current.webContents.on("will-navigate", (event, url) => { if (!isWorkspaceUrl(url)) event.preventDefault(); });
+  current.webContents.on("will-redirect", (event, url) => { if (startupError || !isAppUrl(url, activeOrigin)) event.preventDefault(); });
   current.webContents.setWindowOpenHandler(({ url }) => {
     if (isExternalUrl(url)) void shell.openExternal(url).catch(() => {});
     return { action: "deny" };
   });
   current.webContents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => {
-    if (mainFrame && code !== -3 && !loading) showFailure();
+    if (window === current && mainFrame && code !== -3 && !loading) void showFailure(current).catch(error => console.error("Desktop fallback failed", error));
   });
   current.webContents.on("did-finish-load", () => {
-    if (window !== current || !isAppUrl(current.webContents.getURL().split("#")[0] ?? "", origin)) return;
+    const origin = activeOrigin;
+    if (window !== current || startupError || !isAppUrl(current.webContents.getURL().split("#")[0] ?? "", origin)) return;
     if (/\\b(?:404|502|503|504)\\b|not found|cpolar/i.test(current.webContents.getTitle())) {
-      showFailure();
+      void showFailure(current).catch(error => console.error("Desktop fallback failed", error));
       return;
     }
     failed = false;
@@ -152,12 +145,25 @@ async function connect(initialError = startupError) {
       return showMailNotification(new Notification({ title, body, timeoutType: "default" }));
     }, (input, init) => session.fromPartition(desktopPartition).fetch(String(input), init), showMailNotificationStatus);
   });
+  return current;
+}
+
+async function connect(initialError = startupError) {
+  stopNotifications();
+  setMailNotificationLabel("等待服务连接");
+  settings?.close();
+  const current = workspace();
+  const attempt = ++connecting;
+  const isCurrent = () => window === current && !current.isDestroyed() && connecting === attempt;
+  let origin = activeOrigin = config.url;
+  failed = false; loading = true;
   try {
     await current.loadURL(connectionStatusPage(origin, initialError));
-    if (initialError || window !== current) return;
+    if (!isCurrent()) return;
+    if (initialError) { await showFailure(current); return; }
     const selectedConfig = config;
     const selected = await selectServer(config, pin, basicAuth(config.username, password));
-    if (window !== current || config !== selectedConfig) return;
+    if (!isCurrent() || config !== selectedConfig) return;
     origin = activeOrigin = selected.origin;
     if (selected.lanUrl && config.lanUrl !== selected.lanUrl) {
       config = { ...config, lanUrl: selected.lanUrl };
@@ -166,29 +172,35 @@ async function connect(initialError = startupError) {
     }
     try { await current.loadURL(origin); }
     catch {
-      if (origin === config.url || window !== current) throw new Error("Server unavailable");
+      if (!isCurrent()) return;
+      if (origin === config.url) throw new Error("Server unavailable");
       origin = activeOrigin = config.url;
       await current.loadURL(origin);
     }
-  } catch { showFailure(); }
-  finally { loading = false; }
+  } catch { if (isCurrent()) await showFailure(current); }
+  finally { if (isCurrent()) loading = false; }
 }
 
 async function showServerWorkspace(hash = "") {
   if (!window || window.isDestroyed() || !isAppUrl(window.webContents.getURL().split("#")[0] ?? "", activeOrigin)) await connect();
   const current = window;
   if (!current || current.isDestroyed()) throw new Error("服务器窗口未打开，请重试。");
+  if (current.isMinimized()) current.restore();
+  current.show(); current.focus();
   if (hash) {
     if (!isAppUrl(current.webContents.getURL().split("#")[0] ?? "", activeOrigin)) throw new Error("服务器未连接，请检查连接设置后重试。");
     await current.loadURL(new URL(hash, activeOrigin).href);
   }
-  if (current.isMinimized()) current.restore();
-  current.show(); current.focus();
 }
 
 function showMainWindow() {
   if (!initialized) return;
-  showLocalWindow();
+  if (!window || window.isDestroyed()) {
+    void connect().catch(error => console.error("Desktop workspace failed to open", error));
+    return;
+  }
+  if (window.isMinimized()) window.restore();
+  window.show(); window.focus();
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -236,7 +248,7 @@ else {
     // Do not amend response headers: the selected server owns its CSP.
     const trustedWorkspace = (event: IpcMainInvokeEvent) => Boolean(window && !window.isDestroyed() &&
       event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame &&
-      isAppUrl(event.senderFrame.url.split("#")[0] ?? "", activeOrigin));
+      isWorkspaceUrl(event.senderFrame.url));
     ipcMain.handle("desktop:connection-open", event => {
       if (!trustedWorkspace(event) && !trustedLocalConnection(event)) throw new Error("Untrusted connection window");
       showConnection();
@@ -246,12 +258,14 @@ else {
       return mailNotificationLabel;
     });
     ipcMain.handle("desktop:server-connect", (event, input: unknown) => {
-      if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame ||
-        !isAppUrl(event.senderFrame.url.split("#")[0] ?? "", activeOrigin)) throw new Error("Untrusted server connection window");
+      if (!trustedWorkspace(event)) throw new Error("Untrusted server connection window");
       try {
         if (typeof input !== "string") throw new Error("Invalid server address");
         const next = { url: validateWebUrl(input) };
-        if (next.url === config.url || next.url === activeOrigin) return { ok: true };
+        if (next.url === config.url || next.url === activeOrigin) {
+          if (event.senderFrame?.url.split("#")[0] === localUrl) setImmediate(() => { void connect().catch(error => console.error("Desktop server reconnect failed", error)); });
+          return { ok: true };
+        }
         saveConnection(next, undefined);
         config = next; activeOrigin = next.url; password = undefined; startupError = undefined;
         // Reply before replacing the invoking renderer. A new origin gets no previous credentials.
@@ -284,10 +298,10 @@ else {
     });
     registerLocalSkills({ ipc: ipcMain, dialog, shell,
       catalog: new LocalSkillCatalog({ home: app.getPath("home"), stateFile: join(app.getPath("userData"), "local-skills.json") }),
-      getWindow: () => window, getOrigin: () => activeOrigin,
+      getWindow: () => window, getOrigin: () => activeOrigin, localUrl,
     });
     const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
-    protocol.handle("dee", async request => {
+    web.protocol.handle("dee", async request => {
       const url = new URL(request.url);
       if (url.hostname !== "local" || request.method !== "GET") return new Response("Not found", { status: 404 });
       const relative = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
@@ -297,22 +311,23 @@ else {
       headers.set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'");
       return new Response(response.body, { status: response.status, headers });
     });
-    showLocalWindow();
     // The web session rewrites Authorization; peer credentials stay in a main-process-only session.
     const peerTransport = session.fromPartition("desktop-peer");
     peerTransport.setCertificateVerifyProc((request, callback) => callback(request.errorCode === 0 || isPinnedCertificate(activeOrigin, pin, request.hostname, request.certificate.data) ? 0 : -2));
     localAgent = await registerDesktopAgent({ ipc: ipcMain, directory: app.getPath("userData"), localUrl, searchPath: process.env.PATH, env: { ...process.env },
-      getWindow: () => localWindow, serverId: () => config.url, openServer: showServerWorkspace, openConnection: showConnection,
+      getWindow: () => window, getOrigin: () => startupError ? "" : activeOrigin, serverId: () => config.url, openServer: showServerWorkspace, openConnection: showConnection,
       request: createAgentRequest({ origin: () => activeOrigin, serverId: () => config.url, username: () => config.username, password: () => password,
         token: server => openPeerCredentials(app.getPath("userData"), safeStorage).get(server), fetch: (url, init) => peerTransport.fetch(url, init),
         socket: (url, headers, origin) => new net.WebSocket(url, { session: peerTransport, headers, origin, useSessionCookies: false }) }) });
     Menu.setApplicationMenu(null);
     initialized = true;
-    showLocalWindow();
+    await connect();
   }).catch(error => {
     console.error("Desktop initialization failed", error);
     initialized = true;
-    void connect("连接初始化失败。请按 Cmd+,（Windows/Linux 使用 Ctrl+,）检查连接设置，或重新启动 Dee。")
-      .catch(failure => console.error("Desktop main window failed to open", failure));
+    const message = "连接初始化失败。请按 Cmd+,（Windows/Linux 使用 Ctrl+,）检查连接设置，或重新启动 Dee。";
+    startupError = message;
+    const recovery = localAgent ? connect(message) : workspace().loadURL(connectionStatusPage(activeOrigin, message));
+    void recovery.catch(failure => console.error("Desktop main window failed to open", failure));
   });
 }
