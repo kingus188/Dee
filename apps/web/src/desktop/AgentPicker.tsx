@@ -3,11 +3,11 @@ import type { KeyboardEvent } from "react";
 import type { DesktopAgentKind, DesktopAgentSnapshot } from "@assistant/contracts";
 import { Icon } from "../ui/Icon.js";
 
-export const agentNames = { pi: "Pi", codex: "Codex", claude: "Claude Code", acp: "ACP Agent" };
+export const agentNames = { pi: "Pi", codex: "Codex", claude: "Claude Code", omp: "OMP", acp: "ACP Agent" };
 const kinds = Object.keys(agentNames) as DesktopAgentKind[];
 
 function AgentMark({ kind }: { kind: DesktopAgentKind }) {
-  if (kind === "codex") return <Icon name="terminal" />;
+  if (kind === "codex" || kind === "omp") return <Icon name="terminal" />;
   if (kind === "claude") return <Icon name="sun" />;
   if (kind === "acp") return <Icon name="plug" />;
   return <span aria-hidden="true">π</span>;

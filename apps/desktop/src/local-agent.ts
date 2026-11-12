@@ -259,7 +259,7 @@ export async function openDesktopAgent(options: {
       let agentConfigured = configured(), agentError: string | undefined;
       if (externalState) {
         messages = externalState.messages; agentConfigured = Boolean(settings.workspace);
-        try { resolveAgentExecutable(settings.agents[settings.agent as "codex" | "claude" | "acp"].executable, options.searchPath); } catch (cause) { agentConfigured = false; agentError = cause instanceof Error ? cause.message : "Agent 未安装"; }
+        try { resolveAgentExecutable(settings.agents[settings.agent as "codex" | "claude" | "acp" | "omp"].executable, options.searchPath); } catch (cause) { agentConfigured = false; agentError = cause instanceof Error ? cause.message : "Agent 未安装"; }
       }
       return { configured: agentConfigured, piConfigured: configured(), agent: settings.agent, agentConfig: settings.agent === "pi" ? undefined : settings.agents[settings.agent], external: externalState?.external,
         model: catalog.model, workspace: settings.workspace, nodeId,

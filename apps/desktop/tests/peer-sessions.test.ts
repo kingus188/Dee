@@ -14,7 +14,7 @@ async function until(ready: () => boolean) {
   const deadline = Date.now() + 3000;
   while (!ready()) { if (Date.now() > deadline) throw new Error("fixture timeout"); await new Promise(resolve => setTimeout(resolve, 5)); }
 }
-for (const kind of ["codex", "claude", "acp"] as const) test(`${kind}: addressed old session queues while busy, resumes natively, returns to source and never replays`, async () => {
+for (const kind of ["codex", "claude", "acp", "omp"] as const) test(`${kind}: addressed old session queues while busy, resumes natively, returns to source and never replays`, async () => {
   const directory = await mkdtemp(join(tmpdir(), "dee-native-peer-"));
   const binding: ExternalBinding = { kind, cwd: directory, config: { executable: "fixture", args: [] } };
   let opened = 0, executions = 0, resumed: string | undefined, release: (() => void) | undefined;

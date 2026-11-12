@@ -56,6 +56,16 @@ export function openCodexRpc(options: {
       });
     },
     notify: (method: string, params?: unknown) => write({ method, params }),
-    async close() { if (!closed) { closed = true; for (const call of pending.values()) { clearTimeout(call.timer); call.reject(new Error("Codex 连接已关闭")); } pending.clear(); } await stopAgent(child); },
+    async close() {
+      if (!closed) { closed = true; for (const call of pending.values()) { clearTimeout(call.timer); call.reject(new Error("Codex 连接已关闭")); } pending.clear(); }
+      // EOF lets app-server release its workers before process-tree cleanup.
+      if (child.exitCode === null && child.signalCode === null) await new Promise<void>(resolve => {
+        const done = () => { clearTimeout(timer); child.removeListener("exit", done); resolve(); };
+        const timer = setTimeout(done, 1000);
+        child.once("exit", done);
+        child.stdin.end();
+      });
+      await stopAgent(child);
+    },
   };
 }

@@ -40,11 +40,11 @@ export function openAgentSessionStore(directory: string) {
     get error() { return error; },
     history() {
       if (error) throw new Error(error);
-      return sessions.map(session => ({ sessionId: session.id, agent: object(JSON.parse(session.binding)).kind as "codex" | "claude" | "acp", messages: session.messages.map(message => ({ ...message })) }));
+      return sessions.map(session => ({ sessionId: session.id, agent: object(JSON.parse(session.binding)).kind as "codex" | "claude" | "acp" | "omp", messages: session.messages.map(message => ({ ...message })) }));
     },
     get(binding: string) { return sessions.findLast(session => session.binding === binding); },
     byId(id: string) { if (error) throw new Error(error); return sessions.find(session => session.id === id); },
-    list() { if (error) throw new Error(error); return structuredClone(sessions).map(session => ({ ...session, agent: object(JSON.parse(session.binding)).kind as "codex" | "claude" | "acp" })); },
+    list() { if (error) throw new Error(error); return structuredClone(sessions).map(session => ({ ...session, agent: object(JSON.parse(session.binding)).kind as "codex" | "claude" | "acp" | "omp" })); },
     create(binding: string) {
       if (error) throw new Error(error);
       const session: StoredAgentSession = { id: randomUUID(), binding, status: "idle", messages: [], activities: [] };

@@ -1,4 +1,4 @@
-import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type Query, type EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 import { resolveAgentExecutable, spawnAgent, stopAgent } from "./process.js";
 import { object, questions, string } from "./types.js";
 import type { AgentDriver, DriverOptions } from "./types.js";
@@ -21,8 +21,10 @@ export async function openClaude(options: DriverOptions, runQuery = query): Prom
         active = runQuery({ prompt: text, options: {
           cwd: options.cwd, pathToClaudeCodeExecutable: executable, abortController: turnAbort,
           env: options.env,
+          ...(options.config.model ? { model: options.config.model } : {}),
           ...(sessionId ? { resume: sessionId } : {}), persistSession: true,
-          permissionMode: "default", permissionPromptToolName: undefined,
+          permissionMode: options.config.permission === "autoEdit" ? "acceptEdits" : "default", permissionPromptToolName: undefined,
+          ...(options.config.effort ? { effort: options.config.effort as EffortLevel } : {}),
           settingSources: ["user", "project", "local"], includePartialMessages: true,
           ...(options.peerMcp ? { mcpServers: { dee_peers: options.peerMcp } } : {}),
           systemPrompt: { type: "preset", preset: "claude_code" },

@@ -1,6 +1,7 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from "electron";
 import { dialog } from "electron";
 import { openAgentSettings } from "./agent-settings.js";
+import { readAgentModels } from "./agents/models.js";
 import { openDesktopAgent } from "./local-agent.js";
 import type { AgentRequest } from "./local-agent.js";
 import { isAppUrl, validateServerRoute } from "./policy.js";
@@ -20,6 +21,7 @@ export async function registerDesktopAgent(options: { ipc: IpcMain; directory: s
     if (url !== options.localUrl && !isAppUrl(url, options.getOrigin())) throw new Error("Untrusted local Agent window");
   }
   const handlers: Record<string, (input: never) => unknown> = {
+    models: () => { const current = settings.get(); if (current.agent === "pi" || !current.workspace) throw new Error("请选择外部 Agent"); return readAgentModels(current.agent, current.agents[current.agent], current.workspace, options.searchPath, options.env); },
     snapshot: () => agent.snapshot(), "select-agent": input => agent.selectAgent(input), "new-session": () => agent.newSession(), "answer-approval": input => agent.answerApproval(input), send: input => agent.send(input), approve: input => agent.approve(input), reject: input => agent.reject(input), abort: () => agent.abort(),
     "peer-sessions": input => agent.sessions(input), "read-peer-session": input => agent.readSession(input), "send-peer": input => agent.sendPeer(input), "peer-status": input => agent.peerStatus(input),
     "choose-workspace": async () => {

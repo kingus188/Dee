@@ -7,8 +7,10 @@ import { randomUUID } from "node:crypto";
 import { openExternalAgents, type ExternalBinding, type DriverFactory } from "../dist/agents/service.js";
 import { openCodex } from "../dist/agents/codex.js";
 import { openAcp } from "../dist/agents/acp.js";
+import { openOmp } from "../dist/agents/omp.js";
 import { openClaude } from "../dist/agents/claude.js";
 import { resolveAgentExecutable, spawnAgent, stopAgent } from "../dist/agents/process.js";
+import { openCodexRpc } from "../dist/agents/codex-rpc.js";
 import type { AgentEvent, DriverOptions } from "../dist/agents/types.js";
 import type { query, Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
@@ -164,6 +166,12 @@ async function executable(directory: string, body: string) {
   const bin = join(directory, "agent-fixture.mjs");
   await writeFile(bin, `#!${process.execPath}\n${body}`); await chmod(bin, 0o755); return bin;
 }
+test("Codex close delivers EOF before terminating the process tree", async () => temporary(async directory => {
+  const bin = await executable(directory, `import {writeFileSync} from 'node:fs'; process.stdin.resume(); process.stdin.on('end',()=>{writeFileSync('closed.txt','EOF');process.exit(0);});`);
+  const rpc = openCodexRpc({ executable: bin, cwd: directory, notify() {}, request: async () => ({}), failed() {} });
+  await rpc.close();
+  assert.equal(await readFile(join(directory, "closed.txt"), "utf8"), "EOF");
+}));
 test("executable discovery rejects blank commands and directories", async () => temporary(async directory => {
   assert.throws(() => resolveAgentExecutable(""), /配置/);
   assert.throws(() => resolveAgentExecutable(directory), /找不到/);
@@ -196,9 +204,13 @@ createInterface({ input: process.stdin }).on('line', line => {
 });`);
   const events: AgentEvent[] = [], config = options(directory, bin, events);
   const driver = await openCodex(config);
+  config.config.model = "native-model";
+  config.config.effort = "ultra";
   try { await driver.send("first", randomUUID()); await driver.send("second", randomUUID()); } finally { await driver.close(); }
   const resumed = await openCodex({ ...config, sessionId: "native-codex" }); await resumed.close();
   const calls = (await readFile(join(directory, "calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  assert.equal(calls.find(call => call.method === "turn/start").params.model, "native-model");
+  assert.equal(calls.find(call => call.method === "turn/start").params.effort, "ultra");
   assert.equal(calls.find(call => call.method === "thread/start").params.sandbox, "workspace-write");
   assert.equal(calls.find(call => call.method === "thread/start").params.approvalPolicy, "untrusted");
   assert.ok(calls.some(call => call.method === "thread/resume" && call.params.threadId === "native-codex"));
@@ -278,7 +290,31 @@ createInterface({input:process.stdin}).on('line', line => {
   await assert.rejects(openAcp({ ...config, config: { executable: bin, args: [] } }), /模式 ID/);
 }));
 
-test("Claude SDK keeps its permission callback, streams content and resumes native session", async () => temporary(async directory => {
+test("OMP uses ACP mode, streams replies, resumes native sessions and forwards peer MCP", async () => temporary(async directory => {
+  const bin = await executable(directory, `
+import { createInterface } from 'node:readline';
+const send = value => process.stdout.write(JSON.stringify({jsonrpc:'2.0', ...value}) + '\\n');
+createInterface({input: process.stdin}).on('line', line => {
+ const m = JSON.parse(line);
+ if (m.method === 'initialize') send({id:m.id,result:{protocolVersion:1,agentCapabilities:{loadSession:true}}});
+ if (m.method === 'session/new' || m.method === 'session/load') {
+  if (m.params.mcpServers[0]?.name !== 'dee_peers' || m.params.mcpServers[0]?.env[0]?.value !== 'mcp') throw Error('wrong MCP');
+  send({id:m.id,result:{sessionId:'omp-native',modes:{}}});
+ }
+ if (m.method === 'session/prompt') {
+  send({method:'session/update',params:{sessionId:'omp-native',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'OMP answer'}}}});
+  send({id:m.id,result:{stopReason:'end_turn'}});
+ }
+});`);
+  const events: AgentEvent[] = [], config = options(directory, bin, events);
+  config.peerMcp = { command: process.execPath, args: ["--version"], env: { DEE_FIXTURE: "mcp" } };
+  const driver = await openOmp(config);
+  try { await driver.send("one", randomUUID()); } finally { await driver.close(); }
+  const resumed = await openOmp({ ...config, sessionId: "omp-native" });
+  try { await resumed.send("two", randomUUID()); } finally { await resumed.close(); }
+  assert.equal(events.filter(event => event.type === "text").length, 2);
+}));
+test("Claude SDK keeps its permission callback, streams content and resumes native session", async () => temporary(async cwd => {
   const events: AgentEvent[] = [], calls: Parameters<typeof query>[0][] = [];
   let closed = 0;
   const fakeQuery: typeof query = input => {
@@ -294,11 +330,15 @@ test("Claude SDK keeps its permission callback, streams content and resumes nati
     })() as Query;
     iterator.close = () => { closed++; }; return iterator;
   };
-  const config = options(directory, process.execPath, events);
+  const config = options(cwd, process.execPath, events);
+  config.config.model = "native-claude-model";
+  config.config.effort = "max";
   config.peerMcp = { command: process.execPath, args: ["--version"], env: { DEE_FIXTURE: "mcp" } };
   const driver = await openClaude(config, fakeQuery);
   try { await driver.send("one", randomUUID()); await driver.send("two", randomUUID()); } finally { await driver.close(); }
   assert.equal(calls[0]!.options!.permissionMode, "default");
+  assert.equal(calls[0]!.options!.model, "native-claude-model");
+  assert.equal(calls[0]!.options!.effort, "max");
   assert.equal(calls[0]!.options!.includePartialMessages, true);
   assert.equal(calls[1]!.options!.resume, "claude-native");
   assert.deepEqual(calls[0]!.options!.mcpServers, { dee_peers: config.peerMcp });

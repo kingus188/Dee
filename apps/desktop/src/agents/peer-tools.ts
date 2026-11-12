@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 
 export type PeerToolHandler = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 export type PeerMcp = { command: string; args: string[]; env: Record<string, string> };
-const session = { agent: { type: "string", enum: ["pi", "codex", "claude", "acp"] }, sessionId: { type: "string" } };
+const session = { agent: { type: "string", enum: ["pi", "codex", "claude", "acp", "omp"] }, sessionId: { type: "string" } };
 const tools = [
   { name: "peer_sessions", description: "List existing Agent sessions on this node or server. Remote desktop history is a synchronized snapshot.", inputSchema: { type: "object", properties: { node: { type: "string" } } } },
   { name: "read_peer_session", description: "Read a specific Agent session without switching or running it.", inputSchema: { type: "object", properties: { node: { type: "string" }, ...session }, required: ["node", "agent", "sessionId"] } },

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AgentApproval, AgentApprovalAnswer, DesktopAgentKind, ExternalAgentConfig } from "@assistant/contracts";
 import { openCodex } from "./codex.js";
 import { openAcp } from "./acp.js";
+import { openOmp } from "./omp.js";
 import { openAgentSessionStore, type StoredAgentSession } from "./store.js";
 import type { AgentDriver, DriverOptions, AgentEvent } from "./types.js";
 import { PeerError, peerContinuation, peerTranscript, validPeerSession } from "@assistant/runtime";
@@ -11,7 +12,7 @@ import { openPeerTools, type PeerToolHandler } from "./peer-tools.js";
 type ExternalKind = Exclude<DesktopAgentKind, "pi">;
 export type ExternalBinding = { kind: ExternalKind; cwd: string; config: ExternalAgentConfig };
 export type DriverFactory = (kind: ExternalKind, options: DriverOptions) => Promise<AgentDriver>;
-const factories: Record<ExternalKind, (options: DriverOptions) => Promise<AgentDriver>> = { codex: openCodex, claude: async options => (await import("./claude.js")).openClaude(options), acp: openAcp };
+const factories: Record<ExternalKind, (options: DriverOptions) => Promise<AgentDriver>> = { codex: openCodex, claude: async options => (await import("./claude.js")).openClaude(options), acp: openAcp, omp: openOmp };
 
 export function openExternalAgents(options: { directory: string; binding(): ExternalBinding | undefined; factory?: DriverFactory; searchPath?: string; env?: NodeJS.ProcessEnv; peerTools?: (session: PeerSession) => PeerToolHandler }) {
   const store = openAgentSessionStore(options.directory);

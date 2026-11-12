@@ -4,6 +4,16 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openAgentSettings, validateAgentSelection } from "../dist/agent-settings.js";
+test("agent execution options survive validation and reject unsupported values", () => {
+  const config = { executable: "codex", args: [], permission: "readOnly", effort: "high" };
+  assert.deepEqual(validateAgentSelection({ kind: "codex", config }).config, config);
+  assert.throws(() => validateAgentSelection({ kind: "claude", config }));
+  assert.throws(() => validateAgentSelection({ kind: "omp", config }));
+  assert.equal(validateAgentSelection({ kind: "codex", config: { ...config, effort: "xhigh" } }).config?.effort, "xhigh");
+  assert.equal(validateAgentSelection({ kind: "claude", config: { ...config, permission: "default", effort: "max" } }).config?.effort, "max");
+  assert.throws(() => validateAgentSelection({ kind: "claude", config: { ...config, permission: "default", effort: 123 } }));
+  assert.throws(() => validateAgentSelection({ kind: "codex", config: { ...config, permission: "invalid" } }));
+});
 test("local assistant creates its default directory and upgrades an unselected legacy directory", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dee-default-directory-"));
   try {
@@ -35,6 +45,21 @@ test("desktop settings preserve legacy model data without loading credentials", 
     const saved = JSON.parse(await readFile(path, "utf8"));
     assert.deepEqual(saved.model, legacy.model);
     assert.equal(saved.encryptedKey, legacy.encryptedKey);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+test("OMP upgrades existing settings, persists native selection and rejects extra arguments", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dee-omp-settings-"));
+  try {
+    const path = join(directory, "desktop-agent.json"), initial = openAgentSettings(directory).get();
+    await writeFile(path, JSON.stringify({ ...initial, agents: { codex: initial.agents.codex, claude: initial.agents.claude, acp: initial.agents.acp } }));
+    const settings = openAgentSettings(directory);
+    assert.deepEqual(validateAgentSelection({ kind: "omp" }), { kind: "omp" });
+    settings.selectAgent({ kind: "omp", config: { executable: "/opt/bin/omp", args: [] } });
+    const reopened = openAgentSettings(directory).get();
+    assert.equal(reopened.agent, "omp");
+    assert.deepEqual((reopened.agents as Record<string, unknown>).omp, { executable: "/opt/bin/omp", args: [] });
+    assert.equal(reopened.nodeId, initial.nodeId);
+    assert.throws(() => validateAgentSelection({ kind: "omp", config: { executable: "omp", args: ["--no-session"] } }), /额外启动参数/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 test("agent selection upgrades old settings, preserves Pi and rejects shell-style native arguments", async () => {

@@ -49,7 +49,7 @@ export async function desktopPeerSessions(context: Runtime & { ctx: Context }, d
 function parseUpload(body: Record<string, unknown>): DesktopConversationUpload {
   if (typeof body.deviceId !== "string" || !PEER_DEVICE_ID.test(body.deviceId)
     || typeof body.sessionId !== "string" || !/^(?:pi-\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(body.sessionId)
-    || typeof body.agent !== "string" || !["pi", "codex", "claude", "acp"].includes(body.agent)
+    || typeof body.agent !== "string" || !["pi", "codex", "claude", "acp", "omp"].includes(body.agent)
     || typeof body.revision !== "number" || !Number.isSafeInteger(body.revision) || body.revision < 1
     || !Array.isArray(body.messages) || !body.messages.length || body.messages.length > 10000) throw new HttpError(400, "本机对话格式无效");
   const ids = new Set<string>();

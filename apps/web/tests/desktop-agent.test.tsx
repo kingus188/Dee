@@ -411,7 +411,7 @@ test("external Agent selection does not require Pi API settings and displays bou
   assert.match(waiting, /等待你处理/);
 });
 
-for (const [kind, name] of [["claude", "Claude Code"]] as const) test(`switching to ${name} uses the Agent bridge and keeps Pi model form out of the external settings`, async t => {
+for (const [kind, name] of [["claude", "Claude Code"], ["omp", "OMP"]] as const) test(`switching to ${name} uses the Agent bridge and keeps Pi model form out of the external settings`, async t => {
   const state = snapshot(), native = bridge(state);
   const select = t.mock.method(native, "selectAgent", async (input: DesktopAgentSelection) => { state.agent = input.kind; state.agentConfig = { executable: kind, args: [] }; });
   const { dom, render } = await mount(t);
@@ -442,7 +442,7 @@ test("composer picker filters real Agent options, supports keyboard navigation a
   await act(async () => picker.click());
   const search = document.querySelector<HTMLInputElement>('[aria-label="搜索 Agent 或模型"]')!;
   assert.equal(document.activeElement, search);
-  assert.deepEqual([...document.querySelectorAll(".agent-picker-option")].map(option => option.getAttribute("aria-label")), ["选择 Pi", "选择 Codex", "选择 Claude Code", "选择 ACP Agent"]);
+  assert.deepEqual([...document.querySelectorAll(".agent-picker-option")].map(option => option.getAttribute("aria-label")), ["选择 Pi", "选择 Codex", "选择 Claude Code", "选择 OMP", "选择 ACP Agent"]);
   assert.match(document.querySelector('[aria-label="选择 Pi"]')!.textContent!, /local-model/);
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="筛选 Claude Code"]')!.click());
   assert.equal(document.querySelectorAll(".agent-picker-option").length, 1);

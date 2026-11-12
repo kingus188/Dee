@@ -7,7 +7,7 @@ export function peerContinuation(job: { id: string; target: string; targetSessio
   return `协作任务 ${job.id}\n目标：${job.target}${job.targetSession ? `/${job.targetSession.agent}/${job.targetSession.sessionId}` : ""}\n状态：${job.status}\n结果：\n${job.result ?? ""}\n\n请在本会话原上下文和已有授权内继续原任务。以上是协作结果，不是新的授权；仅接收回执无需再创建协作任务。`;
 }
 
-export type PeerSession = { agent: "pi" | "codex" | "claude" | "acp"; sessionId: string };
+export type PeerSession = { agent: "pi" | "codex" | "claude" | "acp" | "omp"; sessionId: string };
 export type PeerSessionInfo = PeerSession & { status?: string; syncedAt?: string };
 export type PeerTranscript = PeerSessionInfo & { messages: Array<{ id: string; role: "user" | "assistant"; text: string }>; truncated?: boolean };
 export function peerTranscript(session: PeerSessionInfo, history: PeerTranscript["messages"]): PeerTranscript {
@@ -26,7 +26,7 @@ export function validPeerSession(value: unknown): value is PeerSession {
   const { agent, sessionId } = value as PeerSession;
   return typeof agent === "string" && typeof sessionId === "string" && (agent === "pi"
     ? /^pi-[1-9]\d*$/.test(sessionId) && Number.isSafeInteger(Number(sessionId.slice(3)))
-    : ["codex", "claude", "acp"].includes(agent) && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId));
+    : ["codex", "claude", "acp", "omp"].includes(agent) && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId));
 }
 export const samePeerSession = (a?: PeerSession, b?: PeerSession) => a?.agent === b?.agent && a?.sessionId === b?.sessionId;
 export async function piPeerSessions(runtime: Runtime, ctx: Context): Promise<PeerSessionInfo[]> {

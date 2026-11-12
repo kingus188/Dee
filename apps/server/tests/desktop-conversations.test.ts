@@ -15,7 +15,7 @@ import { createHttpServer } from "../dist/http/server.js";
 import { watchView } from "../dist/application/view-stream.js";
 import type { ConversationView } from "@assistant/contracts";
 
-test("desktop transcripts join server history, survive restart, deduplicate and cannot execute server tasks", async () => {
+for (const kind of ["codex", "omp"]) test(`${kind} desktop transcripts join server history, survive restart, deduplicate and cannot execute server tasks`, async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "dee-desktop-history-"));
   const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, fauxAssistantMessage("已回复"));
   const open = () => openRuntime({ dataDir, ...catalog, extensions: [], onReport: () => {} }, ctx);
@@ -23,7 +23,7 @@ test("desktop transcripts join server history, survive restart, deduplicate and 
   const app = () => ({ ...runtime, ctx, config: { password: randomUUID() }, wechat: null, modelConfigured: true, episodeStore: { revokeSource() {} } } as unknown as AppContext);
   let api = createApi(app());
   const call = (method: string, path: string, body?: Record<string, unknown>) => api.dispatch(method, new URL(path, "http://localhost"), body);
-  const upload = { deviceId: `desktop-${randomUUID()}`, sessionId: randomUUID(), agent: "codex", revision: 1, messages: [{ id: "u1", role: "user", text: "本机问题" }, { id: "a1", role: "assistant", text: "本机回答" }] };
+  const upload = { deviceId: `desktop-${randomUUID()}`, sessionId: randomUUID(), agent: kind, revision: 1, messages: [{ id: "u1", role: "user", text: "本机问题" }, { id: "a1", role: "assistant", text: "本机回答" }] };
   try {
     const saved = await call("POST", "/api/peers/conversations", upload);
     const { id } = saved.data as { id: number };

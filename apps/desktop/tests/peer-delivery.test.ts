@@ -77,7 +77,7 @@ createInterface({input:process.stdin}).on('line',line=>{
   }, { onChange: transport.onChange });
   const options = { directory: desktop, settings, request, serverId: () => origin, confirm: async () => false,
     loadModels: async () => ({ ...await createModelCatalog(model, fauxAssistantMessage("local Pi")), model: { ...model, hasApiKey: false } }),
-    driverFactory: async (_kind: "codex" | "claude" | "acp", config: import("../dist/agents/types.js").DriverOptions) => {
+    driverFactory: async (_kind: "codex" | "claude" | "acp" | "omp", config: import("../dist/agents/types.js").DriverOptions) => {
       resumed = config.sessionId;
       const driver = await openCodex(config);
       return { abort: driver.abort, close: driver.close, send: async (text: string, id: string) => {

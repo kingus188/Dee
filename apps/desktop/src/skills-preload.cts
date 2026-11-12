@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = electron;
 contextBridge.exposeInMainWorld("desktopAgent", {
   platform: process.platform,
   snapshot: () => ipcRenderer.invoke("desktop:agent:snapshot"),
+  agentModels: () => ipcRenderer.invoke("desktop:agent:models"),
   selectAgent: (input: unknown) => ipcRenderer.invoke("desktop:agent:select-agent", input),
   newSession: () => ipcRenderer.invoke("desktop:agent:new-session"),
   answerApproval: (input: unknown) => ipcRenderer.invoke("desktop:agent:answer-approval", input),

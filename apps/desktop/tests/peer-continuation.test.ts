@@ -15,7 +15,7 @@ async function until(ready: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 3000;
   while (!await ready()) { if (Date.now() > deadline) throw new Error("continuation timeout"); await new Promise(resolve => setTimeout(resolve, 5)); }
 }
-for (const kind of ["codex", "claude", "acp"] as const) test(`${kind}: result resumes the original native source without selecting it or replaying after restart`, async () => {
+for (const kind of ["codex", "claude", "acp", "omp"] as const) test(`${kind}: result resumes the original native source without selecting it or replaying after restart`, async () => {
   const directory = await mkdtemp(join(tmpdir(), "dee-native-continuation-"));
   const binding: ExternalBinding = { kind, cwd: directory, config: { executable: "fixture", args: [] } };
   const turns: Array<{ nativeId: string; text: string; id: string }> = [];

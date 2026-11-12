@@ -10,7 +10,7 @@ import { openDesktopAgent } from "../dist/local-agent.js";
 import { openAgentSettings } from "../dist/agent-settings.js";
 import { createModelCatalog } from "@assistant/runtime";
 
-const kinds = ["codex", "claude", "acp"] as const;
+const kinds = ["codex", "claude", "acp", "omp"] as const;
 const recall = "RECALL";
 
 async function until(ready: () => boolean | Promise<boolean>) {
@@ -114,7 +114,7 @@ test("context stays isolated across workspace/command changes and an explicit ne
 }));
 
 test("24 switches and restart preserve native memory without duplicating messages", async () => fixture(async f => {
-  const expected = { codex: [] as string[], claude: [] as string[], acp: [] as string[] };
+  const expected = { codex: [] as string[], claude: [] as string[], acp: [] as string[], omp: [] as string[] };
   for (let round = 0; round < 24; round++) {
     const kind = kinds[round % kinds.length]!;
     await f.switchTo(kind);
