@@ -13,7 +13,7 @@ test("skills preload exposes only named operations and never a generic IPC or fi
       ipcRenderer: { invoke: (...args: unknown[]) => { calls.push(args); return Promise.resolve(null); } },
     };
   } });
-  assert.deepEqual([...bridges.keys()].sort(), ["desktopServer", "localSkills"]);
+  assert.deepEqual([...bridges.keys()].sort(), ["desktopConnection", "desktopServer", "localSkills"]);
   const server = bridges.get("desktopServer")!;
   assert.deepEqual(Object.keys(server), ["platform", "connect", "openSettings", "notificationStatus"]);
   assert.equal(server.platform, "darwin");

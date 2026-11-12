@@ -1,6 +1,6 @@
 /* Dee desktop shell, following the "对话页 · 简洁专业" design reference; all pages share it.
    Colors are tokens so dark mode only swaps values. Headers are 52px, the height the native traffic lights are centred on. */
-.workspace-identity, .desktop-titlebar, .composer-keyboard-hint, .workspace-search { display: none; }
+.desktop-titlebar, .composer-keyboard-hint, .workspace-search { display: none; }
 .composer-related { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--bg-subtle); color: var(--text-main); white-space: nowrap; }
 .composer-related .icon { width: 13px; height: 13px; }
 
@@ -199,20 +199,20 @@
   #mascot-card.app-layout .assistant-turn .response-copy { position: absolute; top: -6px; right: 0; margin: 0; background: var(--bg-surface); }
 }
 
-/* Expanded history keeps navigation tools at the bottom, like the reference sidebar. */
+/* Expanded history keeps navigation in the header, above the conversation list. */
 @media (min-width: 901px) {
   #mascot-card.app-layout {
     --rail-width: 0px;
-    & > .sidebar { position: absolute; inset: auto auto 0 0; width: var(--history-width); padding: 6px 10px; background: var(--history-surface); pointer-events: none; }
+    & > .sidebar { position: absolute; inset: 0 auto auto 0; width: var(--history-width); min-height: var(--header-height); padding: 10px; background: var(--history-surface); pointer-events: none; }
     & .workspace-primary-nav { flex-direction: row; align-items: center; gap: 2px; pointer-events: auto; }
     & .workspace-primary-nav > .workspace-nav-link, & .workspace-more-button { width: 32px; min-width: 32px; height: 32px; min-height: 32px; border-radius: 9px; color: var(--dee-secondary); }
     & .workspace-primary-nav .workspace-nav-link .icon, & .workspace-more-button .icon { width: 18px; height: 18px; }
     & .workspace-primary-nav > .workspace-nav-link[aria-current="page"] { background: var(--dee-fill); color: var(--text-main); }
-    & .workspace-primary-nav > [data-tooltip]::before { top: auto; bottom: calc(100% + 6px); left: 0; transform: none; }
+    & .workspace-primary-nav > [data-tooltip]::before { top: calc(100% + 6px); bottom: auto; left: 0; transform: none; }
     & .workspace-primary-nav > .workspace-compose { display: none; }
-    & .workspace-personal-nav { top: auto; bottom: 48px; left: 10px; width: calc(var(--history-width) - 20px); max-height: calc(100dvh - 64px); pointer-events: auto; }
+    & .workspace-personal-nav { top: calc(100% + 4px); bottom: auto; left: 10px; width: calc(var(--history-width) - 20px); max-height: calc(100dvh - var(--header-height) - 16px); pointer-events: auto; }
     & .conversation-sidebar { background: var(--history-surface); }
-    & .conversation-history { padding-bottom: 52px; }
+    & .conversation-history { padding-top: var(--header-height); }
     & .conversation-header-new { display: none; }
     & .conversation-history .history-close { display: none; }
   }
@@ -232,8 +232,9 @@
     & .workspace-primary-nav > .workspace-nav-link, & .workspace-more-button { width: 44px; min-width: 44px; height: 44px; min-height: 44px; border-radius: 12px; }
      & .workspace-primary-nav > [data-tooltip]::before { top: 50%; left: calc(100% + 12px); transform: translateY(-50%); }
     & .workspace-personal-nav { top: calc(var(--header-height) + 6px); bottom: auto; left: calc(100% + 8px); width: 238px; }
-     /* The frame clips overflow, so the handle sits just inside the chat edge instead of straddling the rail. */
-    & .sidebar-toggle { right: -28px; }
+    /* Let the shared edge handle cross into the rail without clipping or hiding behind navigation. */
+    & > .workspace-frame { overflow: visible; }
+    & .conversation-sidebar { z-index: 21; }
   }
 }
 
@@ -245,7 +246,7 @@
 }
 @media (min-width: 901px) {
   #mascot-card[data-desktop] {
-    &[data-desktop="darwin"] .conversation-history { padding-top: var(--header-height); }
+    &[data-desktop="darwin"]:has(.conversation-sidebar[data-expanded="true"]) > .sidebar { padding-left: 96px; }
     &:not([data-desktop="darwin"]) .conversation-header-actions { padding-right: 138px; }
     &:not([data-desktop="darwin"]):has(.related-tasks-panel:not([hidden])) .conversation-header-actions { padding-right: 0; }
     &:not([data-desktop="darwin"]) .related-tasks-panel > header { padding-right: 146px; }

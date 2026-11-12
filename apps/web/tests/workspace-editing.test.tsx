@@ -6,15 +6,10 @@ import { NotesPage } from "../dist/workspace/NotesPage.js";
 import { PersonalPage } from "../dist/workspace/PersonalPage.js";
 import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
+import { replaceSource, sourceEditor } from "./lane-source.js";
 
 async function typeMarkdown(dom: JSDOM, text: string) {
-  const document = dom.window.document;
-  if (!document.querySelector(".markdown-editor textarea")) await act(async () => { [...document.querySelectorAll<HTMLButtonElement>(".markdown-editor-toolbar button")].find(button => button.textContent === "Markdown 源码")!.click(); });
-  const textarea = document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, text);
-    textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  });
+  await replaceSource(dom.window.document, text);
 }
 
 test("笔记直接保存 Markdown，冲突后仍保留草稿", async t => {
@@ -39,10 +34,10 @@ test("笔记直接保存 Markdown，冲突后仍保留草稿", async t => {
   await typeMarkdown(dom, "尚未保存的修改");
   await act(async () => { document.querySelector<HTMLButtonElement>(".settings-save")!.click(); });
   assert.match(document.querySelector('[role="alert"]')!.textContent!, /其他页面更新/);
-  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, "尚未保存的修改");
+  assert.equal(sourceEditor(document).state.doc.toString(), "尚未保存的修改");
   await render(<NotesPage owner={7} active={false} />);
   await render(<NotesPage owner={7} active />);
-  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, "尚未保存的修改");
+  assert.equal(sourceEditor(document).state.doc.toString(), "尚未保存的修改");
 });
 
 test("记忆页面直接新增与编辑，不调用聊天接口，发送原记录防止覆盖", async t => {

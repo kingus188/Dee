@@ -1,0 +1,1803 @@
+import { t } from "../i18n.ts";
+import { LargeTableView } from "./LargeTableView.ts";
+import { positionIndex, shiftPositions } from "./sourcePositions.ts";
+import { BlockViewport, blockSpacer } from "./blockViewport.ts";
+import { codeSelectionCommand, selectionActions, wordRange } from "./selectionCommands.ts";
+import emojiNames from "markdown-it-emoji/lib/data/full.mjs";
+import { clearInlineFormats } from "./inlineFormats.ts";
+import type { InlineFormat } from "./inlineFormats.ts";
+import { EditorState, Compartment } from "@codemirror/state";
+import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import { indentUnit } from "@codemirror/language";
+import { EditorView, keymap, drawSelection } from "@codemirror/view";
+import { defaultKeymap, indentMore, indentLess } from "@codemirror/commands";
+import { MarkdownDocument } from "./model.ts";
+import type { DocumentNode, SelectionBookmark } from "./model.ts";
+import {
+  renderNode,
+  tableRowCells,
+  fenceRange,
+  codeBody,
+  encodeCodeBody,
+  codePosition,
+} from "./richRender.ts";
+import type { Leaf } from "./richRender.ts";
+import { renderDiagrams } from "./diagrams.ts";
+import { renderMath } from "./math.ts";
+import { fenceLanguage } from "./fenceLanguage.ts";
+import { applyBlockCommand } from "./blockCommands.ts";
+import type { BlockArguments } from "./blockCommands.ts";
+import { clipboardTable, htmlToMarkdown, tableCellMarkdown, tableMarkdown, tablePasteBlock } from "./clipboard.ts";
+import { inlineTokens, markdownOptionsVersion } from "./markdown.ts";
+import { imeKey } from "./composition.ts";
+export interface RichCallbacks {
+  change(): void;
+  cursor(line: number, column: number): void;
+  image(file: File): void;
+  link(url: string): void;
+  compositionFinished(): void;
+  error?(message: string): void;
+}
+export class RichEditor {
+  leaves = new Map<string, Leaf>();
+  composing = false;
+  private composingLeaf: Leaf | null = null;
+  private compositionTimer: ReturnType<typeof setTimeout> | null = null;
+  private compositionSnapshot: { raw: string; positions: number[]; from: number; to: number; start: number; end: number; crossBlock: boolean } | null = null;
+  private compositionText: string | null = null;
+  private mutating = false;
+  private pointing = false;
+  private fullSelection = false;
+  private blocks = new Map<string, { node: DocumentNode; element: HTMLElement; leaves: Leaf[]; environment: string }>();
+  private fence: { id: string; leaf: Leaf; view: EditorView } | null = null;
+  private emojiPopup: HTMLDivElement;
+  private emojiOptions: string[] = [];
+  private emojiIndex = 0;
+  private emojiFrom = 0;
+  private emojiEnabled = true;
+  private emojiDismissed = "";
+  private tableToolbar: HTMLDivElement;
+  private pendingFormat = new Map<string, string>();
+  private tabSize = 2;
+  private typewriter = false;
+  private autoPair = false;
+  private readOnly = false;
+  private protectReadOnly = (event: Event) => {
+    if (!this.readOnly) return;
+    if (event.type === "keydown") {
+      const key = event as KeyboardEvent;
+      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", "Escape"].includes(key.key) || ((key.metaKey || key.ctrlKey) && ["a", "c", "f"].includes(key.key.toLowerCase()))) return;
+    }
+    event.preventDefault(); event.stopImmediatePropagation();
+  };
+  private viewport = new BlockViewport();
+  private viewportFrame = 0;
+  private resizeObserver: ResizeObserver | null = null;
+  private viewportWidth = 0;
+  private scrollViewport = () => {
+    if(this.viewportFrame || this.model.text.length<=300_000) return;
+    this.viewportFrame=requestAnimationFrame(()=>{this.viewportFrame=0;if(!this.composing)this.render(false);});
+  };
+  private scrollFrame = 0;
+  private fenceBehavior = new Compartment();
+  private codePreviews = new Map<string, {element: HTMLElement; raw: string; view: EditorView}>();
+  private tableViews = new Map<string, LargeTableView>();
+  private fenceOptions() { return [EditorState.readOnly.of(this.readOnly), EditorView.editable.of(!this.readOnly), indentUnit.of(" ".repeat(this.tabSize)), ...(this.autoPair ? [closeBrackets(), keymap.of(closeBracketsKeymap)] : [])]; }
+  localize() {
+    this.root.setAttribute("aria-label", t("Markdown 编辑器"));
+    this.emojiPopup.setAttribute("aria-label", t("Emoji 建议"));
+    for (const button of this.tableToolbar.querySelectorAll<HTMLButtonElement>("button[data-chrome-label]")) button.textContent = t(button.dataset.chromeLabel!);
+  }
+  readonly root: HTMLElement;
+  readonly model: MarkdownDocument;
+  readonly documentId: string;
+  readonly callbacks: RichCallbacks;
+  constructor(
+    root: HTMLElement,
+    model: MarkdownDocument,
+    documentId: string,
+    callbacks: RichCallbacks,
+  ) {
+    this.root = root;
+    this.model = model;
+    this.documentId = documentId;
+    this.callbacks = callbacks;
+    root.contentEditable = "true";
+    root.role = "textbox";
+    root.tabIndex = 0;
+    root.setAttribute("aria-multiline", "true");
+    root.setAttribute("aria-label", t("Markdown 编辑器"));
+    root.spellcheck = false;
+    for (const type of ["beforeinput", "keydown", "paste", "cut", "drop", "compositionstart"]) root.addEventListener(type, this.protectReadOnly, true);
+    root.addEventListener("beforeinput", this.beforeInput);
+    root.addEventListener("input", this.input);
+    root.addEventListener("keydown", this.keydown);
+    root.addEventListener("paste", this.paste);
+    root.addEventListener("copy", this.copy);
+    root.addEventListener("cut", this.cut);
+    root.addEventListener("drop", this.drop);
+    root.addEventListener("click", this.click);
+    root.addEventListener("pointerdown", this.pointerDown);
+    document.addEventListener("pointerup", this.pointerUp);
+    root.addEventListener("compositionstart", this.compositionStart);
+    root.addEventListener("compositionend", this.compositionEnd);
+    document.addEventListener("selectionchange", this.selectionChange);
+    this.tableToolbar = document.createElement("div");
+    this.tableToolbar.className = "table-tools";
+    this.tableToolbar.contentEditable = "false";
+    this.tableToolbar.hidden = true;
+    for (const [label, action] of [
+      ["添加行", "row"],
+      ["删除行", "removeRow"],
+      ["添加列", "column"],
+      ["删除列", "removeColumn"],
+      ["左对齐", "left"],
+      ["居中", "center"],
+      ["右对齐", "right"],
+    ]) {
+      const button = document.createElement("button");
+      button.dataset.chromeLabel = label;
+      button.textContent = t(label);
+      button.type = "button";
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", () => this.tableAction(action));
+      this.tableToolbar.append(button);
+    }
+    this.emojiPopup = document.createElement("div"); this.emojiPopup.className = "emoji-completion"; this.emojiPopup.hidden = true; this.emojiPopup.role = "listbox"; this.emojiPopup.setAttribute("aria-label", t("Emoji 建议"));
+    this.emojiPopup.addEventListener("mousedown", event => event.preventDefault());
+    root.parentElement!.append(this.emojiPopup);
+    root.parentElement!.append(this.tableToolbar);
+    model.enableRichParsing();
+    root.parentElement!.addEventListener("scroll",this.scrollViewport,{passive:true});
+    if(typeof ResizeObserver!=="undefined") {
+      this.resizeObserver=new ResizeObserver(()=>{const width=root.clientWidth;if(width!==this.viewportWidth){this.viewportWidth=width;this.viewport.reset();this.scrollViewport();}});
+      this.resizeObserver.observe(root);
+    }
+    this.render(false);
+  }
+  destroy() {
+    if (this.compositionTimer !== null) clearTimeout(this.compositionTimer);
+    for (const type of ["beforeinput", "keydown", "paste", "cut", "drop", "compositionstart"]) this.root.removeEventListener(type, this.protectReadOnly, true);
+    cancelAnimationFrame(this.scrollFrame);
+    cancelAnimationFrame(this.viewportFrame); this.resizeObserver?.disconnect();
+    this.root.parentElement?.removeEventListener("scroll",this.scrollViewport);
+    this.fence?.view.destroy();
+    for (const preview of this.codePreviews.values()) preview.view.destroy();
+    for (const table of this.tableViews.values()) table.destroy();
+    this.tableToolbar.remove(); this.emojiPopup.remove();
+    document.removeEventListener("selectionchange", this.selectionChange);
+    document.removeEventListener("pointerup", this.pointerUp);
+    for (const [type, listener] of [
+      ["beforeinput", this.beforeInput],
+      ["input", this.input],
+      ["keydown", this.keydown],
+      ["paste", this.paste],
+      ["copy", this.copy],
+      ["cut", this.cut],
+      ["drop", this.drop],
+      ["click", this.click],
+      ["pointerdown", this.pointerDown],
+      ["compositionstart", this.compositionStart],
+      ["compositionend", this.compositionEnd],
+    ] as const)
+      this.root.removeEventListener(type, listener as EventListener);
+  }
+  private textNodes(element: Node): Text[] {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) =>
+        node.parentElement?.closest(".md-view,.md-ui")
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT,
+    });
+    const nodes: Text[] = [];
+    let node;
+    while ((node = walker.nextNode())) nodes.push(node as Text);
+    return nodes;
+  }
+  private raw(element: Node) {
+    return this.textNodes(element)
+      .map((n) => n.data)
+      .join("");
+  }
+  private leafElement(node: Node | null | undefined) {
+    const element = node?.nodeType === Node.ELEMENT_NODE
+      ? node as HTMLElement
+      : node?.parentElement;
+    return element && this.root.contains(element)
+      ? element.closest<HTMLElement>("[data-leaf]")
+      : null;
+  }
+  private point(node: Node, offset: number) {
+    const parent =
+      node.nodeType === Node.ELEMENT_NODE
+        ? (node as HTMLElement)
+        : node.parentElement;
+    let element = parent?.closest<HTMLElement>("[data-leaf]");
+    if (!element || !this.root.contains(element)) {
+      const block = parent?.closest<HTMLElement>("[data-cid]");
+      if (block)
+        return (
+          this.model.nodes.find((n) => n.id === block.dataset.cid)?.from || 0
+        );
+      if (node === this.root) {
+        const child = this.root.children[
+          Math.min(offset, this.root.children.length - 1)
+        ] as HTMLElement;
+        return (
+          this.model.nodes.find((n) => n.id === child?.dataset.cid)?.from ??
+          this.model.text.length
+        );
+      }
+      return this.model.selection.head;
+    }
+    const leaf = this.leaves.get(element.dataset.leaf!);
+    if (!leaf) return this.model.selection.head;
+    const range = document.createRange();
+    range.setStart(element, 0);
+    try {
+      range.setEnd(node, offset);
+    } catch {
+      return leaf.positions[0];
+    }
+    const fragment = range.cloneContents();
+    fragment.querySelectorAll(".md-view,.md-ui").forEach((e) => e.remove());
+    const local = fragment.textContent?.length || 0;
+    return leaf.positions[Math.min(local, leaf.positions.length - 1)];
+  }
+  bookmark(): SelectionBookmark {
+    if(this.fullSelection)return {...this.model.selection};
+    if (this.fence?.view.hasFocus) {
+      const selection = this.fence.view.state.selection.main,
+        start = this.fence.leaf.positions[0];
+      const node = this.model.nodes.find(
+        (n) => n.id === this.fence!.leaf.nodeId,
+      );
+      if (node && this.fence.leaf.fenceLine !== undefined) {
+        const body = codeBody(node, this.fence.leaf.fenceLine),
+          raw = this.fence.view.state.doc.toString();
+        return {
+          anchor: codePosition(
+            node.from + body.from,
+            raw,
+            body.prefix,
+            selection.anchor,
+          ),
+          head: codePosition(
+            node.from + body.from,
+            raw,
+            body.prefix,
+            selection.head,
+          ),
+        };
+      }
+      return { anchor: start + selection.anchor, head: start + selection.head };
+    }
+    const selection = window.getSelection();
+    if (
+      !selection?.anchorNode ||
+      !selection.focusNode ||
+      !this.root.contains(selection.anchorNode) ||
+      !this.root.contains(selection.focusNode)
+    )
+      return this.model.selection;
+    return {
+      anchor: this.point(selection.anchorNode, selection.anchorOffset),
+      head: this.point(selection.focusNode, selection.focusOffset),
+    };
+  }
+  contextSelection(target: HTMLElement, x: number, y: number, keyboard = false) {
+    if (this.composing) return null;
+    const previous = this.bookmark();
+    let position = previous.head;
+    if (!keyboard) {
+      const code = target.closest<HTMLElement>(".cm-editor"), view = code && EditorView.findFromDOM(code);
+      const wrapper = target.closest<HTMLElement>("[data-fence]"), leaf = wrapper && this.leaves.get(wrapper.dataset.fence!);
+      if (view && leaf) {
+        const local = view.posAtCoords({ x, y }) ?? view.state.selection.main.head;
+        const node = this.model.nodes.find(node => node.id === leaf.nodeId);
+        const body = node && leaf.fenceLine !== undefined ? codeBody(node, leaf.fenceLine) : null;
+        position = node && body ? codePosition(node.from + body.from, view.state.doc.toString(), body.prefix, local) : leaf.positions[0] + local;
+      } else {
+        const caretDocument = document as Document & { caretRangeFromPoint?(x: number, y: number): Range | null };
+        const range = caretDocument.caretRangeFromPoint?.(x, y);
+        const cell = target.closest<HTMLElement>("td,th");
+        const rangeCell = range?.startContainer.parentElement?.closest("td,th");
+        if (cell && rangeCell !== cell) position = this.point(cell.querySelector("[data-leaf]") || cell, 0);
+        else if (range && this.root.contains(range.startContainer)) position = this.point(range.startContainer, range.startOffset);
+        else if (this.root.contains(target)) position = this.point(target, 0);
+      }
+    }
+    const from = Math.min(previous.anchor, previous.head), to = Math.max(previous.anchor, previous.head);
+    const selection = keyboard || (from !== to && position >= from && position <= to) ? previous : { anchor: position, head: position };
+    if (selection !== previous) this.fullSelection = false;
+    this.model.selection = selection; this.model.closeGroup();
+    const node = this.model.nodeAt(position);
+    let table: { row: number; rows: number; column: number; columns: number } | undefined;
+    if (node?.kind === "table_open") {
+      const large = this.tableViews.get(node.id), offset = position - node.from;
+      const lines = large ? null : node.source.split("\n");
+      let row = large ? large.index.rowAt(offset) : node.source.slice(0, offset).split("\n").length - 1;
+      if (row === 1) row = 0;
+      const cells = large ? large.index.cells(row) : tableRowCells(lines![row]);
+      const start = large ? large.index.offsets[row] : lines!.slice(0, row).reduce((sum, line) => sum + line.length + 1, 0);
+      const column = Math.max(0, cells.findIndex(cell => offset - start >= cell.start && offset - start <= cell.end));
+      table = { row, rows: large ? large.index.length : lines!.length, column, columns: cells.length };
+    }
+    return { selection, point: { anchor: position, head: position }, table, code: node?.kind === "fence" };
+  }
+  selectAll() { this.fullSelection = true; this.select({ anchor: 0, head: this.model.text.length }); }
+  private domPoint(position: number): { node: Node; offset: number } | null {
+    const candidates = [...this.leaves.values()].filter(
+      (leaf) =>
+        position >= leaf.positions[0] && position <= leaf.positions.at(-1)!,
+    );
+    const leaf =
+      candidates[0] ||
+      [...this.leaves.values()].sort(
+        (a, b) =>
+          Math.abs(a.positions[0] - position) -
+          Math.abs(b.positions[0] - position),
+      )[0];
+    if (!leaf) return null;
+    const element = this.root.querySelector<HTMLElement>(
+      `[data-leaf="${leaf.id}"]`,
+    );
+    if (!element) return null;
+    let local = positionIndex(leaf.positions, position);
+    if (local < 0) local = leaf.raw.length;
+    const texts = this.textNodes(element);
+    for (const text of texts) {
+      if (local === text.length && text.parentElement?.classList.contains("md-cell-break")) {
+        const marker = text.parentElement, parent = marker.parentNode!;
+        return { node: parent, offset: [...parent.childNodes].indexOf(marker) + 2 };
+      }
+      if (local <= text.length) return { node: text, offset: local };
+      local -= text.length;
+    }
+    return { node: element, offset: 0 };
+  }
+  restore(selection = this.model.selection, focus = true) {
+    if (this.root.closest<HTMLElement>(".document-editor")?.dataset.active === "false") return;
+    // Selection APIs can focus an editing host even without an explicit focus().
+    if (!focus && !this.root.contains(document.activeElement)) return;
+    const anchor = this.domPoint(selection.anchor),
+      head = this.domPoint(selection.head);
+    if (!anchor || !head) return;
+    if (focus) {
+      const parent = anchor.node.nodeType === Node.ELEMENT_NODE ? anchor.node as HTMLElement : anchor.node.parentElement;
+      const host = parent?.closest<HTMLElement>('[contenteditable="true"]');
+      // Large tables are editable islands inside a non-editable row viewport.
+      // Empty cells do not automatically focus that island when selection moves.
+      (host && this.root.contains(host) ? host : this.root).focus({ preventScroll: true });
+    }
+    window
+      .getSelection()
+      ?.setBaseAndExtent(anchor.node, anchor.offset, head.node, head.offset);
+    this.expandInline();
+  }
+  render(restore = true) {
+    if (this.composing) return;
+    const preserveSelection = !restore && this.root.contains(document.activeElement) && this.root.contains(window.getSelection()?.anchorNode || null);
+    this.mutating = true;
+    const fresh = new Map<string, Leaf>(), desired: HTMLElement[] = [], next = new Map<string, { node: DocumentNode; element: HTMLElement; leaves: Leaf[]; environment: string }>();
+    const existing = new Map([...this.root.children].map(element => [(element as HTMLElement).dataset.cid, element as HTMLElement]));
+    const environment = markdownOptionsVersion + ":" + JSON.stringify(this.model.environment);
+    const virtual=this.model.text.length>300_000, scroller=this.root.parentElement!;
+    this.root.dataset.virtualized=String(virtual);
+    this.viewport.setNodes(this.model.nodes);
+    const pins=[this.model.selection.anchor,this.model.selection.head].map(position=>this.model.nodes.indexOf(this.model.nodeAt(position)!));
+    const top=scroller.scrollTop-this.root.offsetTop;
+    const indices=virtual?this.viewport.visible(top,scroller.clientHeight,pins):this.model.nodes.map((_,i)=>i);
+    let cursor=0;
+    for (const index of indices) {
+      const node=this.model.nodes[index];
+      if(virtual&&index>cursor)desired.push(blockSpacer(this.viewport.offset(index)-this.viewport.offset(cursor)));
+      cursor=index+1;
+      const previous = existing.get(node.id), cached = this.blocks.get(node.id);
+      if (this.fence?.id === node.id && previous) {
+        const leaves = cached?.leaves || [this.fence.leaf];
+        for (const leaf of leaves) fresh.set(leaf.id, leaf);
+        desired.push(previous); next.set(node.id, {node, element: previous, leaves, environment}); continue;
+      }
+      if (node.kind === "table_open" && (node.source.length > 50_000 || node.source.split("\n", 202).length > 200)) {
+        let table = this.tableViews.get(node.id);
+        if (!table) {
+          table = new LargeTableView(node, this.documentId, this.model.environment, (view, restore) => {
+            const block = this.blocks.get(node.id); if (block?.element !== view.element) return;
+            const selection = {...this.model.selection};
+            for (const leaf of block.leaves) this.leaves.delete(leaf.id);
+            block.leaves = [...view.leaves.values()];
+            for (const leaf of block.leaves) this.leaves.set(leaf.id, leaf);
+            if (restore && !this.mutating) this.restore(selection, false);
+            void renderMath(this.root).then(view.measure).catch(() => {});
+          }, () => this.composing);
+          this.tableViews.set(node.id, table);
+        }
+        table.update(node, this.model.environment, this.model.selection, this.readOnly);
+        const leaves = [...table.leaves.values()]; for (const leaf of leaves) fresh.set(leaf.id, leaf);
+        desired.push(table.element); next.set(node.id, {node, element: table.element, leaves, environment}); continue;
+      }
+      if (cached && previous === cached.element && this.fence?.id !== node.id && cached.node.source === node.source && cached.node.kind === node.kind && cached.environment === environment) {
+        const delta = node.from - cached.node.from;
+        const leaves = delta ? cached.leaves.map(leaf => ({ ...leaf, positions: shiftPositions(leaf.positions, delta) })) : cached.leaves;
+        for (const leaf of leaves) fresh.set(leaf.id, leaf);
+        if (delta) for (const checkbox of previous.querySelectorAll<HTMLElement>("[data-task]")) checkbox.dataset.task = String(Number(checkbox.dataset.task) + delta);
+        if (previous.dataset.line !== String(node.line)) previous.dataset.line = String(node.line);
+        desired.push(previous); next.set(node.id, { node, element: previous, leaves, environment });
+        continue;
+      }
+      const leaves = new Map<string, Leaf>();
+      const element = renderNode(node, this.documentId, leaves, this.model.environment);
+      for (const [id, leaf] of leaves) fresh.set(id, leaf);
+      if (this.fence?.id === node.id && previous) { desired.push(previous); continue; }
+      if (previous) previous.replaceWith(element);
+      desired.push(element); next.set(node.id, { node, element, leaves: [...leaves.values()], environment });
+    }
+    if(virtual&&cursor<this.model.nodes.length)desired.push(blockSpacer(this.viewport.offset(this.model.nodes.length)-this.viewport.offset(cursor)));
+    this.blocks = next;
+    this.leaves = fresh;
+    for (let i = 0; i < desired.length; i++)
+      if (this.root.children[i] !== desired[i]) this.root.insertBefore(desired[i], this.root.children[i] || null);
+    const retained = new Set(desired);
+    for (const element of [...this.root.children]) if (!retained.has(element as HTMLElement)) element.remove();
+    for (const [id, table] of this.tableViews) if (!next.has(id)) { table.destroy(); this.tableViews.delete(id); }
+    for (const checkbox of this.root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) checkbox.disabled = this.readOnly;
+    this.syncCodePreviews();
+    if (!this.fence && (restore || preserveSelection)) this.restore(this.model.selection, restore);
+    this.mutating = false;
+    const measure=()=>{
+      if(!virtual)return;
+      let changed=false;
+      for(const [id,block] of this.blocks){const style=getComputedStyle(block.element);changed=this.viewport.measure(id,block.element.getBoundingClientRect().height+parseFloat(style.marginTop||"0")+parseFloat(style.marginBottom||"0"))||changed;}
+      if(changed)this.scrollViewport();
+    };
+    measure();
+    void Promise.all([renderDiagrams(this.root),renderMath(this.root)]).then(measure).catch(() => {});
+  }
+  private publish(restore = true) {
+    this.fullSelection=false;
+    this.render(restore);
+    if (!this.fence && !this.composing && this.model.selection.anchor === this.model.selection.head) {
+      const leaf = [...this.leaves.values()].find(leaf => leaf.kind === "fence" && this.model.selection.head >= leaf.positions[0] && this.model.selection.head <= leaf.positions.at(-1)!);
+      const element = leaf && this.root.querySelector<HTMLElement>(`[data-fence="${leaf.id}"]`); if (element) this.activateFence(element);
+    }
+    this.callbacks.change();
+    this.reportCursor();
+  }
+  private reportCursor() {
+    const node = this.model.nodeAt(this.model.selection.head), from = node?.from || 0;
+    if (this.fence) {
+      const head = this.fence.view.state.selection.main.head, line = this.fence.view.state.doc.lineAt(head);
+      this.callbacks.cursor((node?.line || 1) + (this.fence.leaf.fenceLine || 0) + line.number, head - line.from + 1);
+    } else if (node && this.tableViews.has(node.id)) {
+      const index = this.tableViews.get(node.id)!.index, row = index.rowAt(this.model.selection.head - from);
+      this.callbacks.cursor(node.line + row, this.model.selection.head - from - index.offsets[row] + 1);
+    } else {
+      const before = this.model.text.slice(from, this.model.selection.head), at = before.lastIndexOf("\n");
+      this.callbacks.cursor((node?.line || 1) + (before.match(/\n/g)?.length || 0), before.length - at);
+    }
+    this.updateWritingMode(); this.updateEmoji();
+  }
+  setOptions(options: { spellcheck: boolean; tabSize: number; typewriter: boolean; autoPair?: boolean; emoji?: boolean; readOnly?: boolean }) {
+    this.readOnly = options.readOnly ?? false;
+    this.root.setAttribute("contenteditable", String(!this.readOnly));
+    for (const table of this.tableViews.values()) table.setReadOnly(this.readOnly);
+    this.root.setAttribute("aria-readonly", String(this.readOnly));
+    this.tableToolbar.inert = this.readOnly;
+    this.emojiPopup.inert = this.readOnly;
+    if (this.readOnly) this.emojiPopup.hidden = true;
+    for (const checkbox of this.root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) checkbox.disabled = this.readOnly;
+    this.emojiEnabled = options.emoji !== false;
+    this.root.spellcheck = options.spellcheck;
+    this.tabSize = options.tabSize;
+    this.typewriter = options.typewriter;
+    this.autoPair = options.autoPair ?? false;
+    this.fence?.view.dispatch({ effects: this.fenceBehavior.reconfigure(this.fenceOptions()) });
+    this.updateWritingMode();
+  }
+  private updateWritingMode() {
+    const active = this.model.nodeAt(this.model.selection.head);
+    for (const block of this.root.children) block.classList.toggle("is-active", block.getAttribute("data-cid") === active?.id);
+    const activeElement = active && this.root.querySelector<HTMLElement>(`[data-cid="${active.id}"]`), selection = window.getSelection();
+    if (activeElement && selection?.rangeCount && activeElement.contains(selection.anchorNode)) {
+      const range = selection.getRangeAt(0), rect = typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : null;
+      if (rect && rect.height) { const parent = selection.anchorNode?.parentElement, height = parent ? parseFloat(getComputedStyle(parent).lineHeight) || rect.height : rect.height; activeElement.style.setProperty("--focus-line-top", `${Math.max(0, rect.top - activeElement.getBoundingClientRect().top - (height - rect.height) / 2)}px`); activeElement.style.setProperty("--focus-line-height", `${height}px`); }
+    }
+    if (!this.typewriter || this.composing || !this.root.contains(window.getSelection()?.anchorNode || null)) return;
+    cancelAnimationFrame(this.scrollFrame);
+    this.scrollFrame = requestAnimationFrame(() => {
+      const selection = window.getSelection();
+      if (!selection?.rangeCount) return;
+      const range = selection.getRangeAt(0), rect = range.getBoundingClientRect();
+      const scroller = this.root.parentElement!, bounds = scroller.getBoundingClientRect();
+      if (rect.height && Math.abs(rect.top - bounds.top - bounds.height / 2) > 2) scroller.scrollTop += rect.top - bounds.top - bounds.height / 2;
+    });
+  }
+  private expandInline() {
+    const selection = window.getSelection(),
+      anchor = selection?.anchorNode?.parentElement,
+      head = selection?.focusNode?.parentElement;
+    this.root
+      .querySelectorAll<HTMLElement>(".md-inline")
+      .forEach((element) =>
+        element.classList.toggle(
+          "md-expand",
+          !!(
+            (anchor && element.contains(anchor) && selection?.isCollapsed) ||
+            (head && element.contains(head) && selection?.isCollapsed)
+          ),
+        ),
+      );
+    const table = anchor?.closest("table");
+    this.tableToolbar.hidden = !table;
+    if (table) {
+      const rect = table.getBoundingClientRect(),
+        parent = this.root.parentElement!.getBoundingClientRect();
+      this.tableToolbar.style.top = `${Math.max(0, rect.top - parent.top - 29)}px`;
+      this.tableToolbar.style.left = `${rect.left - parent.left}px`;
+    }
+  }
+  private selectionChange = () => {
+    if (
+      this.mutating ||
+      this.composing ||
+      !this.root.contains(window.getSelection()?.anchorNode || null)
+    )
+      return;
+    const selection = this.bookmark();
+    if (
+      selection.anchor !== this.model.selection.anchor ||
+      selection.head !== this.model.selection.head
+    ) {
+      this.pendingFormat.clear();
+      this.model.closeGroup();
+    }
+    this.model.selection = selection;
+    if (!this.pointing) this.expandInline();
+    this.reportCursor();
+  };
+  private pointerDown = () => {
+    this.fullSelection=false;
+    this.pointing = true;
+  };
+  private pointerUp = () => {
+    requestAnimationFrame(() => {
+      this.pointing = false;
+      this.selectionChange();
+    });
+  };
+  private beforeInput = (event: InputEvent) => {
+    if (
+      this.composing ||
+      event.isComposing ||
+      (event.target as HTMLElement)?.closest(".cm-editor")
+    )
+      return;
+    const selection = this.bookmark();
+    this.model.selection = selection;
+    let from = Math.min(selection.anchor, selection.head),
+      to = Math.max(selection.anchor, selection.head),
+      insert = event.data || "",
+      kind = "typing";
+    switch (event.inputType) {
+      case "historyUndo":
+        event.preventDefault();
+        this.undo();
+        return;
+      case "historyRedo":
+        event.preventDefault();
+        this.redo();
+        return;
+      case "insertParagraph":
+        event.preventDefault();
+        this.enter(false);
+        return;
+      case "insertLineBreak":
+        event.preventDefault();
+        this.enter(true);
+        return;
+      case "formatBold":
+        event.preventDefault();
+        this.wrap("**", "**");
+        return;
+      case "formatItalic":
+        event.preventDefault();
+        this.wrap("*", "*");
+        return;
+      case "deleteContentBackward":
+        if (from === to) {
+          const marker = [...this.root.querySelectorAll<HTMLElement>(".md-cell-break")].find(element => this.point(element, 0) + (element.textContent?.length || 0) === from);
+          if (marker) { from -= marker.textContent!.length; insert = ""; kind = "structure"; break; }
+          if (this.leafElement(window.getSelection()?.anchorNode)?.closest("td,th") && this.model.text[from - 1] === "|" && precedingSlashes(this.model.text, from - 1) % 2 === 1) {
+            from -= 2; insert = ""; kind = "structure"; break;
+          }
+          const pairs: Record<string, string> = { "(": ")", "[": "]", "{": "}", '"': '"', "'": "'" };
+          if (this.autoPair && pairs[this.model.text[from - 1]] && pairs[this.model.text[from - 1]] === this.model.text[to]) {
+            from--; to++; insert = ""; break;
+          }
+          const node = this.model.nodeAt(from),
+            previous = this.model.nodes[this.model.nodes.indexOf(node!) - 1];
+          const lineStart = this.model.text.lastIndexOf("\n", from - 1) + 1,
+            prefix = this.model.text.slice(lineStart, from);
+          if (
+            node?.from === from &&
+            node.kind === "paragraph_open" &&
+            previous &&
+            ["paragraph_open", "heading_open"].includes(previous.kind)
+          ) {
+            from = previous.to;
+            kind = "structure";
+          } else if (/^\s*#{1,6}\s+$/.test(prefix)) { from = lineStart; kind = "structure"; } else if (
+            /^\s*(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?$/.test(prefix)
+          ) {
+            from = lineStart;
+            kind = "structure";
+          } else from = previousGrapheme(this.model.text, from);
+        }
+        insert = "";
+        break;
+      case "deleteContentForward":
+        if (from === to) {
+          const marker = [...this.root.querySelectorAll<HTMLElement>(".md-cell-break")].find(element => this.point(element, 0) === from);
+          if (marker) { to += marker.textContent!.length; insert = ""; kind = "structure"; break; }
+          if (this.leafElement(window.getSelection()?.anchorNode)?.closest("td,th") && this.model.text.slice(from, from + 2) === "\\|") {
+            to += 2; insert = ""; kind = "structure"; break;
+          }
+          const node = this.model.nodeAt(from),
+            next = this.model.nodes[this.model.nodes.indexOf(node!) + 1];
+          to =
+            node?.to === from &&
+            next?.kind === "paragraph_open" &&
+            ["paragraph_open", "heading_open"].includes(node.kind)
+              ? next.from
+              : nextGrapheme(this.model.text, to);
+        }
+        insert = "";
+        break;
+      case "deleteWordBackward":
+        if (from === to)
+          from -=
+            /[\p{L}\p{N}_]+\s*$|\s+$|.$/u.exec(
+              this.model.text.slice(0, from),
+            )?.[0].length || 0;
+        insert = "";
+        break;
+      case "deleteWordForward":
+        if (from === to)
+          to +=
+            /^\s*[\p{L}\p{N}_]+|^\s+|^./u.exec(this.model.text.slice(to))?.[0]
+              .length || 0;
+        insert = "";
+        break;
+      case "insertText":
+      case "insertReplacementText":
+        insert = this.tableText(insert, from);
+        if (this.autoPair && event.inputType === "insertText" && insert.length === 1) {
+          const pairs: Record<string, string> = { "(": ")", "[": "]", "{": "}", '"': '"', "'": "'" };
+          if (from === to && ")]}'\"".includes(insert) && this.model.text[from] === insert) {
+            event.preventDefault(); this.model.selection = { anchor: from + 1, head: from + 1 }; this.restore(); this.reportCursor(); return;
+          }
+          const close = pairs[insert];
+          if (close && !(insert === "'" && /[\p{L}\p{N}]/u.test(this.model.text[from - 1] || ""))) {
+            const body = this.model.text.slice(from, to), at = from + 1;
+            event.preventDefault();
+            if (this.model.replace(from, to, insert + body + close, kind, { anchor: at, head: at + body.length })) this.publish();
+            return;
+          }
+        }
+        if (from === to && this.pendingFormat.size && insert) {
+          const before = [...this.pendingFormat.keys()].join(""), after = [...this.pendingFormat.values()].reverse().join("");
+          const at = from + before.length + insert.length;
+          this.pendingFormat.clear(); event.preventDefault();
+          if (this.model.replace(from, to, before + insert + after, kind, { anchor: at, head: at })) this.publish();
+          return;
+        }
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    if (this.model.replace(from, to, insert, kind)) this.publish();
+  };
+  private input = (event: Event) => {
+    if (
+      this.composing ||
+      (event as InputEvent).isComposing ||
+      (event.target as HTMLElement).closest(".cm-editor")
+    )
+      return;
+    // Browser-owned spellcheck/accessibility edits reconcile only their edited leaf.
+    const element = this.leafElement(window.getSelection()?.anchorNode);
+    const leaf = element && this.leaves.get(element.dataset.leaf!);
+    if (!leaf || !element) return;
+    const raw = this.raw(element);
+    if (this.reconcileLeaf(leaf, raw, "native-input")) this.publish();
+  };
+  private reconcileLeaf(
+    leaf: Leaf,
+    raw: string,
+    kind: string,
+    localHead?: number,
+  ) {
+    if (raw === leaf.raw) return false;
+    let before = 0,
+      after = 0;
+    while (
+      before < raw.length &&
+      before < leaf.raw.length &&
+      raw[before] === leaf.raw[before]
+    )
+      before++;
+    while (
+      after < raw.length - before &&
+      after < leaf.raw.length - before &&
+      raw[raw.length - after - 1] === leaf.raw[leaf.raw.length - after - 1]
+    )
+      after++;
+    const from = leaf.positions[before],
+      to = leaf.positions[leaf.raw.length - after],
+      rawInsert = raw.slice(before, raw.length - after),
+      element = this.root.querySelector<HTMLElement>(`[data-leaf="${leaf.id}"]`),
+      insert = this.tableText(rawInsert, from, element);
+    const local = localHead ?? before + rawInsert.length;
+    const head =
+      local < before
+        ? leaf.positions[local]
+        : local <= raw.length - after
+          ? from + this.tableText(rawInsert.slice(0, local - before), from, element).length
+          : leaf.positions[local - raw.length + leaf.raw.length] +
+            insert.length -
+            (to - from);
+    return this.model.replace(from, to, insert, kind, { anchor: head, head });
+  }
+  private compositionStart = (event: CompositionEvent) => {
+    if (this.compositionTimer !== null) this.finishComposition();
+    const element = this.leafElement(window.getSelection()?.anchorNode);
+    this.model.selection = this.bookmark();
+    this.model.closeGroup();
+    if ((event.target as Element)?.closest(".cm-editor")) this.model.beginComposition();
+    this.compositionSnapshot = null;
+    this.compositionText = null;
+    const selection = window.getSelection();
+    if (!(event.target as Element)?.closest(".cm-editor") && selection) {
+      let raw = ""; const positions: number[] = [];
+      for (const element of this.root.querySelectorAll<HTMLElement>("[data-leaf]")) {
+        const leaf = this.leaves.get(element.dataset.leaf!);
+        if (!leaf) continue;
+        for (let i = 0; i < leaf.raw.length; i++) positions[raw.length+i] = leaf.positions[i];
+        raw += leaf.raw;
+        positions[raw.length] = leaf.positions.at(-1)!;
+      }
+      const from = Math.min(this.model.selection.anchor,this.model.selection.head), to = Math.max(this.model.selection.anchor,this.model.selection.head);
+      const project = (offset: number) => { const found = positions.findIndex(position=>position>=offset); return found<0?raw.length:found; };
+      this.compositionSnapshot = { raw, positions, from, to, start:project(from), end:project(to), crossBlock:this.leafElement(selection.anchorNode)!==this.leafElement(selection.focusNode) };
+    }
+    this.composingLeaf = element
+      ? this.leaves.get(element.dataset.leaf!) || null
+      : null;
+    this.composing = true;
+  };
+  private compositionEnd = (event: CompositionEvent) => {
+    if (!this.composing) return;
+    this.compositionText = event.data;
+    if (this.compositionTimer !== null) clearTimeout(this.compositionTimer);
+    // WebKit may deliver the final input after compositionend's microtasks.
+    this.compositionTimer = setTimeout(() => this.finishComposition(), 0);
+  };
+  private finishComposition() {
+      if (this.compositionTimer !== null) clearTimeout(this.compositionTimer);
+      this.compositionTimer = null;
+      let changed = false;
+      const leaf = this.composingLeaf,
+        element = leaf && this.root.querySelector(`[data-leaf="${leaf.id}"]`);
+      if (this.compositionSnapshot && (this.compositionSnapshot.crossBlock || !element)) {
+        const before = this.compositionSnapshot, raw = this.raw(this.root);
+        let start = 0, end = 0;
+        // Repeated Chinese text can share a prefix/suffix across paragraph
+        // boundaries. Keep the replacement anchored to the original selection.
+        while (start < before.start && start < raw.length && before.raw[start] === raw[start]) start++;
+        while (end < before.raw.length - before.end && end < raw.length - start && before.raw.at(-1-end) === raw.at(-1-end)) end++;
+        if (raw !== before.raw) {
+          const from = start===before.start?before.from:before.positions[start], to = before.raw.length-end===before.end?before.to:before.positions[before.raw.length-end];
+          changed = this.model.replace(from, to, raw.slice(start,raw.length-end), "composition");
+        } else if (before.crossBlock && this.compositionText) {
+          // Replacing two paragraphs with the same visible characters still
+          // removes their Markdown separator and must be undoable.
+          changed = this.model.replace(before.from,before.to,this.compositionText,"composition");
+        }
+      } else if (leaf && element) {
+        const raw = this.raw(element),
+          selection = window.getSelection();
+        let local = raw.length;
+        if (selection?.anchorNode && element.contains(selection.anchorNode)) {
+          const range = document.createRange();
+          range.setStart(element, 0);
+          range.setEnd(selection.anchorNode, selection.anchorOffset);
+          local = range.toString().length;
+        }
+        changed = this.reconcileLeaf(leaf, raw, "composition", local);
+      }
+      this.composing = false;
+      this.composingLeaf = null;
+      this.compositionSnapshot = null;
+      this.compositionText = null;
+      changed = this.model.endComposition() || changed;
+      this.model.closeGroup();
+      if (changed) this.publish(); else if (leaf) this.render();
+      this.callbacks.compositionFinished();
+  }
+  private paste = (event: ClipboardEvent) => {
+    if ((event.target as HTMLElement).closest(".cm-editor")) return;
+    if (this.composing) { event.preventDefault(); return; }
+    const data = event.clipboardData;
+    if (!data) return;
+    const parent = window.getSelection()?.anchorNode?.parentElement;
+    if (parent?.closest('.md-inline[data-mark="code"]')) { event.preventDefault(); this.insert(data.getData("text/plain"), "paste"); return; }
+    const cell = parent?.closest("td,th");
+    const internal = data.getData("text/x-open-markdown-lane-markdown");
+    const table = !internal || cell ? clipboardTable(data) : null;
+    const grid = table?.cells;
+    if (grid && cell) {
+      event.preventDefault();
+      if (!this.pasteTable(grid, cell as HTMLTableCellElement)) this.callbacks.error?.("粘贴范围过大，请在新段落粘贴或使用源码模式。");
+      return;
+    }
+    if (grid && !cell) {
+      event.preventDefault();
+      const selection = this.bookmark();
+      this.insert(tablePasteBlock(tableMarkdown(grid, table?.align), this.model.text, Math.min(selection.anchor, selection.head), Math.max(selection.anchor, selection.head)), "paste");
+      return;
+    }
+    const images = [...(data.files || [])].filter(file => file.type.startsWith("image/"));
+    if (images.length && !/<table\b/i.test(data.getData("text/html"))) {
+      event.preventDefault();
+      this.model.selection = this.bookmark();
+      for (const image of images) this.callbacks.image(image);
+      return;
+    }
+    const html = data.getData("text/html");
+    const text = event.clipboardData?.getData("text/x-open-markdown-lane-markdown") || (html ? htmlToMarkdown(html) : event.clipboardData?.getData("text/plain"));
+    if (text !== undefined) {
+      event.preventDefault();
+      this.insert(text, "paste");
+    }
+  };
+  clipboard() {
+    const selection = this.bookmark(),
+      from = Math.min(selection.anchor, selection.head),
+      to = Math.max(selection.anchor, selection.head);
+    if (from === to) return { markdown: "", plain: "", html: "" };
+    let markdown = this.model.text.slice(from, to);
+    // A DOM Range can cross unmounted blocks; never return a partial clipboard.
+    if(this.model.text.length>300_000 && to-from>20_000) return {markdown,plain:markdown,html:""};
+    let plain = markdown, html = "";
+    const range = window.getSelection()?.rangeCount
+      ? window.getSelection()!.getRangeAt(0)
+      : null;
+    if (range) {
+      const markers = (node: Node, position: number, opening: boolean) => {
+        const result: string[] = [];
+        let element =
+          node.nodeType === Node.ELEMENT_NODE
+            ? (node as HTMLElement)
+            : node.parentElement;
+        while (element && element !== this.root) {
+          if (
+            element.matches(
+              '.md-inline[data-mark="strong"],.md-inline[data-mark="em"],.md-inline[data-mark="s"],.md-inline[data-mark="code"]',
+            )
+          ) {
+            const leaf = this.leaves.get(
+                element.closest<HTMLElement>("[data-leaf]")!.dataset.leaf!,
+              )!,
+              before = element.firstElementChild?.textContent || "",
+              after = element.lastElementChild?.textContent || "";
+            const start =
+                leaf.positions[Number(element.dataset.inlineFrom)] +
+                before.length,
+              end =
+                leaf.positions[Number(element.dataset.inlineTo)] - after.length;
+            if (
+              opening
+                ? position >= start && position < end
+                : position > start && position <= end
+            )
+              result.push(opening ? before : after);
+          }
+          element = element.parentElement;
+        }
+        return opening ? result.reverse().join("") : result.join("");
+      };
+      markdown =
+        markers(range.startContainer, from, true) +
+        markdown +
+        markers(range.endContainer, to, false);
+      const container = document.createElement("div");
+      container.append(range.cloneContents());
+      container
+        .querySelectorAll(".md-meta,.md-object-source,.md-ui")
+        .forEach((e) => e.remove());
+      const plainCopy = container.cloneNode(true) as HTMLElement;
+      plainCopy.querySelectorAll("td,th").forEach(cell => cell.append("\t"));
+      plainCopy.querySelectorAll("p,li,h1,h2,h3,h4,h5,h6,tr,br").forEach(block => block.append("\n"));
+      plain = plainCopy.textContent?.replace(/\t\n/g, "\n").trimEnd() || this.model.text.slice(from, to);
+      let ancestor =
+        range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+          ? (range.commonAncestorContainer as HTMLElement)
+          : range.commonAncestorContainer.parentElement;
+      while (ancestor && ancestor !== this.root) {
+        if (["STRONG", "EM", "S", "CODE"].includes(ancestor.tagName)) {
+          const wrapper = document.createElement(
+            ancestor.tagName.toLowerCase(),
+          );
+          wrapper.append(...container.childNodes);
+          container.append(wrapper);
+        }
+        ancestor = ancestor.parentElement;
+      }
+      html = container.innerHTML;
+    }
+    return { markdown, plain, html };
+  }
+  private copy = (event: ClipboardEvent) => {
+    if ((event.target as HTMLElement).closest(".cm-editor") || !event.clipboardData || window.getSelection()?.isCollapsed) return;
+    event.preventDefault();
+    const copied = this.clipboard();
+    event.clipboardData.setData("text/plain", copied.plain);
+    event.clipboardData.setData("text/html", copied.html);
+    event.clipboardData.setData("text/x-open-markdown-lane-markdown", copied.markdown);
+  };
+  private cut = (event: ClipboardEvent) => {
+    if ((event.target as HTMLElement).closest(".cm-editor")) return;
+    this.copy(event);
+    if (!event.defaultPrevented) return;
+    const selection = this.bookmark();
+    this.model.selection = selection;
+    if (
+      this.model.replace(
+        Math.min(selection.anchor, selection.head),
+        Math.max(selection.anchor, selection.head),
+        "",
+        "cut",
+      )
+    )
+      this.publish();
+  };
+  private drop = (event: DragEvent) => {
+    const droppedPath = event.dataTransfer?.getData("application/x-open-markdown-lane-file");
+    if (droppedPath) { event.preventDefault(); const name = droppedPath.split("/").at(-1) || "文档"; this.insert(`[${name.replace(/[\[\]]/g, "")}](${encodeURI(droppedPath).replace(/[()]/g, c => "%" + c.charCodeAt(0).toString(16))})`, "drop"); return; }
+    const images = [...(event.dataTransfer?.files || [])].filter(file => file.type.startsWith("image/"));
+    if (images.length) {
+      event.preventDefault();
+      this.model.selection = this.bookmark();
+      for (const image of images) this.callbacks.image(image);
+    }
+  };
+  private click = (event: MouseEvent) => {
+    const target = event.target as HTMLElement,
+      box = target.closest<HTMLInputElement>("input[data-task]");
+    if (box) {
+      event.preventDefault();
+      if (this.readOnly) return;
+      const from = Number(box.dataset.task);
+      if (
+        this.model.replace(
+          from,
+          from + 1,
+          this.model.text[from].toLowerCase() === "x" ? " " : "x",
+          "checkbox",
+        )
+      )
+        this.publish(false);
+      return;
+    }
+    const link = target.closest<HTMLAnchorElement>("a");
+    if (link) {
+      event.preventDefault();
+      const address = link.getAttribute("href") || "";
+      if (link.dataset.headingLine) this.jump(Number(link.dataset.headingLine));
+      else if (link.dataset.footnote) {
+        const definition = (this.model.environment.footnoteDefinitions as Record<string, { line: number }>)?.[link.dataset.footnote];
+        if (definition) this.jump(definition.line);
+      } else if (event.metaKey || event.ctrlKey) {
+        if (address.startsWith("#")) {
+          const id = decodeURIComponent(address.slice(1)), heading = (this.model.environment.headings as { id: string; line: number }[])?.find(item => item.id === id);
+          if (heading) this.jump(heading.line);
+        } else this.callbacks.link(address);
+      }
+    }
+    const fence = target.closest<HTMLElement>("[data-fence]");
+    if (fence && (!target.closest(".cm-editor") || target.closest(".code-preview"))) {
+      const preview = this.codePreviews.get(fence.dataset.fence!), leaf = this.leaves.get(fence.dataset.fence!);
+      const position = preview?.view.posAtCoords({x: event.clientX, y: event.clientY});
+      if (leaf && position != null) this.model.selection = {anchor: leaf.positions[position], head: leaf.positions[position]};
+      this.activateFence(fence);
+    }
+    const object = target.closest<HTMLElement>('.md-inline[data-mark="math"],.md-inline[data-mark="sub"],.md-inline[data-mark="sup"],.md-inline[data-mark="emoji"],.md-inline[data-mark="image"]');
+    if (object && target.closest(".md-view")) { const leaf = this.leaves.get(object.closest<HTMLElement>("[data-leaf]")!.dataset.leaf!)!; const at = leaf.positions[Number(object.dataset.inlineFrom)] + (object.dataset.mark === "image" ? 2 : 1); this.model.selection = { anchor: at, head: at }; this.restore(); }
+  };
+  private updateEmoji() {
+    if (this.fence) { this.emojiPopup.hidden = true; return; }
+    const selection = this.model.selection, match = /(?:^|[\s(]):([a-zA-Z0-9_+-]{1,30})$/.exec(this.model.text.slice(Math.max(0, selection.head - 34), selection.head));
+    const node = this.model.nodeAt(selection.head);
+    if (this.readOnly || !this.emojiEnabled || this.composing || this.fence || selection.anchor !== selection.head || !match || ["fence", "frontmatter", "html_preview", "html_block"].includes(node?.kind || "") || !this.root.contains(window.getSelection()?.anchorNode || null) || this.emojiDismissed === `${selection.head}:${match[1]}`) { this.emojiPopup.hidden = true; return; }
+    const names = Object.keys(emojiNames).filter(name => name.startsWith(match[1].toLowerCase())).slice(0, 10);
+    if (!names.length) { this.emojiPopup.hidden = true; return; }
+    if (names.join() !== this.emojiOptions.join()) this.emojiIndex = 0;
+    this.emojiOptions = names; this.emojiFrom = selection.head - match[1].length - 1;
+    this.emojiPopup.replaceChildren(...names.map((name, index) => { const button = document.createElement("button"); button.role = "option"; button.setAttribute("aria-selected", String(index === this.emojiIndex)); button.textContent = `${emojiNames[name]}  :${name}:`; button.addEventListener("click", () => this.chooseEmoji(index)); return button; }));
+    const range = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0) : null, rect = range && typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : this.root.getBoundingClientRect();
+    this.emojiPopup.style.left = `${Math.min(window.innerWidth - 245, Math.max(12, rect.left))}px`; this.emojiPopup.style.top = `${Math.min(window.innerHeight - 300, rect.bottom + 6)}px`; this.emojiPopup.hidden = false;
+  }
+  private chooseEmoji(index: number) {
+    if (this.readOnly) return;
+    const name = this.emojiOptions[index]; if (!name) return;
+    this.emojiPopup.hidden = true; this.model.closeGroup();
+    if (this.model.replace(this.emojiFrom, this.model.selection.head, `:${name}:`, "emoji")) this.publish();
+  }
+  private keydown = (event: KeyboardEvent) => {
+    if (this.composing || imeKey(event)) return;
+    // Browsers may coalesce selectionchange for a quick Left/Right round trip.
+    // Navigation ends the undo group even when the final caret is unchanged.
+    if (navigationKeys.has(event.key)) this.model.closeGroup();
+    if ((event.target as HTMLElement).closest(".cm-editor")) return;
+    if (!this.emojiPopup.hidden && ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(event.key)) {
+      event.preventDefault(); event.stopPropagation();
+      if (event.key === "Escape") { this.emojiDismissed = `${this.model.selection.head}:${this.model.text.slice(this.emojiFrom + 1, this.model.selection.head)}`; this.emojiPopup.hidden = true; }
+      else if (event.key === "Enter" || event.key === "Tab") this.chooseEmoji(this.emojiIndex);
+      else { this.emojiIndex = (this.emojiIndex + (event.key === "ArrowDown" ? 1 : -1) + this.emojiOptions.length) % this.emojiOptions.length; this.updateEmoji(); }
+      return;
+    }
+    if(this.model.text.length>300_000 && (event.metaKey||event.ctrlKey)) {
+      if(event.key.toLowerCase()==="a") { event.preventDefault();this.fullSelection=true;this.select({anchor:0,head:this.model.text.length});return; }
+      const start=event.key==="Home"||(event.metaKey&&event.key==="ArrowUp"),end=event.key==="End"||(event.metaKey&&event.key==="ArrowDown");
+      if(start||end){event.preventDefault();this.fullSelection=false;const head=end?this.model.text.length:0;this.select({anchor:event.shiftKey?this.model.selection.anchor:head,head});return;}
+    }
+    if(this.fullSelection&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(event.key)) {
+      event.preventDefault();const at=["ArrowLeft","ArrowUp"].includes(event.key)?0:this.model.text.length;this.fullSelection=false;this.select({anchor:at,head:at});return;
+    }
+    if (event.key === "z" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      event.shiftKey ? this.redo() : this.undo();
+      return;
+    }
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey &&
+        window.getSelection()?.anchorNode?.parentElement?.closest("td,th")) {
+      event.preventDefault();
+      this.tableAction("row");
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      this.tab(event.shiftKey);
+    }
+  };
+  private tableText(text: string, from: number, element = this.leafElement(window.getSelection()?.anchorNode)) {
+    if (!element?.closest("td,th")) return text;
+    // A literal pipe in a rendered cell must not become a Markdown column.
+    // Preserve existing source escapes supplied by clipboard/plugin commands.
+    let slashes = precedingSlashes(this.model.text, from), output = "";
+    for (const character of text.replace(/\r\n?/g, "\n")) {
+      if (character === "\n") { output += "<br>"; slashes = 0; continue; }
+      if (character === "|" && slashes % 2 === 0) output += "\\";
+      output += character;
+      slashes = character === "\\" ? slashes + 1 : 0;
+    }
+    return output;
+  }
+  insert(text: string, kind = "command") {
+    const selection = this.bookmark();
+    this.model.selection = selection;
+    text = this.tableText(text, Math.min(selection.anchor, selection.head));
+    if (
+      this.model.replace(
+        Math.min(selection.anchor, selection.head),
+        Math.max(selection.anchor, selection.head),
+        text,
+        kind,
+      )
+    )
+      this.publish();
+  }
+  enter(soft: boolean) {
+    const selection = this.bookmark();
+    this.model.selection = selection;
+    const from = Math.min(selection.anchor, selection.head),
+      to = Math.max(selection.anchor, selection.head);
+    const table = window
+      .getSelection()
+      ?.anchorNode?.parentElement?.closest("td,th");
+    if (table) {
+      if (soft) this.insert("<br>", "structure");
+      else this.tableNext(false, true);
+      return;
+    }
+    const node = this.model.nodeAt(from),
+      lineStart = this.model.text.lastIndexOf("\n", from - 1) + 1;
+    const line = this.model.text.slice(
+      lineStart,
+      this.model.text.indexOf("\n", lineStart) < 0
+        ? undefined
+        : this.model.text.indexOf("\n", lineStart),
+    );
+    const header = line.trimEnd();
+    if (!soft && from === to && node?.kind === "paragraph_open" && node.from === lineStart && node.to === from &&
+        /^ {0,3}\|/.test(header) && header.endsWith("|") && (/(\\*)\|$/.exec(header)?.[1].length || 0) % 2 === 0) {
+      const cells = tableRowCells(line);
+      if (cells.length > 0 && cells.length <= 30) {
+        const separator = "| " + cells.map(() => "---").join(" | ") + " |",
+          body = "| " + cells.map(() => "").join(" | ") + " |",
+          text = line + "\n" + separator + "\n" + body,
+          at = lineStart + line.length + separator.length + 4;
+        if (this.model.replace(lineStart, from, text, "table-create", {anchor:at,head:at})) this.publish();
+        return;
+      }
+    }
+    const opening = /^(\s*(?:>\s*)*(?:(?:[-+*]|\d+[.)])\s+)?)(`{3,}|~{3,})[^\n]*$/.exec(line);
+    if (!soft && from === to && from === lineStart + line.length && node?.kind !== "frontmatter") {
+      if (opening) { const prefix = opening[1].replace(/(?:[-+*]|\d+[.)])\s+$/, marker => " ".repeat(marker.length)), at = from + 1 + prefix.length; if (this.model.replace(from, to, `\n${prefix}\n${prefix}${opening[2]}`, "structure", { anchor: at, head: at })) this.publish(); return; }
+      if (line.trim() === "$$") { const at = lineStart + 3; if (this.model.replace(lineStart, to, "$$\n\n$$", "structure", { anchor: at, head: at })) this.publish(); return; }
+    }
+    const list = /^(\s*(?:>\s*)*)([-+*]|\d+[.)])\s+(\[[ xX]\]\s+)?/.exec(line);
+    let insert =
+      soft || node?.kind === "fence" || node?.kind === "frontmatter"
+        ? "\n"
+        : "\n\n";
+    if (!soft && list) {
+      if (!line.slice(list[0].length).trim()) {
+        if (this.model.replace(lineStart, to, "\n", "structure"))
+          this.publish();
+        return;
+      }
+      const marker = /^\d/.test(list[2])
+        ? `${parseInt(list[2]) + 1}${list[2].at(-1)}`
+        : list[2];
+      insert = `\n${list[1]}${marker} ${list[3] ? "[ ] " : ""}`;
+    } else if (!soft && /^\s*>/.test(line)) {
+      const prefix = /^\s*(?:>\s*)+/.exec(line)![0];
+      if (!line.slice(prefix.length).trim()) { if (this.model.replace(lineStart, to, prefix.replace(/>\s*$/, ""), "structure")) this.publish(); return; }
+      insert = "\n" + prefix;
+    }
+    if (!soft && from === to) {
+      const formats: { open: string; close: string }[] = [];
+      let element = window.getSelection()?.anchorNode?.parentElement;
+      while (element && element !== this.root) {
+        if (
+          element.matches(
+            '.md-inline[data-mark="strong"],.md-inline[data-mark="em"],.md-inline[data-mark="s"]',
+          )
+        ) {
+          const leaf = this.leaves.get(
+              element.closest<HTMLElement>("[data-leaf]")!.dataset.leaf!,
+            )!,
+            open = element.firstElementChild?.textContent || "",
+            close = element.lastElementChild?.textContent || "";
+          const start =
+              leaf.positions[Number(element.dataset.inlineFrom)] + open.length,
+            end =
+              leaf.positions[Number(element.dataset.inlineTo)] - close.length;
+          if (from > start && from < end) formats.push({ open, close });
+        }
+        element = element.parentElement || undefined;
+      }
+      insert =
+        formats.map((f) => f.close).join("") +
+        insert +
+        formats
+          .toReversed()
+          .map((f) => f.open)
+          .join("");
+    }
+    if (this.model.replace(from, to, insert, "structure")) this.publish();
+  }
+  private tab(back: boolean) {
+    if (window.getSelection()?.anchorNode?.parentElement?.closest("td,th")) {
+      this.tableNext(back);
+      return;
+    }
+    const selection = this.bookmark(), from = Math.min(selection.anchor, selection.head), to = Math.max(selection.anchor, selection.head),
+      start = this.model.text.lastIndexOf("\n", from - 1) + 1;
+    if (back || this.model.text.slice(from, to).includes("\n") || /^[ \t]*(?:>[ \t]*)*(?:[-+*]|\d+[.)])[ \t]/.test(this.model.text.slice(start))) {
+      this.model.selection = selection;
+      if (applyBlockCommand(this.model, back ? "outdent" : "indent", {}, this.tabSize)) this.publish();
+    } else this.insert("\t");
+  }
+  private tableNext(back: boolean, nextRow = false) {
+    const selection = this.bookmark(), node = this.model.nodeAt(selection.head), large = node && this.tableViews.get(node.id);
+    if (node && large) {
+      const row = large.index.rowAt(selection.head - node.from), cells = large.index.cells(row);
+      const column = Math.max(0, cells.findIndex(cell => selection.head - node.from - large.index.offsets[row] <= cell.end));
+      const current = (row ? row - 1 : 0) * large.index.width + column;
+      const next = current + (back ? -1 : nextRow ? large.index.width : 1);
+      if (next < 0) return;
+      if (next >= (large.index.length - 1) * large.index.width) {
+        this.tableAction("row"); const updated = this.tableViews.get(node.id), current = this.model.nodeAt(this.model.selection.head);
+        if (updated && current) { const row = updated.index.length - 1, cell = updated.index.cells(row)[next % updated.index.width]; if (cell) { const point = current.from + updated.index.offsets[row] + cell.start; this.select({anchor: point, head: point}); } }
+        return;
+      }
+      const target = Math.floor(next / large.index.width), sourceRow = target ? target + 1 : 0;
+      const cell = large.index.cells(sourceRow)[next % large.index.width]; if (!cell) return;
+      this.select({anchor: node.from + large.index.offsets[sourceRow] + cell.start, head: node.from + large.index.offsets[sourceRow] + cell.start}); return;
+    }
+    const cell = window
+        .getSelection()
+        ?.anchorNode?.parentElement?.closest("td,th"),
+      table = cell?.closest("table");
+    if (!cell || !table) return;
+    const cells = [...table.querySelectorAll("td,th")],
+      index = cells.indexOf(cell),
+      width = table.rows[0]?.cells.length || 1;
+    let next = index + (back ? -1 : nextRow ? width : 1);
+    if (next >= cells.length) {
+      this.tableAction("row");
+      const updated = this.root.querySelector(
+        `table[data-cid="${table.dataset.cid}"]`,
+      );
+      const target =
+        updated?.querySelectorAll("td,th")[
+          Math.min(next, cells.length + width - 1)
+        ];
+      if (target) this.selectCell(target);
+      return;
+    }
+    if (next >= 0) this.selectCell(cells[next]);
+  }
+  private selectCell(cell: Element) {
+    const leaf = cell.querySelector<HTMLElement>("[data-leaf]");
+    const info = leaf && this.leaves.get(leaf.dataset.leaf!);
+    if (info) {
+      this.model.selection = {
+        anchor: info.positions[0],
+        head: info.positions[0],
+      };
+      this.restore();
+    }
+  }
+  private largeTableAction(action: string, node: DocumentNode, selection: SelectionBookmark) {
+    const view = this.tableViews.get(node.id);
+    if (!view || !["row", "rowBefore", "removeRow", "moveRowUp", "moveRowDown", "left", "center", "right"].includes(action)) return false;
+    const index = view.index, row = index.rowAt(selection.head - node.from), cells = index.cells(row);
+    const column = Math.max(0, cells.findIndex(cell => selection.head - node.from - index.offsets[row] <= cell.end));
+    let from = 0, to = 0, insert = "", head = selection.head;
+    if (action === "row" || action === "rowBefore") {
+      const target = Math.max(2, row + (action === "row" ? 1 : 0));
+      const line = `| ${Array(index.width).fill("").join(" | ")} |`;
+      from = to = target < index.length ? index.offsets[target] : node.source.length;
+      insert = target < index.length ? line + "\n" : "\n" + line;
+      head = node.from + from + (target < index.length ? 0 : 1) + tableRowCells(line)[Math.min(column, index.width - 1)].start;
+    } else if (action === "removeRow") {
+      if (row < 2) return true;
+      if (row + 1 < index.length) { from = index.offsets[row]; to = index.offsets[row + 1]; head = node.from + from + (index.cells(row + 1)[column]?.start || 0); }
+      else { from = index.offsets[row] - 1; to = node.source.length; const target = row > 2 ? row - 1 : 0; head = node.from + index.offsets[target] + (index.cells(target)[column]?.start || 0); }
+    } else if (["left", "center", "right"].includes(action)) {
+      const values = index.cells(1).map(cell => cell.raw); values[column] = action === "left" ? ":---" : action === "right" ? "---:" : ":---:";
+      from = index.offsets[1]; to = index.end(1); insert = `| ${values.join(" | ")} |`; head += insert.length - (to - from);
+    } else {
+      const other = row + (action === "moveRowUp" ? -1 : 1);
+      if (row < 2 || other < 2 || other >= index.length) return true;
+      const low = Math.min(row, other), high = Math.max(row, other);
+      from = index.offsets[low]; to = index.end(high); insert = index.line(high) + "\n" + index.line(low);
+      const start = row === high ? from : from + index.line(high).length + 1;
+      head = node.from + start + selection.head - node.from - index.offsets[row];
+    }
+    this.model.selection = selection;
+    if (this.model.replace(node.from + from, node.from + to, insert, "table", {anchor: head, head})) this.publish();
+    return true;
+  }
+  tableAction(action: string) {
+    const selection = this.bookmark();
+    const node = this.model.nodeAt(selection.head);
+    if (!node || node.kind !== "table_open") return;
+    if (this.largeTableAction(action, node, selection)) return;
+    const lines = node.source.split("\n"),
+      rows = lines.map((line) => tableRowCells(line).map((cell) => cell.raw));
+    const currentCell = window
+        .getSelection()
+        ?.anchorNode?.parentElement?.closest<HTMLTableCellElement>("td,th"),
+      row = currentCell?.parentElement as HTMLTableRowElement | null;
+    let local = selection.head - node.from, sourceRow = 0;
+    while (sourceRow < lines.length - 1 && local > lines[sourceRow].length) { local -= lines[sourceRow].length + 1; sourceRow++; }
+    if (sourceRow === 1) sourceRow = 0;
+    let column = currentCell && this.root.querySelector(`[data-cid="${node.id}"]`)?.contains(currentCell) ? currentCell.cellIndex : Math.max(0, tableRowCells(lines[sourceRow]).findIndex(cell => local >= cell.start && local <= cell.end));
+    let targetRow = sourceRow, targetColumn = column;
+    const oldCell = tableRowCells(lines[sourceRow])[column];
+    const oldStart =
+      node.from +
+      lines.slice(0, sourceRow).reduce((n, line) => n + line.length + 1, 0) +
+      (oldCell?.start || 0);
+    if (action === "deleteTable" || (action === "removeColumn" && rows[0].length === 1)) {
+      this.model.selection = selection;
+      if (this.model.replace(node.from, node.to, "", "table", { anchor: node.from, head: node.from })) this.publish();
+      return;
+    }
+    if (action === "row" || action === "rowBefore") {
+      const at = Math.max(2, sourceRow + (action === "row" ? 1 : 0));
+      rows.splice(
+        at,
+        0,
+        rows[0].map(() => ""),
+      );
+      targetRow = at;
+    }
+    else if (action === "removeRow" && sourceRow > 1 && rows.length > 2)
+      rows.splice(sourceRow, 1);
+    else if (action === "column" || action === "columnBefore") {
+      const at = column + (action === "column" ? 1 : 0);
+      rows.forEach((cells, i) =>
+        cells.splice(at, 0, i === 1 ? "---" : ""),
+      );
+      targetColumn = at;
+    }
+    else if (action === "removeColumn" && rows[0].length > 1)
+      rows.forEach((cells) => cells.splice(column, 1));
+    else if (["left", "center", "right"].includes(action))
+      rows[1][column] =
+        action === "left" ? ":---" : action === "right" ? "---:" : ":---:";
+    else if (["moveRowUp", "moveRowDown"].includes(action)) {
+      const other = sourceRow + (action === "moveRowUp" ? -1 : 1);
+      if (sourceRow < 2 || other < 2 || other >= rows.length) return;
+      [rows[sourceRow], rows[other]] = [rows[other], rows[sourceRow]]; targetRow = other;
+    } else if (["moveColumnLeft", "moveColumnRight"].includes(action)) {
+      const other = column + (action === "moveColumnLeft" ? -1 : 1);
+      if (other < 0 || other >= rows[0].length) return;
+      for (const cells of rows) [cells[column], cells[other]] = [cells[other], cells[column]];
+      targetColumn = other;
+    } else if (action === "format") { /* Normalize the table in the same transaction. */ }
+    else return;
+    const output = rows.map((cells) => `| ${cells.join(" | ")} |`);
+    targetRow = Math.min(targetRow, rows.length - 1);
+    targetColumn = Math.min(targetColumn, rows[0].length - 1);
+    const cell = tableRowCells(output[targetRow])[targetColumn];
+    const start =
+      node.from +
+      output.slice(0, targetRow).reduce((n, line) => n + line.length + 1, 0) +
+      cell.start;
+    const nextSelection = {
+      anchor:
+        start +
+        Math.max(0, Math.min(cell.raw.length, selection.anchor - oldStart)),
+      head:
+        start +
+        Math.max(0, Math.min(cell.raw.length, selection.head - oldStart)),
+    };
+    this.model.selection = selection;
+    if (
+      this.model.replace(
+        node.from,
+        node.to,
+        output.join("\n"),
+        "table",
+        nextSelection,
+      )
+    )
+      this.publish();
+  }
+  wrap(before: string, after = "") {
+    if (this.fence?.view.hasFocus) return;
+    this.model.selection = this.bookmark();
+    let from = Math.min(this.model.selection.anchor, this.model.selection.head),
+      to = Math.max(this.model.selection.anchor, this.model.selection.head);
+    const selectedLeaves = [...this.leaves.values()].filter(leaf => !leaf.kind && leaf.positions[0] < to && leaf.positions.at(-1)! > from);
+    if (from !== to && selectedLeaves.length > 1) {
+      const edits = selectedLeaves.map(leaf => ({ from: Math.max(from, leaf.positions[0]), to: Math.min(to, leaf.positions.at(-1)!) })).filter(edit => edit.from < edit.to).sort((a,b) => a.from - b.from);
+      let text = this.model.text;
+      for (const edit of edits.toReversed()) text = text.slice(0, edit.from) + before + text.slice(edit.from, edit.to) + after + text.slice(edit.to);
+      const mapped = (position: number) => {
+        let delta = 0;
+        for (const edit of edits) {
+          if (position < edit.from) break;
+          if (position <= edit.to) return position + delta + before.length;
+          delta += before.length + after.length;
+        }
+        return position + delta;
+      };
+      const selection = this.model.selection;
+      if (this.model.replace(0, this.model.text.length, text, "format", { anchor: mapped(selection.anchor), head: mapped(selection.head) })) this.publish();
+      return;
+    }
+    const mark = ({ "**": "strong", "*": "em", "~~": "s", "==": "mark", "`": "code", "<u>": "u", "~": "sub", "^": "sup" } as Record<string, string>)[before] || "";
+    const inline = window
+      .getSelection()
+      ?.anchorNode?.parentElement?.closest<HTMLElement>(
+        mark ? `.md-inline[data-mark="${mark}"]` : ".md-inline",
+      );
+    if (
+      inline &&
+      mark && inline.dataset.mark === mark
+    ) {
+      const leafElement = inline.closest<HTMLElement>("[data-leaf]")!,
+        leaf = this.leaves.get(leafElement.dataset.leaf!)!;
+      const start = leaf.positions[Number(inline.dataset.inlineFrom)],
+        end = leaf.positions[Number(inline.dataset.inlineTo)];
+      const open = inline.firstElementChild?.classList.contains("md-meta") ? inline.firstElementChild.textContent || before : before;
+      const close = inline.lastElementChild?.classList.contains("md-meta") ? inline.lastElementChild.textContent || after : after;
+      this.model.replace(
+        start,
+        end,
+        this.model.text.slice(start + open.length, end - close.length),
+        "format",
+        {
+          anchor: Math.max(start, from - open.length),
+          head: Math.max(start, to - open.length),
+        },
+      );
+      this.publish();
+      return;
+    }
+    if (from === to) {
+      if (this.pendingFormat.has(before)) this.pendingFormat.delete(before); else this.pendingFormat.set(before, after);
+      this.restore(); return;
+    }
+    const text = this.model.text.slice(from, to);
+    if (before === "`" && text.includes("`")) {
+      const size = Math.max(...[...text.matchAll(/`+/g)].map(match => match[0].length)) + 1;
+      before = after = "`".repeat(size);
+    }
+    if (
+      this.model.replace(from, to, before + text + after, "format", {
+        anchor: from + before.length,
+        head: to + before.length,
+      })
+    )
+      this.publish();
+  }
+  private selectionCommand(action: string) {
+    if (this.fence?.view.hasFocus) { codeSelectionCommand(this.fence.view,action); this.model.selection = this.bookmark(); this.reportCursor(); return; }
+    const selection = this.bookmark();
+    if (action === "jump-selection") {
+      this.restore(selection);
+      const range = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0) : null;
+      const element = range?.endContainer.nodeType === Node.ELEMENT_NODE ? range.endContainer as Element : range?.endContainer.parentElement;
+      element?.scrollIntoView({block:"center"}); return;
+    }
+    const head = selection.head, start = Math.min(selection.anchor,head), end = Math.max(selection.anchor,head);
+    const leaf = [...this.leaves.values()].find(item => !item.kind && item.positions[0] <= head && item.positions.at(-1)! >= head);
+    if (!leaf) return;
+    const element = this.root.querySelector<HTMLElement>(`[data-leaf="${leaf.id}"]`);
+    if (!element) return;
+    let from = leaf.positions[0], to = leaf.positions.at(-1)!;
+    const cell = element.closest("td,th");
+    if (action === "select-line" && cell) {
+      const row = cell.closest("tr")!;
+      const leaves = [...row.querySelectorAll<HTMLElement>("[data-leaf]")].map(element=>this.leaves.get(element.dataset.leaf!)!).filter(Boolean);
+      from = leaves[0].positions[0]; to = leaves.at(-1)!.positions.at(-1)!;
+    } else if (action === "select-scope" && !cell) {
+      const scopes = [...element.querySelectorAll<HTMLElement>(".md-inline")].map(inline => {
+        const open = inline.firstElementChild?.classList.contains("md-meta") ? inline.firstElementChild.textContent!.length : 0;
+        const close = inline.lastElementChild?.classList.contains("md-meta") ? inline.lastElementChild.textContent!.length : 0;
+        return {from:leaf.positions[Number(inline.dataset.inlineFrom)+open],to:leaf.positions[Number(inline.dataset.inlineTo)-close]};
+      }).filter(scope=>scope.from <= start && scope.to >= end && (scope.from < start || scope.to > end)).sort((a,b)=>(a.to-a.from)-(b.to-b.from));
+      if (scopes.length) ({from,to} = scopes[0]);
+    } else if (action === "select-word" || action === "delete-word") {
+      if (action === "delete-word" && start !== end) { from = start; to = end; }
+      else {
+        // Segment rendered text and map the result back to source positions;
+        // hidden Markdown delimiters must never become part of a word deletion.
+        const texts = this.textNodes(element).filter(text=>!text.parentElement?.closest(".md-meta,.md-object-source"));
+        const text = texts.find(text=>this.point(text,0) <= head && this.point(text,text.length) >= head);
+        if (!text) return;
+        const offsets = Array.from({length:text.length+1},(_,i)=>this.point(text,i));
+        const caret = Math.max(0,offsets.findLastIndex(position=>position<=head));
+        const range = wordRange(text.data,caret);
+        from = offsets[range.from]; to = offsets[range.to];
+      }
+    }
+    this.model.closeGroup();
+    if (action === "delete-word") {
+      // Remove an emptied enclosing mark as part of the same transaction.
+      // Leaving **** behind can turn an ordinary paragraph into a thematic break.
+      for (const inline of [...element.querySelectorAll<HTMLElement>(".md-inline")].reverse()) {
+        const open = inline.firstElementChild, close = inline.lastElementChild;
+        if (!open?.classList.contains("md-meta") || !close?.classList.contains("md-meta")) continue;
+        const first = Number(inline.dataset.inlineFrom), last = Number(inline.dataset.inlineTo);
+        if (leaf.positions[first+open.textContent!.length] === from && leaf.positions[last-close.textContent!.length] === to) {
+          from = leaf.positions[first]; to = leaf.positions[last];
+        }
+      }
+      if (!this.readOnly && this.model.replace(from,to,"","delete-word",{anchor:from,head:from})) this.publish();
+    } else { this.model.selection = {anchor:from,head:to}; this.restore(); this.reportCursor(); }
+  }
+  command(action: string, args: BlockArguments = {}) {
+    if (this.composing) return;
+    if (selectionActions.has(action)) { this.selectionCommand(action); return; }
+    if (this.readOnly) return;
+    if ((action === "indent" || action === "outdent") && !this.fence) {
+      // Opening a menu or undoing may have released the local code view.
+      const selection = this.model.selection, node = this.model.nodeAt(selection.head);
+      const element = node ? this.root.querySelector<HTMLElement>(`[data-cid="${node.id}"][data-fence]`) : null;
+      const leaf = element ? this.leaves.get(element.dataset.fence!) : undefined;
+      if (element && leaf && [selection.anchor, selection.head].every(position => position >= leaf.positions[0] && position <= leaf.positions.at(-1)!))
+        this.activateFence(element);
+    }
+    if ((action === "indent" || action === "outdent") && this.fence) {
+      this.model.closeGroup();
+      (action === "indent" ? indentMore : indentLess)(this.fence.view);
+      this.model.closeGroup(); this.fence.view.focus();
+      return;
+    }
+    this.model.selection = this.bookmark();
+    this.pendingFormat.clear();
+    if (action.startsWith("table-")) { this.tableAction(action.slice(6)); return; }
+    if (applyBlockCommand(this.model, action, args, this.tabSize)) this.publish();
+  }
+  clearFormat() {
+    if (this.composing || this.fence?.view.hasFocus) return;
+    const selection = this.bookmark();
+    let from = Math.min(selection.anchor, selection.head), to = Math.max(selection.anchor, selection.head);
+    if (from === to) { const leaf = [...this.leaves.values()].find(item => !item.kind && item.positions[0] <= from && item.positions.at(-1)! >= from); if (!leaf) return; from = leaf.positions[0]; to = leaf.positions.at(-1)!; }
+    const formats: InlineFormat[] = [];
+    for (const leaf of this.leaves.values()) {
+      if (leaf.kind || leaf.positions[0] > to || leaf.positions.at(-1)! < from) continue;
+      const element = this.root.querySelector(`[data-leaf="${leaf.id}"]`);
+      for (const inline of element?.querySelectorAll<HTMLElement>(".md-inline") || []) {
+        const first = inline.firstElementChild, last = inline.lastElementChild;
+        let open = first?.classList.contains("md-meta") ? first.textContent || "" : "", close = last?.classList.contains("md-meta") ? last.textContent || "" : "";
+        if (["sub", "sup"].includes(inline.dataset.mark || "")) open = close = inline.dataset.mark === "sub" ? "~" : "^";
+        if (!open || !close) continue;
+        formats.push({ from: leaf.positions[Number(inline.dataset.inlineFrom)], to: leaf.positions[Number(inline.dataset.inlineTo)], open, close });
+      }
+    }
+    const next = clearInlineFormats(this.model.text, from, to, formats);
+    this.model.closeGroup();
+    if (this.model.replace(0, this.model.text.length, next.text, "clear-format", { anchor: next.from, head: next.to })) this.publish();
+  }
+  pasteTable(grid: string[][], cell: HTMLTableCellElement) {
+    if (!grid.length) return false;
+    let pastedWidth = 0;
+    for (const row of grid) pastedWidth = Math.max(pastedWidth, row.length);
+    if (!pastedWidth || grid.length * pastedWidth > 1_000_000) return false;
+    const element = cell.closest<HTMLElement>("[data-cid]"), node = this.model.nodes.find(node => node.id === element?.dataset.cid);
+    if (!node || node.kind !== "table_open") return false;
+    const rowElement = cell.parentElement as HTMLTableRowElement, large = this.tableViews.get(node.id);
+    let row = large ? Number(rowElement.dataset.sourceRow) : rowElement.rowIndex;
+    if (!Number.isInteger(row) || row < 0) return false;
+    if (!large && row > 0) row++;
+    const column = cell.cellIndex;
+    const last = row + grid.length - 1 + (row === 0 && grid.length > 1 ? 1 : 0);
+    if (large && column + pastedWidth <= large.index.width && last < large.index.length) {
+      const lines = Array.from({ length: last - row + 1 }, (_, i) => large.index.line(row + i));
+      for (let i = 0; i < grid.length; i++) {
+        const local = i + (row === 0 && i > 0 ? 1 : 0), values = tableRowCells(lines[local]).map(cell => cell.raw);
+        while (values.length < large.index.width) values.push("");
+        for (let j = 0; j < grid[i].length; j++) values[column + j] = tableCellMarkdown(grid[i][j]);
+        lines[local] = `| ${values.join(" | ")} |`;
+      }
+      const from = node.from + large.index.offsets[row], to = node.from + large.index.end(last);
+      this.model.closeGroup();
+      if (this.model.replace(from, to, lines.join("\n"), "table-paste")) this.publish();
+      return true;
+    }
+    const width = Math.max(large?.index.width || tableRowCells(node.source.split("\n", 1)[0]).length, column + pastedWidth);
+    const rowCount = large?.index.length || node.source.split("\n").length;
+    if (width * Math.max(rowCount, last + 1) > 1_000_000) return false;
+    const lines = node.source.split("\n"), rows = lines.map(line => tableRowCells(line).map(cell => cell.raw));
+    while (rows.length < row + grid.length + (row === 0 ? 1 : 0)) rows.push(Array(width).fill(""));
+    for (const [i, cells] of rows.entries()) while (cells.length < width) cells.push(i === 1 ? "---" : "");
+    for (let i = 0; i < grid.length; i++) { const at = row + i + (row === 0 && i > 0 ? 1 : 0); if (!rows[at]) rows[at] = Array(width).fill(""); for (let j = 0; j < grid[i].length; j++) rows[at][column + j] = tableCellMarkdown(grid[i][j]); }
+    const output = rows.map(cells => `| ${cells.join(" | ")} |`).join("\n");
+    this.model.closeGroup();
+    if (this.model.replace(node.from, node.to, output, "table-paste")) this.publish();
+    return true;
+  }
+  codeBlock() {
+    if (this.fence?.view.hasFocus) return;
+    const selection = this.bookmark(); this.model.selection = selection;
+    let from = Math.min(selection.anchor, selection.head), to = Math.max(selection.anchor, selection.head);
+    const node = this.model.nodeAt(from);
+    if (from === to && node && ["paragraph_open", "empty"].includes(node.kind)) { from = node.from; to = node.to; }
+    const raw = this.model.text.slice(from, to), width = Math.max(3, ...[...raw.matchAll(/`+/g)].map(match => match[0].length + 1)), marker = "`".repeat(width), at = from + width + 1 + Math.max(0, Math.min(raw.length, selection.head - from));
+    if (this.model.replace(from, to, `${marker}\n${raw}\n${marker}`, "block-format", { anchor: at, head: at })) this.publish();
+  }
+  undo() {
+    this.releaseFence();
+    if (this.model.undo()) this.publish();
+  }
+  redo() {
+    this.releaseFence();
+    if (this.model.redo()) this.publish();
+  }
+  select(selection: SelectionBookmark, focus = true) {
+    this.releaseFence();
+    this.model.selection = selection;
+    this.model.closeGroup();
+    this.model.refreshCaret();
+    this.render(false);
+    const node = this.model.nodeAt(selection.head),
+      element = this.root.querySelector<HTMLElement>(
+        `[data-cid="${node?.id}"]`,
+      );
+    if (focus && element?.hasAttribute("data-fence")) {
+      this.activateFence(element);
+      const fence = this.fence;
+      if (fence) {
+        const start = fence.leaf.positions[0],
+          length = fence.view.state.doc.length;
+        fence.view.dispatch({
+          selection: {
+            anchor: Math.max(0, Math.min(length, selection.anchor - start)),
+            head: Math.max(0, Math.min(length, selection.head - start)),
+          },
+        });
+      }
+    } else this.restore(selection, focus);
+    element?.scrollIntoView({ block: "nearest" });
+    this.reportCursor();
+  }
+  jump(line: number) {
+    this.releaseFence();
+    const from = this.model.text
+      .split("\n")
+      .slice(0, Math.max(0, line - 1))
+      .reduce((n, l) => n + l.length + 1, 0);
+    this.model.selection = {
+      anchor: Math.min(from, this.model.text.length),
+      head: Math.min(from, this.model.text.length),
+    };
+    this.render(false);
+    this.restore();
+    const node = this.model.nodeAt(from);
+    this.root
+      .querySelector(`[data-cid="${node?.id}"]`)
+      ?.scrollIntoView({ block: "start" });
+  }
+  releaseFence() {
+    if (!this.fence) return;
+    const id = this.fence.id;
+    this.fence.view.destroy();
+    this.fence = null;
+    this.blocks.delete(id);
+    this.render(false);
+  }
+  private syncCodePreviews() {
+    for (const [id, preview] of this.codePreviews) if (!this.root.contains(preview.element) || preview.element.classList.contains("fence-editing")) { preview.view.destroy(); this.codePreviews.delete(id); }
+    for (const element of this.root.querySelectorAll<HTMLElement>(".large-code:not(.fence-editing)")) {
+      const id = element.dataset.fence!, leaf = this.leaves.get(id); if (!leaf || this.codePreviews.has(id)) continue;
+      const view = new EditorView({parent: element.querySelector(".fence-body")!, state: EditorState.create({doc: leaf.raw,
+        extensions: [EditorState.readOnly.of(true), EditorView.editable.of(false), EditorView.editorAttributes.of({class: "code-preview"})]})});
+      this.codePreviews.set(id, {element, raw: leaf.raw, view});
+    }
+  }
+  private activateFence(element: HTMLElement) {
+    if (this.fence && this.fence.leaf.id === element.dataset.fence) return;
+    const key = element.dataset.fence!;
+    this.releaseFence();
+    element =
+      this.root.querySelector<HTMLElement>(`[data-fence="${key}"]`) || element;
+    const leaf = this.leaves.get(element.dataset.fence!)!,
+      body = element.querySelector<HTMLElement>(".fence-body")!;
+    if (!leaf || !body) return;
+    const preview = this.codePreviews.get(key);
+    if (preview) { preview.view.destroy(); this.codePreviews.delete(key); }
+    body.replaceChildren();
+    element.classList.add("fence-editing");
+    const view = new EditorView({
+      parent: body,
+      state: EditorState.create({
+        doc: leaf.raw,
+        selection: {
+          anchor: positionIndex(leaf.positions, this.model.selection.anchor, true),
+          head: positionIndex(leaf.positions, this.model.selection.head, true),
+        },
+        extensions: [
+          this.fenceBehavior.of(this.fenceOptions()),
+          leaf.raw.length > 100_000 ? [] : fenceLanguage(
+            element.classList.contains("md-math")
+              ? "math"
+              : element.querySelector(".fence-language")?.textContent || "",
+          ),
+          drawSelection(),
+          leaf.raw.length > 100_000 ? [] : EditorView.lineWrapping,
+          keymap.of([
+            {
+              key: "Mod-z",
+              run: () => {
+                this.undo();
+                return true;
+              },
+            },
+            {
+              key: "Mod-Shift-z",
+              run: () => {
+                this.redo();
+                return true;
+              },
+            },
+            {
+              key: "Tab",
+              run: (cm) => {
+                if (!cm.state.selection.main.empty) return indentMore(cm);
+                cm.dispatch(cm.state.replaceSelection(" ".repeat(this.tabSize)));
+                return true;
+              },
+            },
+            { key: "Shift-Tab", run: indentLess },
+            ...defaultKeymap,
+          ]),
+          EditorView.updateListener.of((update) => {
+            if (update.selectionSet && !update.docChanged && !this.composing && !update.view.composing) this.model.closeGroup();
+            if (!update.docChanged) return;
+            const current = this.model.nodes.find((n) => n.id === leaf.nodeId);
+            if (!current) return;
+            if (leaf.fenceLine === 0 && /^(`{3,}|~{3,})/.test(current.source)) {
+              const range = fenceRange(current), start = current.from + range.start;
+              let from = Infinity, to = 0, first = 0, last = 0;
+              update.changes.iterChangedRanges((a, b, c, d) => { if (a < from) { from = a; first = c; } to = Math.max(to, b); last = Math.max(last, d); });
+              let insert = update.state.sliceDoc(first, last);
+              if (to === update.startState.doc.length && range.closingOnNewLine && update.state.doc.length && update.state.sliceDoc(update.state.doc.length - 1) !== "\n" && range.end - range.start <= update.startState.doc.length) insert += "\n";
+              this.model.selection = {anchor: start + update.startState.selection.main.anchor, head: start + update.startState.selection.main.head};
+              this.model.replace(start + from, start + to, insert,
+                this.composing || update.transactions.some(transaction => transaction.isUserEvent("input.type.compose")) ? "composition" : "typing",
+                {anchor: start + update.state.selection.main.anchor, head: start + update.state.selection.main.head});
+              this.callbacks.change(); this.reportCursor(); return;
+            }
+            const range = fenceRange(current),
+              body =
+                leaf.fenceLine !== undefined
+                  ? codeBody(current, leaf.fenceLine)
+                  : undefined,
+              start = current.from + (body?.from ?? range.start),
+              end = current.from + (body?.to ?? range.end);
+            let text = update.state.doc.toString();
+            if (
+              (body ? body.closed : range.closingOnNewLine) &&
+              text &&
+              !text.endsWith("\n")
+            )
+              text += "\n";
+            const oldPoint = (position: number) =>
+              body
+                ? codePosition(start, body.raw, body.prefix, position)
+                : start + position;
+            const newPoint = (position: number) =>
+              body
+                ? codePosition(start, text, body.prefix, position)
+                : start + position;
+            this.model.selection = {
+              anchor: oldPoint(update.startState.selection.main.anchor),
+              head: oldPoint(update.startState.selection.main.head),
+            };
+            this.model.replace(
+              start,
+              end,
+              body ? encodeCodeBody(text, body.prefix) : text,
+              this.composing || update.transactions.some(transaction => transaction.isUserEvent("input.type.compose")) ? "composition" : "typing",
+              {
+                anchor: newPoint(update.state.selection.main.anchor),
+                head: newPoint(update.state.selection.main.head),
+              },
+            );
+            this.callbacks.change();
+            this.reportCursor();
+          }),
+        ],
+      }),
+    });
+    this.fence = { id: leaf.nodeId, leaf, view };
+    view.focus();
+    view.dom.addEventListener("focusout", (event) => {
+      const next = (event as FocusEvent).relatedTarget as HTMLElement | null;
+      // Menus temporarily take focus; keep the code selection for their commands.
+      if (!next || next.closest(".quick-actions,.toolbar,.more-menu,.pane-heading")) return;
+      if (
+        !view.dom.contains((event as FocusEvent).relatedTarget as Node | null)
+      )
+        queueMicrotask(() => {
+          if (this.fence?.view === view && !view.hasFocus) this.releaseFence();
+        });
+    });
+  }
+}
+function precedingSlashes(text: string, position: number) {
+  let count = 0;
+  while (position > count && text[position - count - 1] === "\\") count++;
+  return count;
+}
+const navigationKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+const graphemes = new Intl.Segmenter(undefined, {granularity: "grapheme"});
+function previousGrapheme(text: string, position: number) {
+  return position > 0 ? graphemes.segment(text).containing(position - 1)?.index ?? 0 : 0;
+}
+function nextGrapheme(text: string, position: number) {
+  const segment = graphemes.segment(text).containing(position);
+  return segment ? segment.index + segment.segment.length : position;
+}

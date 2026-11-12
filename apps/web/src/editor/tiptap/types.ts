@@ -1,4 +1,5 @@
 export interface MarkdownEditorProps {
+  documentId?: string;
   value: string;
   onChange: (markdown: string) => void;
   disabled?: boolean;

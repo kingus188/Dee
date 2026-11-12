@@ -64,7 +64,7 @@ export function AgentPicker({ snapshot, disabled, select, settings }: {
   }
   async function choose(kind: DesktopAgentKind) {
     if (disabled || selecting.current) return;
-    if (kind === current) { close(); return; }
+    if (kind === current && kind !== "pi") { close(); return; }
     selecting.current = true;
     try { if (await select(kind)) close(); }
     finally { selecting.current = false; }
@@ -91,7 +91,7 @@ export function AgentPicker({ snapshot, disabled, select, settings }: {
           {!visible.length && <p className="agent-picker-empty" role="status">没有匹配的 Agent 或模型</p>}
         </div>
       </div>
-      <div className="agent-picker-footer"><span>{agentNames[current]}</span><button type="button" disabled={disabled} onClick={() => { close(); settings(); }}><Icon name="settings" />设置</button></div>
+      <div className="agent-picker-footer"><span>{agentNames[current]}</span>{current !== "pi" && <button type="button" disabled={disabled} onClick={() => { close(); settings(); }}><Icon name="settings" />设置</button>}</div>
     </div>}
   </div>;
 }

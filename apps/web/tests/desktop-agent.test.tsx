@@ -38,6 +38,29 @@ test("明确目标的外部会话可在忙时批准排队，不要求 Pi 配置�
   assert.ok(!document.body.textContent!.includes("批准 Pi 执行"));
 });
 
+test("断线仅在 header 显示警告图标，详情可访问且本机输入仍可用", async t => {
+  const state = snapshot();
+  state.error = "服务器连接中断，正在自动重连；本机对话已保留。";
+  const { dom, render } = await mount(t, null);
+  Object.defineProperty(dom.window, "desktopAgent", { value: bridge(state) });
+  await render(<DesktopAgent />);
+  const document = dom.window.document;
+  const warning = document.querySelector<HTMLElement>(".desktop-agent-header [role='alert']");
+  assert.ok(warning);
+  assert.equal(warning.title, state.error);
+  assert.equal(warning.getAttribute("aria-label"), state.error);
+  assert.equal(warning.tabIndex, 0);
+  assert.ok(warning.querySelector("svg use"));
+  assert.equal(warning.textContent, "");
+  assert.equal(document.querySelector(".desktop-agent-error"), null);
+  assert.equal(document.querySelector<HTMLTextAreaElement>("textarea")!.disabled, false);
+  await render(null);
+  state.serverConnected = true; state.collaboration = "ready"; delete state.error;
+  await render(<DesktopAgent />);
+  assert.equal(document.querySelector("[role='alert']"), null);
+  assert.match(document.querySelector(".desktop-agent-server")!.textContent!, /双端已连接/);
+});
+
 test("本机助手使用原生平台避让标题栏，不显示目录选择", async t => {
   const native = { ...bridge(snapshot()), platform: "darwin" };
   const { dom, render } = await mount(t, <DesktopAgent />);
@@ -92,7 +115,7 @@ test("本机导航保留对话与草稿，服务器内容按路由打开，轮�
   assert.equal(send.mock.callCount(), 0); assert.equal(fresh.mock.callCount(), 0);
   open.mock.mockImplementation(async () => { throw new Error("服务器未连接"); });
   await act(async () => document.querySelector<HTMLAnchorElement>('[aria-label="Daylight 待办"]')!.click());
-  assert.match(document.querySelector('[role="alert"]')!.textContent!, /服务器未连接/);
+  assert.match(document.querySelector('.desktop-agent-header [role="alert"]')!.getAttribute("aria-label")!, /服务器未连接/);
   assert.equal(input.disabled, false);
 });
 
@@ -216,7 +239,7 @@ test("未配置 Pi 禁止发送，不再弹出或提供模型和密钥表单", a
   assert.equal(document.querySelector('[aria-label="本机模型设置"]'), null);
   assert.equal(document.querySelector('[name="apiKey"]'), null);
   assert.equal(document.querySelector(".desktop-agent-panel"), null);
-  assert.match(document.querySelector('[role="alert"]')!.textContent!, /在 Pi 中选择默认模型/);
+  assert.match(document.querySelector('.desktop-agent-header [role="alert"]')!.getAttribute("aria-label")!, /在 Pi 中选择默认模型/);
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="执行 Agent"]')!.click());
   assert.equal(document.querySelector(".agent-picker-footer button"), null);
   const select = t.mock.method(native, "selectAgent", async () => {});
@@ -254,7 +277,7 @@ test("发送防重复，未确认重试使用同一 UUID，服务端任务逐项
   });
   assert.equal(send.mock.callCount(), 1);
   await act(async () => reject(new Error("发送结果未确认")));
-  assert.match(document.querySelector('[role="alert"]')!.textContent!, /发送结果未确认/);
+  assert.match(document.querySelector('.desktop-agent-header [role="alert"]')!.getAttribute("aria-label")!, /发送结果未确认/);
   assert.equal(textarea.value, "检查文件");
   await act(async () => { form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
   assert.equal(send.mock.callCount(), 2);
@@ -398,7 +421,7 @@ test("picker prevents duplicate switches and keeps the current selection after a
   assert.equal(picker.disabled, true);
   assert.ok([...document.querySelectorAll<HTMLButtonElement>(".agent-picker-option")].every(button => button.disabled));
   await act(async () => fail(new Error("切换失败")));
-  assert.match(document.querySelector('[role="alert"]')!.textContent!, /切换失败/);
+  assert.match(document.querySelector('.desktop-agent-header [role="alert"]')!.getAttribute("aria-label")!, /切换失败/);
   assert.match(picker.textContent!, /Pi.*local-model/);
   assert.equal(picker.disabled, false);
   assert.equal(document.querySelector('[aria-label="选择 Pi"]')!.getAttribute("aria-pressed"), "true");

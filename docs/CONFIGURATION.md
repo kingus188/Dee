@@ -26,7 +26,9 @@
 | `LLM_MODELS_FILE` | 空 | 服务器模型目录 JSON 的路径；显式设置后以该文件为唯一可选目录，建议使用绝对路径和 `0600` 权限 |
 | `LLM_CONTEXT_WINDOW` | `128000` | 提供给模型目录的上下文窗口配置，并非真实配额保证 |
 | `LLM_MAX_TOKENS` | `8192` | 模型目录的最大输出 token 配置 |
-| `DEMO_PASSWORD` | 空 | HTTP Basic Auth 密码；生产模式必须配置，用户名固定 `demo`；验证后可建立浏览器会话，口令仍是登录凭据 |
+| `DEMO_PASSWORD` | 空 | HTTP Basic Auth 密码；默认生产模式必须配置，用户名固定 `demo`；验证后可建立浏览器会话。`AUTH_DISABLED=1` 时忽略此密码 |
+| `AUTH_DISABLED` | `0` | 仅显式设为 `1` 时启用自用免登录模式：首页、普通 HTTP API、网页 WebSocket 不验证密码或会话，旧认证头也不阻止访问；双端协作仍独立验证配对凭据。保留生产模式、同源校验、业务审批和独立通道令牌。服务监听 `0.0.0.0` 以支持容器代理；公网网页入口会允许匿名访问 |
+| `PEER_TOKEN` | 空 | 双端协作独立凭据，使用 32 个随机字节的 base64url 编码（43 字符）；授权 `/api/peers/*` 的 HTTP 请求及 `/api/peers/socket` 连接内认证，不授予普通业务接口或网页 `/api/socket` 的额外权限。自用免登录模式仍须验证此凭据，客户端按服务器地址加密保存，不提交到 Git |
 | `HOST_PORT` | `3300` | Docker 映射到宿主机 `127.0.0.1` 的端口 |
 | `NOTIFY_WEBHOOK_URL` | 空 | 通用 Webhook 或飞书机器人地址；留空时不向外发送通知 |
 | `NOTIFY_WEBHOOK_KIND` | `generic` | `generic` JSON / `feishu` 文本机器人 |
@@ -109,6 +111,8 @@ LLM_MODEL=your-model-id
 使用 `docker compose up -d --build`。生产未配置 `DEMO_PASSWORD` 会拒绝启动，不能通过移除鉴权来解决。默认容器映射只绑定到 `127.0.0.1`，需要远程访问时应另外部署 TLS 反向代理。
 
 ### 浏览器会话与 cpolar
+
+以下会话机制适用于默认启用鉴权的部署。自用时可在 API 服务环境中显式设置 `AUTH_DISABLED=1` 并重建 API；使用共享 API 网络的微信桥也须随之重建。无需删除原密码，也不要改成开发模式。移除该开关并重建服务后恢复原密码登录；只清空密码但不启用该开关，生产启动仍会拒绝。既有 cpolar 网关的首页子请求在此模式下返回成功，不再要求登录。
 
 验证成功的 Basic `GET /api/info` 会签发一小时有效的签名 Cookie（`__Host-pi-durable-session`，Secure/HttpOnly/SameSite=Strict，Path=/），不在 Cookie 内保存口令。HTTP 和 WebSocket 使用同一个后端鉴权器；显式错误 Authorization 优先拒绝，不回退到 Cookie。签名密钥只在当前服务器实例内存中，服务重启后需重新建立会话。
 

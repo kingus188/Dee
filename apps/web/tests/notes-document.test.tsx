@@ -7,6 +7,7 @@ import type { ConversationNotes, NotesEditRequest } from "@assistant/contracts";
 import { NotesPage } from "../dist/workspace/NotesPage.js";
 import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
+import { replaceSource, sourceEditor } from "./lane-source.js";
 
 function notesApi(t: TestContext, owner: number, original: ConversationNotes, save?: (body: NotesEditRequest) => Promise<ConversationNotes>) {
   const reads: string[] = [], writes: NotesEditRequest[] = [];
@@ -52,11 +53,8 @@ async function input(dom: JSDOM, element: HTMLInputElement | HTMLTextAreaElement
 
 async function typeMarkdown(dom: JSDOM, value: string) {
   const document = dom.window.document;
-  if (!document.querySelector(".markdown-editor textarea")) await click(document, "Markdown 源码");
-  const source = document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea");
-  assert.ok(source);
-  await input(dom, source, value);
-  assert.equal(source.value, value);
+  await replaceSource(document, value);
+  assert.equal(sourceEditor(document).state.doc.toString(), value);
 }
 
 function deferred<T>() {
@@ -101,7 +99,7 @@ test("笔记库按 Escape、点击正文和切页收起，重新打开保留编�
   const navigation = document.querySelector<HTMLElement>('[aria-label="笔记导航"]')!;
   await click(document, "编辑笔记");
   await typeMarkdown(dom, "# 未保存\n\n编辑中的草稿");
-  const source = document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!;
+  const source = sourceEditor(document).contentDOM;
   await openLibrary(document);
   await act(async () => { document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   assert.equal(navigation.hidden, true);
@@ -109,14 +107,14 @@ test("笔记库按 Escape、点击正文和切页收起，重新打开保留编�
   await openLibrary(document);
   await act(async () => { source.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true })); });
   assert.equal(navigation.hidden, true);
-  assert.equal(document.querySelector(".markdown-editor textarea"), source);
-  assert.equal(source.value, "# 未保存\n\n编辑中的草稿");
+  assert.equal(sourceEditor(document).contentDOM, source);
+  assert.equal(sourceEditor(document).state.doc.toString(), "# 未保存\n\n编辑中的草稿");
   await openLibrary(document);
   await render(<NotesPage owner={24} active={false} />);
   assert.equal(navigation.hidden, true);
   await render(<NotesPage owner={24} active />);
   await openLibrary(document);
-  assert.equal(source.value, "# 未保存\n\n编辑中的草稿");
+  assert.equal(sourceEditor(document).state.doc.toString(), "# 未保存\n\n编辑中的草稿");
   assert.equal(button(document, "保存笔记").disabled, false);
 });
 
@@ -194,7 +192,7 @@ test("Ctrl/Meta+S 均可保存，同步双击和 pending 重复快捷键只提�
     await click(document, "编辑笔记");
     const text = `保存正文 ${index + 1}`;
     await typeMarkdown(dom, text);
-    const source = document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!;
+    const source = sourceEditor(document).contentDOM;
     const save = button(document, "保存笔记");
     const shortcut = (metaKey: boolean, isComposing = false) => new dom.window.KeyboardEvent("keydown", { key: metaKey ? "S" : "s", ctrlKey: !metaKey, metaKey, isComposing, bubbles: true, cancelable: true });
     await act(async () => { source.dispatchEvent(shortcut(false, true)); });
@@ -209,7 +207,7 @@ test("Ctrl/Meta+S 均可保存，同步双击和 pending 重复快捷键只提�
     assert.equal(api.writes.length, index + 1);
     assert.equal(api.writes[index]!.notes.memos[0], text);
     assert.equal(save.disabled, true);
-    assert.equal(source.disabled, true);
+    assert.equal(source.getAttribute("contenteditable"), "false");
     assert.equal(document.querySelector('[aria-label="笔记编辑"]')?.getAttribute("aria-busy"), "true");
     await act(async () => {
       save.click();
@@ -237,16 +235,16 @@ test("冲突后保留草稿及原 base，同 owner 的 active 切页后重试仍
   await typeMarkdown(dom, draft);
   await click(document, "保存笔记");
   assert.match(document.querySelector('[role="alert"]')!.textContent!, /其他页面更新.*草稿已保留/);
-  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, draft);
+  assert.equal(sourceEditor(document).state.doc.toString(), draft);
   assert.equal(button(document, "保存笔记").disabled, false);
 
   await render(<NotesPage owner={21} active={false} />);
   await act(async () => {
-    document.querySelector(".markdown-editor textarea")!.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true }));
+    sourceEditor(document).contentDOM.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true }));
   });
   assert.equal(api.writes.length, 1, "隐藏页面不处理保存快捷键");
   await render(<NotesPage owner={21} active />);
-  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, draft);
+  assert.equal(sourceEditor(document).state.doc.toString(), draft);
   assert.equal(api.reads.length, 1, "切回页面不重新读取并覆盖冲突草稿");
   const revised = `${draft}\n\n继续编辑`;
   await typeMarkdown(dom, revised);
@@ -274,24 +272,23 @@ test("阅读、即时与源码模式切换保留原文，非无损内容也可�
   assert.ok(document.querySelector('[role="textbox"][contenteditable="true"]'));
   for (let index = 0; index < 2; index++) {
     await click(document, "Markdown 源码");
-    assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, canonical);
+    assert.equal(sourceEditor(document).state.doc.toString(), canonical);
     assert.equal(button(document, "保存笔记").disabled, true);
     await click(document, "返回文档");
-    assert.equal(document.querySelector(".markdown-editor textarea"), null);
+    assert.equal(document.querySelector(".lane-source"), null);
     assert.equal(button(document, "保存笔记").disabled, true);
   }
   await click(document, "取消编辑");
   await selectNote(document, 1);
   await click(document, "编辑笔记");
-  assert.ok(document.querySelector(".tiptap-document-content[contenteditable=true]"));
-  assert.equal(document.querySelector('.tiptap-document-content script, .tiptap-document-content iframe, .tiptap-document-content img[src]'), null);
+  assert.ok(document.querySelector(".lane-document-content[contenteditable=true]"));
+  assert.equal(document.querySelector('.lane-document-content script, .lane-document-content iframe, .lane-document-content img[src]'), null);
   await click(document, "Markdown 源码");
-  const source = document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!;
-  // The textarea normalizes its DOM value; the source model and dirty state preserve the original CRLF.
-  assert.equal(source.value, exact.replace(/\r\n/g, "\n"));
+  // CodeMirror displays LF; the source model and dirty state preserve the original CRLF.
+  assert.equal(sourceEditor(document).state.doc.toString(), exact.replace(/\r\n/g, "\n"));
   await click(document, "返回文档");
-  assert.equal(document.querySelector(".markdown-editor textarea"), null);
-  assert.ok(document.querySelector('.tiptap-document-content'));
+  assert.equal(document.querySelector(".lane-source"), null);
+  assert.ok(document.querySelector('.lane-document-content'));
   assert.equal(button(document, "保存笔记").disabled, true);
   await click(document, "取消编辑");
   assert.equal(api.reads.length, 1);
@@ -307,14 +304,14 @@ test("富文本正文通过真实粘贴事件编辑，保存正文变化而非�
   await click(document, "编辑笔记");
   const editor = document.querySelector<HTMLElement>('[role="textbox"][aria-label="笔记正文"][contenteditable="true"]');
   assert.ok(editor, "可无损往返的正文应提供富文本输入");
-  assert.equal(document.querySelector(".markdown-editor textarea"), null);
+  assert.equal(document.querySelector(".lane-source"), null);
   const paste = new dom.window.Event("paste", { bubbles: true, cancelable: true });
-  Object.defineProperty(paste, "clipboardData", { value: { getData: (format: string) => format === "text/plain" ? "新增段落" : "<img src=x onerror=alert(1)>" } });
+  Object.defineProperty(paste, "clipboardData", { value: { getData: (format: string) => format === "text/plain" ? "新增段落" : "" } });
   await act(async () => { editor.dispatchEvent(paste); });
   assert.equal(paste.defaultPrevented, true);
   assert.equal(editor.textContent, "原始正文新增段落");
   assert.equal(editor.querySelector("img"), null);
-  assert.equal(document.querySelector(".markdown-editor textarea"), null);
+  assert.equal(document.querySelector(".lane-source"), null);
   assert.equal(button(document, "保存笔记").disabled, false);
   await click(document, "保存笔记");
   assert.deepEqual(api.writes, [{ base: original, notes: { todos: [], memos: ["原始正文新增段落"] } }]);

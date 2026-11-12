@@ -6,6 +6,7 @@ import type { SkillItem } from "@assistant/contracts";
 import { PersonalPage } from "../dist/workspace/PersonalPage.js";
 import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
+import { replaceSource, sourceEditor } from "./lane-source.js";
 
 function skill(id: string, status: SkillItem["status"] = "approved"): SkillItem {
   return { id, status, name: id === "review" ? "项目复盘" : "发布检查", description: id === "review" ? "每周整理项目进展时使用" : "发布前逐项核对", body: "## 操作步骤\n\n先核对证据，再整理结果。", source: status === "pending" ? "agent" : "user", createdAt: 1, decidedAt: status === "pending" ? null : 1 };
@@ -17,12 +18,7 @@ async function click(dom: JSDOM, text: string) {
   await act(async () => button.click());
 }
 async function markdown(dom: JSDOM, text: string) {
-  await click(dom, "Markdown 源码");
-  const input = dom.window.document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!.call(input, text);
-    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  });
+  await replaceSource(dom.window.document, text);
 }
 
 test("技能空页先浏览，主动新增才进入编辑，切页保留草稿且取消有放弃保护", async t => {
@@ -38,7 +34,7 @@ test("技能空页先浏览，主动新增才进入编辑，切页保留草稿�
   await markdown(dom, "准备好证据再发布");
   await render(<PersonalPage kind="skills" active={false} />);
   await render(<PersonalPage kind="skills" active />);
-  assert.equal(document.querySelector<HTMLTextAreaElement>("textarea")!.value, "准备好证据再发布");
+  assert.equal(sourceEditor(document).state.doc.toString(), "准备好证据再发布");
   const confirm = t.mock.method(dom.window, "confirm", () => false);
   await click(dom, "取消编辑");
   assert.ok(document.querySelector(".markdown-editor"));
@@ -68,7 +64,7 @@ test("技能条目先展示只读详情，编辑冲突保留草稿与原记录 b
   assert.equal(writes[0].path, "/api/personal/skills/review/edit");
   assert.deepEqual(writes[0].body.base, original);
   assert.match(document.querySelector('[role="alert"]')!.textContent!, /其他页面更新/);
-  assert.equal(document.querySelector<HTMLTextAreaElement>("textarea")!.value, "## 新步骤\n\n待核对的草稿");
+  assert.equal(sourceEditor(document).state.doc.toString(), "## 新步骤\n\n待核对的草稿");
 });
 
 test("技能库支持状态与搜索，候选在只读详情批准后生效，撤回后只读", async t => {

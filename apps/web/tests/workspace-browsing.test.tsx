@@ -7,6 +7,7 @@ import { NotesPage } from "../dist/workspace/NotesPage.js";
 import { TasksPage } from "../dist/workspace/TasksPage.js";
 import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
+import { replaceSource, sourceEditor } from "./lane-source.js";
 
 type Notes = ConversationView["notes"];
 const emptyManagement = (): Management => ({ schedules: [], reminders: [], background: [] });
@@ -27,18 +28,12 @@ function assertBrowsing(document: Document) {
 
 async function source(dom: JSDOM) {
   const document = dom.window.document;
-  if (!document.querySelector(".markdown-editor textarea")) await click(document, "Markdown 源码");
-  const textarea = document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea");
-  assert.ok(textarea);
-  return textarea;
+  if (!document.querySelector(".lane-source")) await click(document, "Markdown 源码");
+  return sourceEditor(document).state.doc.toString();
 }
 
 async function typeMarkdown(dom: JSDOM, text: string) {
-  const textarea = await source(dom);
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, text);
-    textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  });
+  await replaceSource(dom.window.document, text);
 }
 
 async function changeValue(dom: JSDOM, element: HTMLInputElement | HTMLSelectElement, value: string) {
@@ -62,7 +57,7 @@ test("笔记默认浏览列表，条目先只读 Markdown，再显式编辑并�
   assert.equal(document.querySelector(".workspace-reading script"), null);
   assert.match(document.querySelector(".workspace-reading .md")!.textContent!, /<script>alert\(1\)<\/script>/);
   await click(document, "编辑笔记");
-  assert.equal((await source(dom)).value, original.memos[0]);
+  assert.equal(await source(dom), original.memos[0]);
   await click(document, "取消编辑");
   assertBrowsing(document);
   assert.ok(document.querySelector('[aria-label="笔记详情"]'));
@@ -95,7 +90,7 @@ test("空笔记先显示空状态，新增保存使用原 base 并返回只读�
   assert.match(document.querySelector(".workspace-reading .md")!.textContent!, /新笔记/);
   assert.equal(document.querySelector('[role="status"]')!.textContent, "已保存");
   await click(document, "编辑笔记");
-  assert.equal((await source(dom)).value, markdown);
+  assert.equal(await source(dom), markdown);
 });
 
 test("笔记冲突保留草稿和编辑状态，切页不丢失，取消与重读复用放弃确认", async t => {
@@ -113,15 +108,15 @@ test("笔记冲突保留草稿和编辑状态，切页不丢失，取消与重�
   await typeMarkdown(dom, "尚未保存的修改");
   await click(document, "保存笔记");
   assert.match(document.querySelector('[role="alert"]')!.textContent!, /其他页面更新.*草稿已保留/);
-  assert.equal((await source(dom)).value, "尚未保存的修改");
+  assert.equal(await source(dom), "尚未保存的修改");
   await view.render(<NotesPage owner={7} active={false} />);
   await view.render(<NotesPage owner={7} active />);
-  assert.equal((await source(dom)).value, "尚未保存的修改");
+  assert.equal(await source(dom), "尚未保存的修改");
   await click(document, "取消编辑");
   await click(document, "重新读取");
   await click(document, "新增笔记");
   assert.equal(confirmations, 3);
-  assert.equal((await source(dom)).value, "尚未保存的修改");
+  assert.equal(await source(dom), "尚未保存的修改");
   assert.equal(reads, 1);
   assert.equal(writes, 1);
   const leaving = new dom.window.Event("beforeunload", { cancelable: true });
@@ -152,7 +147,7 @@ test("任务默认保留各类列表与管理能力，编辑计划发送 revisio
   assert.equal(document.querySelectorAll(".workspace-task").length, 3);
   for (const label of ["继续", "取消计划", "取消提醒", "停止任务"]) assert.ok(button(document, label));
   await click(document, "编辑计划");
-  assert.equal((await source(dom)).value, schedule.text);
+  assert.equal(await source(dom), schedule.text);
   assert.equal(document.querySelector<HTMLSelectElement>("select")!.disabled, true);
   await click(document, "取消编辑");
   assertBrowsing(document);
@@ -191,7 +186,7 @@ test("提醒失败保留正文、时间和 at，切页刷新列表不覆盖草�
   await view.render(<TasksPage owner={7} active={false} />);
   await view.render(<TasksPage owner={7} active />);
   assert.match(document.querySelector('[aria-label="任务列表"]')!.textContent!, /另一页面的新内容/);
-  assert.equal((await source(dom)).value, "改为提前准备资料");
+  assert.equal(await source(dom), "改为提前准备资料");
   assert.equal(document.querySelector<HTMLInputElement>('input[type="number"]')!.value, "25");
   await click(document, "保存安排");
   assert.equal(writes[1].at, reminder.at, "刷新不替换草稿的原版本");
@@ -199,7 +194,7 @@ test("提醒失败保留正文、时间和 at，切页刷新列表不覆盖草�
   await click(document, "取消编辑");
   await click(document, "新增安排");
   assert.equal(confirmations, 2);
-  assert.equal((await source(dom)).value, "改为提前准备资料");
+  assert.equal(await source(dom), "改为提前准备资料");
   discard = true;
   await click(document, "取消编辑");
   assertBrowsing(document);
@@ -226,7 +221,7 @@ test("空任务显式新增，失败重试使用同一 requestId，等待时重�
   await typeMarkdown(dom, "确认发布记录");
   await click(document, "创建安排");
   assert.match(document.querySelector('[role="alert"]')!.textContent!, /连接中断/);
-  assert.equal((await source(dom)).value, "确认发布记录");
+  assert.equal(await source(dom), "确认发布记录");
   fail = false;
   const save = button(document, "创建安排");
   await act(async () => { save.click(); save.click(); });

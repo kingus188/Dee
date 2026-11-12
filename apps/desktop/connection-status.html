@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Dee · 连接状态</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; color: #252824; background: #f6f8fc; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
+    body::before { content: ""; position: fixed; inset: 0 0 auto; height: 52px; -webkit-app-region: drag; }
+    main { width: min(560px, calc(100% - 80px)); padding: 40px 0; }
+    .brand { font-size: 32px; font-weight: 700; margin-bottom: 48px; color: #25345b; }
+    h1 { margin: 0; font-size: 30px; color: #25345b; }
+    p { line-height: 1.8; color: #656b78; overflow-wrap: anywhere; }
+    .origin { font-size: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+    button { padding: 12px 24px; border: 1px solid #5374c9; border-radius: 12px; background: #fff; color: #25345b; font: inherit; cursor: pointer; }
+    button.primary { background: #5374c9; color: #fff; }
+    button:focus-visible { outline: 3px solid #8da8ee; outline-offset: 4px; }
+    @media (prefers-color-scheme: dark) { :root { color: #e5e9df; background: #20242d; } .brand, h1 { color: #dce5ff; } p { color: #b6bdaf; } button { background: #303642; color: #e5e9df; } button.primary { background: #8da8ee; color: #20242d; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">Dee · 小 D</div>
+    <h1 id="title">正在连接 Dee</h1>
+    <p id="message" role="status" aria-live="polite">正在使用已保存的连接，稍后进入你的工作空间。</p>
+    <p id="origin" class="origin"></p>
+    <div class="actions">
+      <button id="settings" class="primary" type="button">打开连接设置</button>
+      <button id="retry" type="button">重新连接</button>
+    </div>
+  </main>
+  <script src="connection-status.js"></script>
+</body>
+</html>

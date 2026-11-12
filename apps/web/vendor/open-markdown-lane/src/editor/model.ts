@@ -1,0 +1,465 @@
+import { fenceRange } from "./fenceRange.ts";
+import { compactPipeRow, tableRowCells } from "./tableData.ts";
+import { detachedSpan } from "./sourcePositions.ts";
+import type { SourceEdit } from "./sourcePositions.ts";
+import { headingSlug } from "./markdownExtensions.ts";
+import { parseBlocks } from "./markdown.ts";
+export interface SelectionBookmark {
+  anchor: number;
+  head: number;
+}
+export interface DocumentNode {
+  id: string;
+  from: number;
+  to: number;
+  source: string;
+  kind: string;
+  line: number;
+  revision?: number;
+  edit?: SourceEdit & { previousRevision: number };
+}
+export interface DocumentRoot {
+  children: DocumentNode[];
+}
+interface Snapshot {
+  text: string;
+  selection: SelectionBookmark;
+}
+interface Command {
+  from: number;
+  removed: string;
+  inserted: string;
+  before: SelectionBookmark;
+  after: SelectionBookmark;
+  kind: string;
+  time: number;
+}
+let sequence = 0;
+
+export class MarkdownDocument {
+  text: string;
+  nodes: DocumentNode[] = [];
+  root: DocumentRoot = { children: [] };
+  environment: Record<string, unknown> = {};
+  selection: SelectionBookmark;
+  private original: string;
+  private normalizedOriginal: string;
+  private serializedText: string | null = null;
+  private serializedMarkdown = "";
+  private undoStack: Command[] = [];
+  private redoStack: Command[] = [];
+  private group = false;
+  private compositionSession: { entry: Snapshot; undo: Command[]; redo: Command[]; nodes:DocumentNode[];environment:Record<string,unknown> } | null = null;
+  beginComposition() {
+    if (this.compositionSession) return;
+    this.closeGroup();
+    this.compositionSession = { entry: { text:this.text,selection:{...this.selection} }, undo:this.undoStack, redo:this.redoStack,nodes:this.nodes,environment:this.environment };
+    this.undoStack=[]; this.redoStack=[];
+  }
+  endComposition() {
+    const session=this.compositionSession; if (!session) return false;
+    const after={text:this.text,selection:{...this.selection}};
+    this.undoStack=session.undo; this.redoStack=session.redo;
+    this.text=session.entry.text; this.selection=session.entry.selection; this.nodes=session.nodes;this.environment=session.environment; this.compositionSession=null;
+    this.closeGroup();
+    const changed=this.replace(0,this.text.length,after.text,"composition",after.selection);
+    this.closeGroup(); return changed;
+  }
+  private sourceSession: {
+    entry: Snapshot;
+    nodes: DocumentNode[];
+    environment: Record<string,unknown>;
+    undo: Command[];
+    redo: Command[];
+  } | null = null;
+  get canUndo() {
+    return this.undoStack.length > 0;
+  }
+  get canRedo() {
+    return this.redoStack.length > 0;
+  }
+  beginSourceSession() {
+    if (this.sourceSession) return;
+    this.closeGroup();
+    this.sourceSession = {
+      nodes:this.nodes,environment:this.environment,
+      entry: { text: this.text, selection: { ...this.selection } },
+      undo: this.undoStack,
+      redo: this.redoStack,
+    };
+    this.undoStack = [];
+    this.redoStack = [];
+  }
+  endSourceSession() {
+    const session = this.sourceSession;
+    if (!session) return;
+    const after = { text: this.text, selection: { ...this.selection } };
+    this.undoStack = session.undo;
+    this.redoStack = session.redo;
+    this.text = session.entry.text;
+    this.nodes=session.nodes;this.environment=session.environment;
+    this.selection = session.entry.selection;
+    this.sourceSession = null;
+    this.closeGroup();
+    this.replace(
+      0,
+      this.text.length,
+      after.text,
+      "source-session",
+      after.selection,
+    );
+    this.closeGroup();
+  }
+  lineEnding: string;
+  constructor(source: string, lineEnding = "\n") {
+    this.lineEnding = lineEnding;
+    this.original = source;
+    this.text = source.replace(/\r\n/g, "\n");
+    this.normalizedOriginal = this.text;
+    this.selection = { anchor: this.text.length, head: this.text.length };
+    this.parse();
+  }
+  serialize() {
+    return this.root.children.map((node) => node.source).join("");
+  }
+  toMarkdown() {
+    const source = this.text;
+    if (source === this.normalizedOriginal) return this.original;
+    if (source !== this.serializedText) {
+      this.serializedText = source;
+      this.serializedMarkdown = this.lineEnding === "\n" ? source : source.replace(/\n/g, this.lineEnding);
+    }
+    return this.serializedMarkdown;
+  }
+  private richParsing = false;
+  enableRichParsing() {
+    if (this.richParsing) return;
+    this.richParsing = true;
+    if (this.text.length > 300_000) this.parse();
+  }
+  private incremental(edit: {from:number;to:number;insert:string;removed:string}) {
+    const old = this.nodes;
+    if (!old.length) return false;
+    let first = 0, last = old.length - 1;
+    // Find affected blocks without walking the document's text or inline tokens.
+    while (first < last) { const middle = (first + last) >>> 1; if (old[middle].to < edit.from) first = middle + 1; else last = middle; }
+    const affected = old[first];
+    if (affected && edit.from >= affected.from && edit.to <= affected.to) {
+      const from = edit.from - affected.from, to = edit.to - affected.from;
+      const delta = edit.insert.length - edit.removed.length;
+      const lineDelta = (edit.insert.match(/\n/g)?.length || 0) - (edit.removed.match(/\n/g)?.length || 0);
+      let stable = false;
+      if (affected.kind === "fence") {
+        const opening = /^ {0,3}(`{3,}|~{3,})[^\n]*\n/.exec(affected.source);
+        const range = opening && fenceRange(affected);
+        if (opening && range && from >= range.start && to <= range.end) {
+          const closingStart = affected.from + range.end + delta;
+          const start = this.text.lastIndexOf("\n", edit.from - 1) + 1;
+          const next = this.text.indexOf("\n", edit.from + edit.insert.length);
+          const end = Math.min(next < 0 ? this.text.length : next, range.closingOnNewLine ? closingStart - 1 : this.text.length);
+          const closing = new RegExp(`(?:^|\\n) {0,3}${opening[1][0]}{${opening[1].length},}[ \\t]*(?=\\n|$)`);
+          // Inspect the changed lines, including a closing fence exposed by deleting
+          // ordinary text. The previous fast path missed that syntax change.
+          stable = (!range.closingOnNewLine || this.text[closingStart - 1] === "\n") &&
+            !closing.test(this.text.slice(start, Math.max(start, end)));
+        }
+      } else if (affected.kind === "table_open") {
+        const headerEnd = affected.source.indexOf("\n"), delimiterEnd = affected.source.indexOf("\n", headerEnd + 1);
+        if (delimiterEnd >= 0 && from > delimiterEnd) {
+          const start = affected.source.lastIndexOf("\n", from - 1) + 1;
+          const next = affected.source.indexOf("\n", to), end = next < 0 ? affected.source.length : next;
+          const before = affected.source.slice(start, end);
+          const after = affected.source.slice(start, from) + edit.insert + affected.source.slice(to, end);
+          const width = tableRowCells(affected.source.slice(0, headerEnd)).length;
+          stable = before.split("\n").every(row => compactPipeRow(row, width)) && after.split("\n").every(row => compactPipeRow(row, width));
+        }
+      }
+      if (stable) {
+        this.nodes = old.map((node, index) => index === first ? {
+          ...node, to: node.to + delta, source: this.text.slice(node.from, node.to + delta),
+          revision: (node.revision || 0) + 1, edit: {from, to, insert: edit.insert, previousRevision: node.revision || 0},
+        } : index > first ? {...node, from: node.from + delta, to: node.to + delta, line: node.line + lineDelta} : node);
+        if (lineDelta && Array.isArray(this.environment.headings)) this.environment = {
+          ...this.environment, headings: (this.environment.headings as Array<{line: number}>).map(heading => heading.line > affected.line ? {...heading, line: heading.line + lineDelta} : heading),
+        };
+        this.ensureCaretNode(); this.rebuildRoot(); return true;
+      }
+    }
+    if (/(?:^|\n) {0,3}\[[^\]\n]+\]:/.test(edit.insert + "\n" + edit.removed)) return false;
+    const begin = Math.max(0, first - 2);
+    let finish = first;
+    while (finish < old.length && old[finish].from <= edit.to) finish++;
+    finish = Math.min(old.length, finish + 3);
+    const delta = edit.insert.length - (edit.to - edit.from);
+    const lineDelta = (edit.insert.match(/\n/g)?.length || 0) - (edit.removed.match(/\n/g)?.length || 0);
+    const start = old[begin].from, startLine = old[begin].line;
+    // Changes to a definition can affect reference resolution anywhere in the file.
+    if (old.slice(begin, finish).some(node => /(?:^|\n) {0,3}\[[^\]\n]+\]:/.test(node.source))) return false;
+    while (true) {
+      const end = finish < old.length ? old[finish].from + delta : this.text.length;
+      const source = this.text.slice(start, end), offsets = [0];
+      for (let i=0;i<source.length;i++) if(source[i] === "\n") offsets.push(i+1);
+      const oldSource=old.slice(begin,finish).map(node=>node.source).join("\n");
+      const refs=(text:string)=>(text.match(/\[\^[^\]\n]+\](?!:)/g)||[]).join("\0");
+      if(refs(source)!==refs(oldSource)||/(?:^|\n) {0,3}\[[^\]\n]+\]:/.test(source))return false;
+      const env = {...this.environment, footnoteNumbers:{...(this.environment.footnoteNumbers as Record<string,number>||{})},fragment:true, lineOffset:startLine-1};
+      const parsed = parseBlocks(source,env).map(block => ({
+        id:"",from:start+offsets[block.fromLine-1],to:start+(offsets[block.toLine] ?? source.length+1)-1,
+        source:block.source,kind:block.kind,line:startLine+block.fromLine-1,
+      }));
+      const tail = old.slice(begin,finish).filter(node=>node.kind!=="empty").slice(-2);
+      const nextTail = parsed.slice(-tail.length);
+      const stable = tail.length>0 && nextTail.length===tail.length && tail.every((node,index)=>node.source===nextTail[index].source && node.kind===nextTail[index].kind && node.to+delta===nextTail[index].to);
+      if (!stable && finish < old.length) { finish = Math.min(old.length, finish + Math.max(8,finish-begin)); continue; }
+      const candidates = new Map<string,DocumentNode[]>();
+      for(const node of old.slice(begin,finish)) { const key=node.kind+"\0"+node.source;const entries=candidates.get(key)||[];entries.push(node);candidates.set(key,entries); }
+      const previous=old.slice(begin,finish),used=new Set<string>();
+      // Reserve exact identities first, then preserve the edited block's identity.
+      // Local code editors keep this ID across every IME update and final commit.
+      for(const node of parsed) {node.id=candidates.get(node.kind+"\0"+node.source)?.shift()?.id||"";if(node.id)used.add(node.id);}
+      for(const [index,node] of parsed.entries())if(!node.id){let same=previous[index];if(!same||same.kind!==node.kind||used.has(same.id))same=previous.find(item=>item.kind===node.kind&&!used.has(item.id))!;node.id=same?.id||`node-${++sequence}`;used.add(node.id);}
+      this.nodes = [...old.slice(0,begin),...parsed,...old.slice(finish).map(node=>({...node,from:node.from+delta,to:node.to+delta,line:node.line+lineDelta}))];
+      if (finish===old.length && (!this.nodes.length || /\n$/.test(this.text))) this.nodes.push({id:`node-${++sequence}`,from:this.text.length,to:this.text.length,source:"",kind:"empty",line:startLine+offsets.length-1});
+      // Existing headings keep their IDs; updated headings are supplied by the fragment parser.
+      if (Array.isArray(this.environment.headings)) {
+        const oldEndLine=finish<old.length?old[finish].line:Infinity;
+        const before=(this.environment.headings as Array<{line:number}>).filter(item=>item.line<startLine);
+        const after=(this.environment.headings as Array<{line:number}>).filter(item=>item.line>=oldEndLine).map(item=>({...item,line:item.line+lineDelta}));
+        const headings=[...before,...((env as Record<string,unknown>).fragmentHeadings as Array<{line:number;text:string;id:string}>||[]).filter(item=>item.line>=startLine&&item.line<oldEndLine+lineDelta),...after] as Array<{line:number;text:string;id:string}>;
+        const used=new Map<string,number>();
+        this.environment={...this.environment,headings:headings.map(heading=>{const base=headingSlug(heading.text),count=used.get(base)||0;used.set(base,count+1);return {...heading,id:base+(count?`-${count}`:"")};})};
+      }
+      this.ensureCaretNode();this.rebuildRoot();
+      return true;
+    }
+  }
+  private ensureCaretNode(previous = this.nodes) {
+    const caret=this.selection.head, tail=this.nodes.findLast(node=>node.kind==="empty"&&node.from===this.text.length);
+    const oldEmpty = new Map(previous.filter(node=>node.kind==="empty").map(node=>[node.from,node]));
+    const blocks = this.nodes.filter(node=>node.kind!=="empty"), nodes: DocumentNode[] = [];
+    const used = new Set(blocks.map(node=>node.id));
+    const empty = (from: number, line: number) => {
+      const previousId=oldEmpty.get(from)?.id, id=previousId&&!used.has(previousId)?previousId:`node-${++sequence}`;
+      used.add(id); nodes.push({id,from,to:from,source:"",kind:"empty",line});
+    };
+    let before: DocumentNode | undefined;
+    for (const after of [...blocks, undefined]) {
+      const start = before?.to ?? 0, end = after?.from ?? this.text.length;
+      if(end<=start) { if(after)nodes.push(after); before=after; continue; }
+      const breaks: number[] = [];
+      for (let at=start;at<end;at++) if(this.text[at]==="\n") breaks.push(at+1);
+      const endLine = after?.line ?? tail?.line ?? (before ? before.line + (before.source.match(/\n/g)?.length || 0) : 1) + breaks.length;
+      // Two newlines separate blocks; every additional source line is one
+      // visible empty line. Leading blank lines do not need a separator.
+      for (let index=before?1:-1;index<breaks.length;index++) {
+        const at=index<0?start:breaks[index];
+        if(at>=end)continue;
+        const next=this.text.indexOf("\n",at), finish=next<0||next>end?end:next;
+        if(!/^[ \t]*$/.test(this.text.slice(at,finish)))continue;
+        const line=endLine-breaks.length+index+1;
+        empty(at,line);
+      }
+      if(after)nodes.push(after);
+      before=after;
+    }
+    if(tail)nodes.push(used.has(tail.id)?{...tail,id:`node-${++sequence}`}:tail);
+    this.nodes=nodes;
+    if(caret<this.text.length&&!this.nodes.some(node=>caret>=node.from&&caret<=node.to)) {
+      this.nodes.push({id:`gap-${caret}`,from:caret,to:caret,source:"",kind:"empty",line:1+(this.text.slice(0,caret).match(/\n/g)?.length||0)});
+    }
+    this.nodes.sort((a,b)=>a.from-b.from);
+  }
+  private rebuildRoot() {
+    const children: DocumentNode[] = []; let end=0;
+    for(const node of this.nodes) {
+      if(node.from>end) children.push({id:`source-gap-${end}`,from:end,to:node.from,source:this.text.slice(end,node.from),kind:"separator",line:0});
+      children.push(node);end=node.to;
+    }
+    if(end<this.text.length) children.push({id:`source-gap-${end}`,from:end,to:this.text.length,source:this.text.slice(end),kind:"separator",line:0});
+    this.root={children};
+  }
+  private parse(edit?: {from:number;to:number;insert:string;removed:string}) {
+    const old = this.nodes;
+    if (this.text.length > 300_000 && !this.richParsing) {
+      this.environment = {};
+      this.nodes = [];
+      this.root.children = [
+        {
+          id: "raw-source",
+          from: 0,
+          to: this.text.length,
+          source: this.text,
+          kind: "source",
+          line: 1,
+        },
+      ];
+      return;
+    }
+    if (edit && this.richParsing && this.text.length > 300_000 && this.incremental(edit)) return;
+    const offsets = [0];
+    for (let i = 0; i < this.text.length; i++)
+      if (this.text[i] === "\n") offsets.push(i + 1);
+    const used = new Set<string>();
+    // Exact matches are consumed in document order, including duplicate paragraphs.
+    const candidates = new Map<string, Map<string, DocumentNode[]>>();
+    for (let i = old.length - 1; i >= 0; i--) {
+      const node = old[i], sources = candidates.get(node.kind) || new Map<string, DocumentNode[]>();
+      const matches = sources.get(node.source) || [];
+      matches.push(node); sources.set(node.source, matches); candidates.set(node.kind, sources);
+    }
+    this.environment = {};
+    this.nodes = parseBlocks(this.text, this.environment).map(
+      (block, index) => {
+        const from = offsets[block.fromLine - 1],
+          to = (offsets[block.toLine] ?? this.text.length + 1) - 1;
+        const matches = candidates.get(block.kind)?.get(block.source);
+        while (matches?.length && used.has(matches.at(-1)!.id)) matches.pop();
+        const same = matches?.pop() ||
+          (old[index]?.kind === block.kind && !used.has(old[index].id) ? old[index] : undefined);
+        const id = same?.id || `node-${++sequence}`;
+        used.add(id);
+        return {
+          id,
+          from,
+          to,
+          source: block.source,
+          kind: block.kind,
+          line: block.fromLine,
+        };
+      },
+    );
+    if (!this.nodes.length || /\n$/.test(this.text))
+      this.nodes.push({
+        id: old.findLast(n => n.kind === "empty" && !used.has(n.id))?.id || `node-${++sequence}`,
+        from: this.text.length,
+        to: this.text.length,
+        source: "",
+        kind: "empty",
+        line: offsets.length,
+      });
+    this.ensureCaretNode(old);
+    const children: DocumentNode[] = [];
+    let end = 0;
+    for (const node of this.nodes) {
+      if (node.from > end)
+        children.push({
+          id: `source-gap-${end}`,
+          from: end,
+          to: node.from,
+          source: this.text.slice(end, node.from),
+          kind: "separator",
+          line: 0,
+        });
+      children.push(node);
+      end = node.to;
+    }
+    if (end < this.text.length)
+      children.push({
+        id: `source-gap-${end}`,
+        from: end,
+        to: this.text.length,
+        source: this.text.slice(end),
+        kind: "separator",
+        line: 0,
+      });
+    this.root = { children };
+  }
+  closeGroup() {
+    this.group = false;
+  }
+  refreshCaret() {
+    if (this.text.length <= 300_000) this.parse();
+    else if(this.richParsing){this.ensureCaretNode();this.rebuildRoot();}
+  }
+  replace(
+    from: number,
+    to: number,
+    insert: string,
+    kind = "command",
+    selection?: SelectionBookmark,
+  ) {
+    from = Math.max(0, Math.min(from, this.text.length));
+    to = Math.max(from, Math.min(to, this.text.length));
+    insert = insert.replace(/\r\n/g, "\n");
+    const before = { ...this.selection };
+    const nextSelection = selection || { anchor: from + insert.length, head: from + insert.length };
+    // Source editors and mode/composition commits may supply a whole document.
+    // Retain only its changed span in history, including on multi-megabyte files.
+    if (from === 0 && to === this.text.length) {
+      let prefix = 0, suffix = 0;
+      while (prefix < to && prefix < insert.length && this.text.charCodeAt(prefix) === insert.charCodeAt(prefix)) prefix++;
+      while (suffix < to - prefix && suffix < insert.length - prefix && this.text.charCodeAt(to - suffix - 1) === insert.charCodeAt(insert.length - suffix - 1)) suffix++;
+      from = prefix; to -= suffix; insert = insert.slice(prefix, insert.length - suffix);
+    }
+    let removed = this.text.slice(from, to);
+    this.selection = nextSelection;
+    if (removed === insert) return false;
+    removed = detachedSpan(removed); insert = detachedSpan(insert);
+    this.text = this.text.slice(0, from) + insert + this.text.slice(to);
+    const now = Date.now(), previous = this.undoStack.at(-1);
+    const merge = this.group && ["typing", "composition"].includes(kind) && previous?.kind === kind &&
+      (kind === "composition" || now - previous.time < 800) && previous.after.head === before.head && before.anchor === before.head;
+    if (merge && from >= previous.from && to <= previous.from + previous.inserted.length) {
+      const at = from - previous.from;
+      previous.inserted = previous.inserted.slice(0, at) + insert + previous.inserted.slice(to - previous.from);
+      previous.after = { ...this.selection }; previous.time = now;
+    } else if (merge && from === previous.from + previous.inserted.length) {
+      previous.removed += removed; previous.inserted += insert;
+      previous.after = { ...this.selection }; previous.time = now;
+    } else {
+      this.undoStack.push({ from, removed, inserted: insert, before, after: { ...this.selection }, kind, time: now });
+      if (this.undoStack.length > 100) this.undoStack.shift();
+    }
+    while (this.undoStack.length > 1 && this.undoStack.reduce((bytes, command) => bytes + 2 * (command.removed.length + command.inserted.length), 0) > 16 * 1024 * 1024) this.undoStack.shift();
+    this.group = ["typing", "composition"].includes(kind);
+    this.redoStack = [];
+    this.parse({from,to,insert,removed});
+    return true;
+  }
+  replaceExternal(
+    source: string,
+    lineEnding = source.includes("\r\n") ? "\r\n" : "\n",
+  ) {
+    this.sourceSession = null;
+    this.compositionSession = null;
+    this.lineEnding = lineEnding;
+    this.original = source;
+    this.text = source.replace(/\r\n/g, "\n");
+    this.normalizedOriginal = this.text;
+    this.serializedText = null;
+    this.selection = {
+      anchor: Math.min(this.selection.anchor, this.text.length),
+      head: Math.min(this.selection.head, this.text.length),
+    };
+    this.undoStack = [];
+    this.redoStack = [];
+    this.group = false;
+    this.parse();
+  }
+  undo() {
+    const command = this.undoStack.pop();
+    if (!command) return false;
+    this.redoStack.push(command);
+    this.text = this.text.slice(0, command.from) + command.removed + this.text.slice(command.from + command.inserted.length);
+    this.selection = { ...command.before };
+    this.closeGroup();
+    this.parse({from:command.from,to:command.from+command.inserted.length,insert:command.removed,removed:command.inserted});
+    return true;
+  }
+  redo() {
+    const command = this.redoStack.pop();
+    if (!command) return false;
+    this.undoStack.push(command);
+    this.text = this.text.slice(0, command.from) + command.inserted + this.text.slice(command.from + command.removed.length);
+    this.selection = { ...command.after };
+    this.closeGroup();
+    this.parse({from:command.from,to:command.from+command.removed.length,insert:command.inserted,removed:command.removed});
+    return true;
+  }
+  nodeAt(position: number) {
+    return (
+      this.nodes.find((n) => position >= n.from && position <= n.to) ||
+      this.nodes.at(-1)
+    );
+  }
+}

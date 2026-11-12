@@ -90,6 +90,12 @@ test("密度使用有上下限的宽高规则，移动断点与交互一致，�
 test("桌面历史收起为 76px 图标栏，展开时导航横排在历史栏顶部", async () => {
   const css = await readFile(new URL("../public/prototype.css", import.meta.url), "utf8");
   assert.match(css, /\.workspace-primary-nav \{ flex-direction: row;/);
+  const expanded = css.match(/@media \(min-width: 901px\) \{\n  #mascot-card\.app-layout \{([\s\S]+?)\n  \}/)?.[1];
+  assert.ok(expanded);
+  assert.match(expanded, /> \.sidebar \{[^}]*inset: 0 auto auto 0;/, "展开时导航固定在顶部而不是底部");
+  assert.match(expanded, /\.conversation-history \{ padding-top: var\(--header-height\); \}/, "历史列表为顶部导航留出空间，不再预留底部空白");
+  assert.match(expanded, /\.workspace-personal-nav \{ top: calc\(100% \+ 4px\); bottom: auto;/, "更多菜单从顶部导航向下展开");
+  assert.match(css, /\[data-desktop="darwin"\]:has\(\.conversation-sidebar\[data-expanded="true"\]\) > \.sidebar \{ padding-left: 96px; \}/, "macOS 顶部导航避开原生窗口按钮");
   const folded = css.match(/:has\(\.conversation-sidebar\[data-expanded="false"\]\) \{([\s\S]+?)\n  \}/)?.[1];
   assert.ok(folded);
   assert.match(folded, /--rail-width: 76px;/);

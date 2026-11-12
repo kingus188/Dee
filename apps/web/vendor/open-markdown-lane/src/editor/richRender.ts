@@ -1,0 +1,489 @@
+import { t } from "../i18n.ts";
+import { fenceRange } from "./fenceRange.ts";
+export { fenceRange } from "./fenceRange.ts";
+import { contiguousPositions, mappedPositions } from "./sourcePositions.ts";
+import { tableRowCells } from "./tableData.ts";
+export { tableRowCells } from "./tableData.ts";
+import { alertTitle } from "./markdownExtensions.ts";
+import {
+  editableHtml,
+  renderMarkdown,
+  inlineTokens,
+  decodeMarkdownText,
+  highlightCode,
+} from "./markdown.ts";
+import type { DocumentNode } from "./model.ts";
+export interface Leaf {
+  id: string;
+  nodeId: string;
+  raw: string;
+  positions: number[];
+  kind?: string;
+  fenceLine?: number;
+}
+export function codeBody(node: DocumentNode, startLine: number) {
+  if (startLine === 0 && /^(`{3,}|~{3,})/.test(node.source)) {
+    const range = fenceRange(node), raw = node.source.slice(range.start, range.end);
+    return {from: range.start, to: range.end, prefix: "", raw, positions: contiguousPositions(node.from + range.start, raw.length), closed: range.closingOnNewLine};
+  }
+  const lines = node.source.split("\n"),
+    offsets = [0];
+  for (let i = 0; i < lines.length; i++)
+    offsets.push(offsets[i] + lines[i].length + 1);
+  const opening = /^(.*?)(`{3,}|~{3,})/.exec(lines[startLine] || "");
+  const prefix = (opening?.[1] || "").replace(
+      /(?:[-+*]|\d+[.)])\s+$/,
+      (marker) => " ".repeat(marker.length),
+    ),
+    marker = opening?.[2] || "```";
+  let endLine = lines.length,
+    closed = false;
+  for (let i = startLine + 1; i < lines.length; i++) {
+    const content = lines[i].startsWith(prefix)
+      ? lines[i].slice(prefix.length)
+      : lines[i];
+    if (new RegExp(`^${marker[0]}{${marker.length},}\\s*$`).test(content)) {
+      endLine = i;
+      closed = true;
+      break;
+    }
+  }
+  const from = Math.min(node.source.length, offsets[startLine + 1]),
+    to = Math.min(node.source.length, offsets[endLine]);
+  const parts: string[] = [], rawOffsets: number[] = [], sourceOffsets: number[] = [];
+  let length = 0;
+  for (let i = startLine + 1; i < endLine; i++) {
+    const skip = lines[i].startsWith(prefix) ? prefix.length : 0;
+    const line = lines[i].slice(skip) + (offsets[i] + lines[i].length < to ? "\n" : "");
+    rawOffsets.push(length); sourceOffsets.push(node.from + offsets[i] + skip); parts.push(line); length += line.length;
+  }
+  const raw = parts.join("");
+  const positions = !prefix ? contiguousPositions(node.from + from, raw.length) : mappedPositions(raw.length, index => {
+    if (index === raw.length) return node.from + to;
+    let low = 0, high = rawOffsets.length;
+    while (low < high) { const middle = (low + high) >>> 1; if (rawOffsets[middle] <= index) low = middle + 1; else high = middle; }
+    const line = Math.max(0, low - 1); return sourceOffsets[line] + index - rawOffsets[line];
+  });
+  return { from, to, prefix, raw, positions, closed };
+}
+export function encodeCodeBody(raw: string, prefix: string) {
+  if (!prefix) return raw;
+  return raw ? prefix + raw.replace(/\n(?!$)/g, "\n" + prefix) : "";
+}
+export function codePosition(
+  from: number,
+  raw: string,
+  prefix: string,
+  position: number,
+) {
+  if (!prefix) return from + position;
+  return (
+    from +
+    (position === 0 && raw
+      ? prefix.length
+      : encodeCodeBody(raw.slice(0, position), prefix).length) +
+    (raw[position - 1] === "\n" && position < raw.length ? prefix.length : 0)
+  );
+}
+export const escapeHtml = (text: string) =>
+  text.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ]!,
+  );
+
+const meta = (text: string) =>
+  `<span class="md-meta">${escapeHtml(text)}</span>`;
+export function renderNode(
+  node: DocumentNode,
+  documentId: string,
+  leaves: Map<string, Leaf>,
+  environment: Record<string, unknown> = {},
+): HTMLElement {
+  const holder = document.createElement("div");
+  const sourceLines = node.source.split("\n"), lineOffsets = [0];
+  for (const line of sourceLines) lineOffsets.push(lineOffsets.at(-1)! + line.length + 1);
+  const alert = /^\s*>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i.exec(node.source);
+  if (alert) environment = { ...environment, alertType: alert[1].toUpperCase() };
+  let pointer = 0,
+    index = 0;
+  const cells = node.kind === "table_open" ? tableCells(node.source) : [];
+  const leaf = (raw: string, map?: [number, number] | null, kind?: string) => {
+    let start = pointer;
+    if (map)
+      start = lineOffsets[map[0]] || 0;
+    const positions: number[] = [];
+    let search = start;
+    for (const [lineIndex, line] of raw.split("\n").entries()) {
+      const lineStart = lineIndex
+        ? node.source.lastIndexOf("\n", search - 1) + 1
+        : start;
+      if (map && kind !== "fence") {
+        const actual = node.source.slice(lineStart).split("\n")[0];
+        const task = /^\s*(?:[-+*]|\d+[.)])\s+\[[ xX]\]/.exec(actual);
+        const prefix =
+          task ||
+          /^\s*(?:>\s*)*(?:#{1,6}\s+|[-+*]\s+|\d+[.)]\s+)?/.exec(actual);
+        search = lineStart + (prefix?.[0].length || 0);
+      }
+      let found = node.source.indexOf(line, search),
+        at = found >= 0 ? found : search;
+      if (!line.trim() && map && kind !== "fence")
+        at =
+          lineStart +
+          node.source.slice(lineStart).split("\n")[0].length -
+          line.length;
+      if (lineIndex)
+        positions.push(
+          node.from + Math.max(0, node.source.lastIndexOf("\n", at - 1)),
+        );
+      for (let c = 0; c < line.length; c++) positions.push(node.from + at + c);
+      search = at + line.length + 1;
+    }
+    positions.push(node.from + Math.max(start, search - 1));
+    pointer = search - 1;
+    const id = `${node.id}-leaf-${index++}`;
+    leaves.set(id, { id, nodeId: node.id, raw, positions, kind });
+    return id;
+  };
+  const fenceLeaf = (startLine?: number) => {
+    const range = fenceRange(node),
+      body = startLine !== undefined ? codeBody(node, startLine) : undefined,
+      raw = body ? body.raw : node.source.slice(range.start, range.end),
+      id = `${node.id}-leaf-${index++}`;
+    leaves.set(id, {
+      id,
+      nodeId: node.id,
+      raw,
+      positions:
+        body?.positions ||
+        contiguousPositions(node.from + range.start, raw.length),
+      kind: "fence",
+      fenceLine: startLine,
+    });
+    return { id, raw };
+  };
+  if (node.kind === "empty") {
+    const id = leaf("");
+    holder.innerHTML = `<p><span data-leaf="${id}"><br /></span></p>`;
+  } else if ((node.kind === "fence" || /^\$\$\s*$/.test(node.source)) && !node.source.includes("\n")) {
+    const id = leaf(node.source); holder.innerHTML = `<p><span data-leaf="${id}" class="md-fence-opening">${escapeHtml(node.source)}</span></p>`;
+  } else if (node.kind === "blockquote_open" && /^\s*(?:>\s*)+$/.test(node.source)) {
+    const id = leaf("", [0, 1]); holder.innerHTML = `<blockquote><p><span data-leaf="${id}"><br /></span></p></blockquote>`;
+  } else if (["html_preview", "html_block"].includes(node.kind)) {
+    const { id, raw } = fenceLeaf();
+    holder.innerHTML = `<div class="md-fence md-html" contenteditable="false" data-fence="${id}"><div class="fence-preview">${renderMarkdown(node.source, documentId)}</div><pre class="fence-body"><code>${escapeHtml(raw)}</code></pre><span class="fence-language">html</span></div>`;
+  } else if (node.kind === "frontmatter") {
+    const id = leaf(node.source, null, "code");
+    holder.innerHTML = `<pre class="md-frontmatter"><code data-leaf="${id}">${escapeHtml(node.source)}</code></pre>`;
+  } else if (node.kind === "footnote_definition") {
+    const definition = /^(\[\^([^\]]+)\]:[ \t]*)([\s\S]*)$/.exec(node.source)!;
+    pointer = definition[1].length;
+    const id = leaf(definition[3]), number = (environment.footnoteNumbers as Record<string, number>)?.[definition[2]] || definition[2];
+    holder.innerHTML = `<aside class="md-footnote-definition" id="fn-${encodeURIComponent(definition[2])}"><span class="footnote-label md-ui" contenteditable="false">${escapeHtml(String(number))}.</span><span data-leaf="${id}">${tokenInlineHtml(definition[3], documentId, environment) || "<br />"}</span></aside>`;
+  } else if (node.kind === "toc") {
+    const id = leaf(node.source);
+    holder.innerHTML = `<div class="md-toc"><span data-leaf="${id}" class="md-toc-source">${escapeHtml(node.source)}</span><div contenteditable="false" class="md-ui">${renderMarkdown(node.source, documentId, { ...environment, fragment: true })}</div></div>`;
+  } else if (/^\$\$/.test(node.source)) {
+    const { id, raw } = fenceLeaf();
+    holder.innerHTML = `<div class="md-fence md-math" contenteditable="false" data-fence="${id}"><div class="fence-preview">${renderMarkdown(node.source, documentId)}</div><pre class="fence-body"><code>${escapeHtml(raw)}</code></pre></div>`;
+  } else {
+    holder.innerHTML = editableHtml(
+      node.source,
+      documentId,
+      (token) => {
+        const cell = cells.shift();
+        let raw = cell ? cell.raw : token.content;
+        if (!cell && token.map) {
+          // Markdown-it trims terminal whitespace from inline content. Keep it
+          // editable so a caret after a typed space cannot fall into another block.
+          const lastLine = sourceLines[token.map[1] - 1] || "";
+          const trailing = /[ \t]+$/.exec(lastLine)?.[0] || "";
+          if (trailing && !raw.endsWith(trailing)) raw += trailing;
+        }
+        if (cell) pointer = cell.start;
+        const id = leaf(raw, cell ? null : token.map);
+        if (cell) {
+          const item = leaves.get(id)!;
+          item.positions = Array.from(
+            { length: raw.length + 1 },
+            (_, i) => node.from + cell.start + i,
+          );
+          pointer = cell.end;
+        }
+        const sourceLine = token.map
+          ? sourceLines[token.map[0]]
+          : "";
+        const task = /^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[([ xX])\]\s/.exec(
+          sourceLine || "",
+        );
+        const taskFrom = node.from + (lineOffsets[token.map?.[0] || 0] || 0) + sourceLine.indexOf("[") + 1;
+        const checkbox = task
+          ? `<input class="task-checkbox" data-task="${taskFrom}" type="checkbox" contenteditable="false" ${task[1].toLowerCase() === "x" ? "checked" : ""} />`
+          : "";
+        return `${checkbox}<span class="md-line" data-leaf="${id}">${tokenInlineHtml(raw, documentId, environment) || "<br />"}</span>`;
+      },
+      (token) => {
+        const openingLine = sourceLines[token.map?.[0] || 0];
+        if (token.map?.[1] === (token.map?.[0] || 0) + 1 && !node.source.includes("\n")) { const raw = openingLine.replace(/^\s*(?:>\s*)*(?:(?:[-+*]|\d+[.)])\s+)?/, ""), id = leaf(raw, token.map); return `<p><span data-leaf="${id}" class="md-fence-opening">${escapeHtml(raw)}</span></p>`; }
+        const { id, raw } = fenceLeaf(token.map?.[0] || 0);
+        if (/^(mermaid|sequence|flow)$/.test(token.info.trim()))
+          return `<div class="md-fence" contenteditable="false" data-fence="${id}"><div class="fence-preview">${renderMarkdown(node.source, documentId)}</div><pre class="fence-body"><code>${escapeHtml(token.content)}</code></pre><span class="fence-language">${token.info.trim()}</span></div>`;
+        if (raw.length > 100_000) return `<div class="md-fence large-code" contenteditable="false" data-fence="${id}"><pre class="fence-body"></pre><span class="fence-language">${escapeHtml(token.info)}</span></div>`;
+        return `<div class="md-fence" contenteditable="false" data-fence="${id}"><pre class="fence-body"><code data-leaf="${id}">${highlightCode(raw, token.info.trim().split(/\s/)[0])}</code></pre><span class="fence-language">${escapeHtml(token.info)}</span></div>`;
+      },
+      { ...environment, lineOffset: node.line - 1 },
+    );
+  }
+  const element =
+    (holder.firstElementChild as HTMLElement) || document.createElement("p");
+  element.dataset.cid = node.id;
+  element.dataset.kind = node.kind;
+  element.dataset.line = String(node.line);
+  // Task-list syntax belongs to the model; the native checkbox is an interactive view.
+  element
+    .querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+    .forEach((box) => {
+      box.disabled = false;
+      box.contentEditable = "false";
+    });
+  return element;
+}
+function tableCells(source: string) {
+  const cells: { raw: string; start: number; end: number }[] = [];
+  let offset = 0;
+  for (const [index, line] of source.split("\n").entries()) {
+    if (index === 1) {
+      offset += line.length + 1;
+      continue;
+    }
+    for (const cell of tableRowCells(line))
+      cells.push({
+        raw: cell.raw,
+        start: offset + cell.start,
+        end: offset + cell.end,
+      });
+    offset += line.length + 1;
+  }
+  return cells;
+}
+// Markdown-it owns recognition; DOM text retains the original spelling and delimiters.
+export function tokenInlineHtml(
+  raw: string,
+  documentId: string,
+  environment: Record<string, unknown>,
+) {
+  type Frame = {
+    from: number;
+    before: string;
+    tag: string;
+    mark: string;
+    html: string;
+    href?: string;
+    style?: string;
+  };
+  const stack: Frame[] = [{ from: 0, before: "", tag: "", mark: "", html: "" }];
+  let cursor = 0;
+  const append = (html: string) => {
+    stack.at(-1)!.html += html;
+  };
+  const object = (source: string, view: string, mark: string, from: number) =>
+    `<span class="md-inline" data-mark="${mark}" data-inline-from="${from}" data-inline-to="${from + source.length}"><span class="md-object-source">${escapeHtml(source)}</span><span class="md-view" contenteditable="false">${view}</span></span>`;
+  const text = (value: string) => {
+    if (raw.startsWith(value, cursor)) { cursor += value.length; return escapeHtml(value); }
+    let decoded = "",
+      html = "",
+      attempts = 0;
+    while (
+      decoded.length < value.length &&
+      cursor < raw.length &&
+      attempts++ < raw.length + 1
+    ) {
+      const rest = raw.slice(cursor),
+        entity = /^&(?:#x[\da-f]+|#\d+|[a-z][\da-z]+);/i.exec(rest),
+        escaped = /^\\[\\`*_{}\[\]()#+.!~<>|-]/.exec(rest);
+      const unit =
+        entity?.[0] ||
+        escaped?.[0] ||
+        String.fromCodePoint(raw.codePointAt(cursor)!);
+      const visible = decodeMarkdownText(unit);
+      if (!value.startsWith(decoded + visible)) break;
+      html +=
+        entity && visible !== unit
+          ? object(unit, escapeHtml(visible), "entity", cursor)
+          : escaped
+            ? meta("\\") + escapeHtml(unit.slice(1))
+            : escapeHtml(unit);
+      cursor += unit.length;
+      decoded += visible;
+    }
+    if (decoded !== value) {
+      const missing = value.slice(decoded.length),
+        found = raw.indexOf(missing, cursor);
+      if (found >= 0) {
+        html += escapeHtml(raw.slice(cursor, found + missing.length));
+        cursor = found + missing.length;
+      } else html += escapeHtml(missing);
+    }
+    return html;
+  };
+  const suffix = (at: number) => {
+    if (raw[at] === ">") return ">";
+    if (raw[at] !== "]") return "";
+    let end = at + 1;
+    if (raw[end] === "(") {
+      let depth = 1;
+      end++;
+      while (end < raw.length && depth) {
+        if (raw[end] === "\\") {
+          end += 2;
+          continue;
+        }
+        if (raw[end] === "(") depth++;
+        if (raw[end] === ")") depth--;
+        end++;
+      }
+    } else if (raw[end] === "[") {
+      end = raw.indexOf("]", end + 1) + 1 || end;
+    }
+    return raw.slice(at, end);
+  };
+  for (const token of inlineTokens(raw, environment)) {
+    if (cursor === 0 && token.type === "text" && environment.alertType && token.content === `[!${environment.alertType}]`) { const title = String(environment.alertType).toLowerCase(); append(object(token.content, alertTitle(title), "alert", 0)); cursor += token.content.length; continue; }
+    if (token.type === "html_break") {
+      cursor += token.markup.length;
+      append(`<span class="md-meta md-cell-break">${escapeHtml(token.markup)}</span><br>${cursor === raw.length ? '<br class="md-ui" data-break-placeholder>' : ''}`);
+      continue;
+    }
+    if (token.type === "html_embed") { append(object(token.content, renderMarkdown(token.content, documentId, { ...environment, fragment: true }).replace(/^<p>|<\/p>\n?$/g, ""), "image", cursor)); cursor += token.content.length; continue; }
+    if (token.type === "comment") {
+      append(object(token.markup, `<span class="md-comment-view">${escapeHtml(token.content.trim()) || t("注释")}</span>`, "comment", cursor)); cursor += token.markup.length; continue;
+    }
+    if (["sup", "sub", "emoji", "footnote_ref"].includes(token.type)) {
+      const from = cursor;
+      const source = token.type === "emoji" ? `:${token.markup}:` : token.type === "footnote_ref" ? token.markup : raw.slice(cursor, raw.indexOf(token.type === "sup" ? "^" : "~", cursor + 1) + 1);
+      if (source && raw.startsWith(source, cursor)) {
+        const view = renderMarkdown(source, documentId, { ...environment, fragment: true }).replace(/^<p>|<\/p>\n?$/g, "");
+        append(object(source, view, token.type, from)); cursor += source.length; continue;
+      }
+    }
+    if (token.type === "text" || token.type === "text_special") {
+      append(text(token.content));
+      continue;
+    }
+    if (token.type === "softbreak" || token.type === "hardbreak") {
+      const end = raw.indexOf("\n", cursor);
+      const before = end < 0 ? "" : raw.slice(cursor, end);
+      append(meta(before) + '<span class="md-newline">\n</span><br />');
+      cursor = end < 0 ? cursor : end + 1;
+      continue;
+    }
+    if (token.type === "code_inline") {
+      const from = cursor,
+        marker = token.markup;
+      cursor += marker.length;
+      const end = raw.indexOf(marker, cursor);
+      if (end < 0) {
+        append(escapeHtml(raw.slice(from)));
+        cursor = raw.length;
+        continue;
+      }
+      const body = raw.slice(cursor, end);
+      append(
+        `<span class="md-inline" data-mark="code" data-inline-from="${from}" data-inline-to="${end + marker.length}">${meta(marker)}<code>${escapeHtml(body)}</code>${meta(marker)}</span>`,
+      );
+      cursor = end + marker.length;
+      continue;
+    }
+    if (token.type === "image") {
+      const from = cursor,
+        start = raw.indexOf("]", from + 2),
+        after = suffix(start);
+      const end =
+        start < 0 ? from + token.content.length : start + after.length;
+      const source = raw.slice(from, end);
+      append(
+        object(
+          source,
+          renderMarkdown(source, documentId, environment).replace(
+            /^<p>|<\/p>\n?$/g,
+            "",
+          ),
+          "image",
+          from,
+        ),
+      );
+      cursor = end;
+      continue;
+    }
+    if (token.type.startsWith("math_inline")) {
+      const from = cursor,
+        marker = raw.startsWith("$$", from) ? "$$" : "$",
+        end = raw.indexOf(marker, from + marker.length);
+      if (end >= 0) {
+        const source = raw.slice(from, end + marker.length);
+        append(
+          object(
+            source,
+            `<span class="mathjax-node" data-tex="${escapeHtml(token.content)}" data-display="${marker === "$$"}">${escapeHtml(token.content)}</span>`,
+            "math",
+            from,
+          ),
+        );
+        cursor = end + marker.length;
+      }
+      continue;
+    }
+    if (token.nesting === 1) {
+      const before =
+        token.type === "link_open"
+          ? raw[cursor] === "["
+            ? "["
+            : raw[cursor] === "<"
+              ? "<"
+              : ""
+          : token.markup;
+      const frame: Frame = {
+        from: cursor,
+        before,
+        tag: token.tag,
+        mark: token.tag,
+        html: "",
+        href:
+          token.type === "link_open"
+            ? String(token.attrGet("href") || "")
+            : undefined,
+        style: token.attrGet("style") ? String(token.attrGet("style")) : undefined,
+      };
+      stack.push(frame);
+      cursor += before.length;
+      continue;
+    }
+    if (token.nesting === -1 && stack.length > 1) {
+      const frame = stack.pop()!,
+        after =
+          token.type === "link_close"
+            ? frame.before
+              ? suffix(cursor)
+              : ""
+            : token.markup;
+      cursor += after.length;
+      const href =
+        frame.href !== undefined ? ` href="${escapeHtml(frame.href)}"` : "";
+      const style = frame.style ? ` style="${escapeHtml(frame.style)}"` : "";
+      append(
+        `<span class="md-inline" data-mark="${frame.mark === "a" ? "link" : frame.mark}" data-inline-from="${frame.from}" data-inline-to="${cursor}">${meta(frame.before)}<${frame.tag}${href}${style}>${frame.html}</${frame.tag}>${meta(after)}</span>`,
+      );
+      continue;
+    }
+    append(text(token.content));
+  }
+  if (cursor < raw.length) append(escapeHtml(raw.slice(cursor)));
+  while (stack.length > 1) {
+    const frame = stack.pop()!;
+    append(escapeHtml(frame.before) + frame.html);
+  }
+  return stack[0].html;
+}

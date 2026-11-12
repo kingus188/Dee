@@ -7,6 +7,7 @@ import { MediaItems } from "../chat/TeamsMedia.js";
 import { isTeamsTriageActionResult, teamsSourceUrl } from "./data.js";
 import { isTeamsConversationList, isTeamsConversationMessages, mergeTeamsMessages, sanitizeTeamsMessage } from "./conversation-data.js";
 import { useTeamsPages } from "./useTeamsPages.js";
+import { TeamsReplyComposer } from "./TeamsReplyComposer.js";
 
 const mergeChats = (previous: TeamsConversationList, next: TeamsConversationList) => ({ ...next, items: [...new Map([...previous.items, ...next.items].map(item => [item.id, item])).values()] });
 const mergePages = (previous: TeamsConversationMessages, next: TeamsConversationMessages) => ({ ...next, items: mergeTeamsMessages(previous.items, next.items) });
@@ -77,12 +78,12 @@ export function TeamsConversations({ active, chatId, onSelectChat, onAssistant, 
     </aside>
     <section ref={detail} className="teams-conversation-detail" hidden={!showDetail} aria-label={selected?.title || "Teams 聊天记录"}>
       <header className="teams-conversation-header">{compact && <button type="button" className="icon-button teams-mobile-toggle" aria-label="返回 Teams 会话列表" onClick={() => { focusTarget.current = "list"; setListOpen(true); }}><Icon name="chevron-left" /></button>}<div><h1 ref={detailHeading} tabIndex={-1} title={selected?.title}>{selected?.title || (chatId ? "Teams 会话" : "Teams")}</h1><span className="teams-conversation-provider"><span className="teams-provider-mark" aria-hidden="true">T</span>Teams</span></div>{teamsSourceUrl(selected?.sourceUrl) && <a className="teams-header-source" aria-label="在 Teams 查看原消息" title="在 Teams 查看原消息" href={teamsSourceUrl(selected?.sourceUrl)} target="_blank" rel="noopener noreferrer"><Icon name="external-link" /><span>原消息</span></a>}</header>
-      {chats.data?.available && chatId ? <TeamsMessageThread key={chatId} active={active} visible={showDetail} chatId={chatId} onDaylight={onDaylight} /> : <div className="teams-view-empty"><Icon name="messages-square" /><h2>{chats.error ? "暂时无法读取 Teams" : chats.data?.available ? "选择一个会话" : chats.loading ? "正在连接 Teams" : "连接后查看 Teams 消息"}</h2><p>{chats.error ? "请重新读取会话，旧消息已隐藏。" : "按发送人和时间查看原消息，不会自动回复或创建待办。"}</p></div>}
+      {chats.data?.available && chatId ? <TeamsMessageThread key={chatId} active={active} visible={showDetail} chatId={chatId} canSend={chats.data.canSend === true} onDaylight={onDaylight} /> : <div className="teams-view-empty"><Icon name="messages-square" /><h2>{chats.error ? "暂时无法读取 Teams" : chats.data?.available ? "选择一个会话" : chats.loading ? "正在连接 Teams" : "连接后查看 Teams 消息"}</h2><p>{chats.error ? "请重新读取会话，旧消息已隐藏。" : "按发送人和时间查看原消息，不会自动回复或创建待办。"}</p></div>}
     </section>
   </section>;
 }
 
-function TeamsMessageThread({ active, visible, chatId, onDaylight }: { active: boolean; visible: boolean; chatId: string; onDaylight: (id?: string) => void }) {
+function TeamsMessageThread({ active, visible, chatId, canSend, onDaylight }: { active: boolean; visible: boolean; chatId: string; canSend: boolean; onDaylight: (id?: string) => void }) {
   const validate = useCallback((value: unknown): value is TeamsConversationMessages => isTeamsConversationMessages(value) && value.chatId === chatId, [chatId]);
   const messages = useTeamsPages(`/api/teams/conversations/messages?chatId=${encodeURIComponent(chatId)}`, active, validate, mergePages);
   const [confirmation, setConfirmation] = useState<TeamsTriageItem | null>(null), [pending, setPending] = useState("");
@@ -126,7 +127,7 @@ function TeamsMessageThread({ active, visible, chatId, onDaylight }: { active: b
       </>}
     </div>
     {notice && <div className={`teams-action-notice${notice.error ? " is-error" : ""}`} role={notice.error ? "alert" : "status"}>{notice.text}{notice.taskId && <button className="text-button" type="button" onClick={() => onDaylight(notice.taskId)}>查看待办<Icon name="arrow-up-right" /></button>}</div>}
-    <p className="teams-readonly-note">仅查看消息，回复请前往 Teams。附件只显示已归档内容。</p>
+    <TeamsReplyComposer chatId={chatId} active={active && visible} available={canSend} readable={!!messages.data && !messages.error && !messages.loading} onSent={() => { firstScroll.current = true; messages.refresh(); }} />
   </>;
 }
 

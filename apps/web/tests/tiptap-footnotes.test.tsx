@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { act } from "react";
 import type { TiptapEditorHTMLElement } from "@tiptap/core";
-import { MarkdownEditor } from "../dist/editor/MarkdownEditor.js";
+import { TiptapMarkdownEditor as MarkdownEditor } from "../dist/editor/tiptap/TiptapMarkdownEditor.js";
 import { MarkdownDocument } from "../dist/editor/MarkdownDocument.js";
 import { mount } from "./dom.js";
 

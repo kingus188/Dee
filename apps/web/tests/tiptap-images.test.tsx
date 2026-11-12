@@ -4,7 +4,8 @@ import { setTimeout } from "node:timers/promises";
 import { JSDOM } from "jsdom";
 import { act, useState, type ReactNode } from "react";
 import type { Editor, JSONContent, TiptapEditorHTMLElement } from "@tiptap/core";
-import { MarkdownEditor, type MarkdownEditorProps } from "../dist/editor/MarkdownEditor.js";
+import { TiptapMarkdownEditor as MarkdownEditor } from "../dist/editor/tiptap/TiptapMarkdownEditor.js";
+import type { MarkdownEditorProps } from "../dist/editor/tiptap/types.js";
 import { parseDocument } from "../dist/editor/tiptap/parse-document.js";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZWQAAAAASUVORK5CYII=";

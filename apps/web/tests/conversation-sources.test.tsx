@@ -9,19 +9,19 @@ import { WorkspaceNavigation } from "../dist/ui/WorkspaceNavigation.js";
 import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
 
-async function harness(t: TestContext) {
+async function harness(t: TestContext, desktop = false) {
   t.mock.method(apiClient, "connect", async () => {});
   let receive!: (view: ConversationView) => void;
   t.mock.method(apiClient, "onView", (callback: (view: ConversationView) => void) => { receive = callback; return () => {}; });
   const subscriptions: number[] = [];
   t.mock.method(apiClient, "subscribeConversation", async (id: number) => {
     subscriptions.push(id);
-    receive({ conversationId: id, entries: [{ id: 1, kind: "user", text: `讨论 ${id}` }, { id: 2, kind: "assistant", text: "已收到。" }], live: {}, busy: false, inbox: 0, notes: { todos: [], memos: [] }, usage: null, tasks: [], reminders: [], subagents: [], parentId: null });
+    receive({ conversationId: id, ...(desktop ? { channel: "desktop", readOnly: true } : {}), entries: [{ id: 1, kind: "user", text: `讨论 ${id}` }, { id: 2, kind: "assistant", text: "已收到。" }], live: {}, busy: false, inbox: 0, notes: { todos: [], memos: [] }, usage: null, tasks: [], reminders: [], subagents: [], parentId: null });
   });
   const calls: string[] = [];
   t.mock.method(apiClient, "request", async (path: string) => {
     calls.push(path);
-    if (path === "/api/conversations") return [{ id: 12, title: "产品方案跟进", channel: "web", createdAt: "2026-10-21", archivedAt: null }, { id: 19, title: "季度计划", channel: "web", createdAt: "2026-10-22", archivedAt: null }];
+    if (path === "/api/conversations") return [{ id: 12, title: "产品方案跟进", channel: desktop ? "desktop" : "web", createdAt: "2026-10-21", archivedAt: null }, { id: 19, title: "季度计划", channel: "web", createdAt: "2026-10-22", archivedAt: null }];
     if (path.startsWith("/api/teams/conversations/messages?")) return { chatId: new URL(path, "http://localhost").searchParams.get("chatId"), items: [], nextCursor: null, fetchedAt: "2026-11-06T10:00:00Z" };
     if (path === "/api/teams/conversations") return { available: true, items: [], nextCursor: null, fetchedAt: "2026-11-06T10:00:00Z" };
     if (path === "/api/personal") return { memory: [], skills: [], knowledge: { enabled: false, allow: [] } };
@@ -38,6 +38,17 @@ async function harness(t: TestContext) {
     restore: async (hash: string) => { await act(async () => { mounted.dom.window.history.replaceState(null, "", hash); mounted.dom.window.dispatchEvent(new mounted.dom.window.PopStateEvent("popstate")); }); },
   };
 }
+
+test("服务器显示本机历史来源与正文，并隐藏发送入口", async t => {
+  const view = await harness(t, true);
+  view.dom.window.history.replaceState(null, "", "#chat/12");
+  await view.render(<App />);
+  assert.match(view.doc.querySelector("#message-history")!.textContent!, /讨论 12/);
+  assert.equal(view.doc.querySelector("#chat-textarea"), null);
+  assert.equal(view.doc.querySelector("#btn-send"), null);
+  assert.match(view.doc.querySelector(".input-container")!.textContent!, /本机对话历史/);
+  assert.equal(view.doc.querySelector(".history-channel")?.textContent, "本机");
+});
 
 test("来源切换器保持原生键盘选择语义，Teams 使用现有对话导航", async t => {
   const sources: string[] = [];

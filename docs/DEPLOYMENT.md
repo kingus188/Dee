@@ -34,7 +34,7 @@ curl -u demo:YOUR_PASSWORD http://127.0.0.1:3300/api/info
 
 示例 `YOUR_PASSWORD` 必须换成自己的密码；避免在共享机器的 Shell 历史里保留明文凭据。可直接使用 `curl -u demo` 交互输入密码。
 
-API 使用 HTTP Basic Auth，静态页面可加载但不含账户数据；数据请求未登录返回 401。**不要开放 3000、3300 或微信桥 18790 给公网访问**。
+API 默认使用 HTTP Basic Auth，首页与数据请求未登录返回 401。自用免登录可在 API 服务环境中显式设置 `AUTH_DISABLED=1`，保留 `NODE_ENV=production`；首页、HTTP API 与 WebSocket 随之允许匿名访问，旧密码仍可保留以便恢复。该模式不取消同源校验、业务审批或微信通道令牌。**不要开放 3000、3300 或微信桥 18790 给公网访问**。
 
 ### Nginx 反向代理示例
 
@@ -162,7 +162,7 @@ PostgreSQL 迁移验收（2026-10-21）：上述服务器实例已切换到独�
 
 当前固定公网入口：**<https://xiaod.vip.cpolar.cn>**（`xiaod` 对应“小 D”，方便记忆）。使用账号套餐内已预留的 cpolar 二级子域名，不需要自有域名或 DNS 配置；不再使用随机地址或原来的长名称。已实测重启助手穿透服务后仍分配同一地址。
 
-首次打开主页时，浏览器会要求登录：用户名为 `demo`，密码沿用现有服务器访问口令。本次没有更改口令，也没有关闭鉴权。需要新设备登录时使用原口令，不要把口令或会话 Cookie 发到聊天、URL 或仓库中。
+默认鉴权模式首次打开主页时，浏览器会要求登录：用户名为 `demo`，使用现有服务器访问口令。API 显式设置 `AUTH_DISABLED=1` 的自用模式不再要求登录；恢复默认鉴权后仍使用原口令。不要把口令或会话 Cookie 发到聊天、URL 或仓库中。
 
 官网当前“预留”记录为 `China VIP / xiaod`，描述为 `小 D 助手固定入口`。服务器私有 `pi-durable.yml` 在 `pi-durable-assistant` 隧道下设置 `region: cn_vip` 和 `subdomain: xiaod`；必须保留该预留记录和配置，不能仅给随机隧道改显示名称。原长名称 `pidurableassistant` 的账号预留记录保留，但不再绑定本助手隧道。修改私有配置后只重启本助手的 cpolar 单元，使 `LoadCredential` 重新载入。
 
@@ -209,7 +209,7 @@ sudo journalctl -u cpolar-pi-durable -g 'Tunnel established at' --no-pager -n 10
 
 最后一项含历史地址，仍需使用当前固定入口实际访问确认。
 
-当前固定入口的匿名检查应返回 `401`，而非公开业务数据；提供原口令后 `/api/info` 应返回 `200`。第二条命令会交互询问口令，不要把口令拼进命令或 URL，输出不包含 Cookie：
+默认鉴权模式下，固定入口匿名检查应返回 `401`，提供原口令后 `/api/info` 应返回 `200`；显式启用 `AUTH_DISABLED=1` 的自用模式下，两者匿名访问均应返回 `200`。第二条命令会交互询问口令，仅用于鉴权模式；不要把口令拼进命令或 URL，输出不包含 Cookie：
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' https://xiaod.vip.cpolar.cn/
@@ -238,3 +238,15 @@ docker compose -f compose.cpolar.yaml up -d --no-deps --force-recreate --wait ga
 额外的 WSS 检查在同一连接上间隔 33 秒发送两次只读 `/api/info` 请求，均返回 200，实际连接持续 34.675 秒；这验证了跨两个后端心跳周期后仍可交互，不依赖代理是否向浏览器暴露 ping 帧。公网 HTTP 地址返回 404 且无口令挑战，仅使用 HTTPS 登录。
 
 本轮切换为短域名 `xiaod` 后再次验证：HTTPS 证书正常，真实浏览器以原口令建立新域名会话，主页、API 及 WSS 只读请求均返回 200。两次启动穿透进程均得到上述固定地址；本轮没有重启业务 API、Web、数据库或微信桥。学习项目也按要求独立切换为固定入口 <https://aitutor.vip.cpolar.cn>，其登录和真实流式请求均验证通过。
+
+## 8. 自用免登录部署（2026-11-08）
+
+当前实例已按自用需求显式设置 API 环境 `AUTH_DISABLED=1`，保留 `NODE_ENV=production` 与原访问口令。固定公网入口不再要求登录；首页、HTTP API 和 WebSocket 均允许匿名访问，携带旧 Basic 凭据也不再被拒绝。同源校验、记忆/技能批准、开发任务审批、设备授权与微信独立令牌保持原状。
+
+API 在原 `pi-durable-verify-api:remote-06cb5aa-20261106-02` 镜像上只更新 `dist/config.js`、`dist/application/index.js`、`dist/lifecycle.js`，发布为 `pi-durable-verify-api:self-use-20261108-01`。没有用本地工作区整包覆盖服务器；保留服务器已有设备任务等功能与当前 Web 页面。免登录发布只重建 API 和共享其网络命名空间的微信桥。随后桌面验收发现原 Web 的 `notes.css`、`editor.css` 是 `root:0600`，`node` 用户无法读取，导致 502 并阻断前端启动；在原 Web 镜像上仅将这两个公开文件改为 `0644`，内容哈希保持不变，发布为 `pi-durable-verify-web:self-use-assets-20261108-01` 并只重建 Web。PostgreSQL、网关容器和持久挂载保留；网关仅校验配置并重载上游连接。
+
+发布记录位于部署根目录 `updates/self-use-20261108-01/`：`compose.update.yaml` 为免登录覆盖配置，`compose.rollback.yaml` 恢复原 API 镜像，`before.json` 记录原容器与镜像标识；`compose.assets.yaml` 为静态文件权限修复，`compose.assets.rollback.yaml` 恢复此前 Web 镜像，`assets-result.json` 记录修改前后模式和内容哈希。`backup/` 中保留发布前 PostgreSQL dump 及停写时的 SQLite、微信状态/媒体备份；均不提交仓库。后续 Compose 更新需保留当前 Web 容器标记的完整覆盖文件链，不能只运行早期基础 Compose 文件。
+
+已验证：`npm run check` 通过；独立本地 PostgreSQL 上 `npm test` 为 941 项通过、0 失败、0 跳过。公网匿名首页与 `/api/info` 返回 200，旧 Basic 凭据访问 `/api/info` 仍返回 200；不带 Cookie 或 Authorization 的 WSS 握手后只读 `/api/info` 请求返回 200；跨源写请求仍返回 403，已移除的 `/api/crash` 同源请求返回 404。API 容器内无微信令牌的入站请求仍返回 401，微信桥共用新 API 网络已验证。本轮没有发送模型问题、微信或 Teams 消息，也没有执行业务审批。
+
+实际 Dee 桌面重载后已挂载正常工作区：启动占位页消失，16 个样式资源均返回 200，未观察到失败响应或页面脚本异常。此检查覆盖真实 Electron 与局域网 HTTPS 入口，不以首页/API 返回 200 代替界面验收。

@@ -99,7 +99,7 @@ export function DailyReports({ active }: { active: boolean }) {
         {ready && <>
           {!markdown.trim() && !preview && <div className="reports-starter"><div><p>从今天最值得记下的事开始。</p><span>自由记录，或用三个小标题理清思路。</span></div><button type="button" disabled={pending} onClick={() => setMarkdown(REPORT_TEMPLATE)}>使用日报模板<Icon name="chevron-right" /></button></div>}
           {preview && <div className="reports-preview md" aria-label="日报预览">{markdown ? <MarkdownDocument value={markdown} /> : <p className="reports-empty-preview">还没有内容，切回编辑开始记录。</p>}</div>}
-          <div className="reports-writing" hidden={preview}><MarkdownEditor key={date} value={markdown} onChange={setMarkdown} disabled={pending} label="日报正文" variant="document" /></div>
+          <div className="reports-writing" hidden={preview}><MarkdownEditor key={date} documentId={`daily-report:${date}`} value={markdown} onChange={setMarkdown} disabled={pending} label="日报正文" variant="document" /></div>
           {markdown.length > 16000 && <p className="reports-error" role="alert">正文不能超过 16000 个字符，请缩短内容后保存。当前草稿仍完整保留。</p>}
           <footer className="reports-footer"><div><span className="reports-save-status" data-dirty={dirty || pending} role="status">{status}</span>{saved && !dirty && !pending && <time className="reports-saved-time" dateTime={saved.updatedAt}>{new Date(saved.updatedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}</time>}</div><span className="reports-character-count" data-limit={markdown.length > 16000}>{markdown.length.toLocaleString("zh-CN")} / 16,000 字符</span></footer>
           <p className="reports-shortcut">⌘ / Ctrl + S 保存<span aria-hidden="true">·</span>支持 Markdown</p>

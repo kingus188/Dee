@@ -28,6 +28,7 @@ async function desktop(options: { localOnly?: boolean; notificationsSupported?: 
     webContents = Object.assign(new EventEmitter(), {
       url: "", mainFrame: { url: "" }, session: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} },
       getURL: () => this.webContents.url,
+      getTitle: () => "",
       setWindowOpenHandler: () => {},
       copy: () => state.edits.push("copy"), cut: () => state.edits.push("cut"), paste: () => state.edits.push("paste"),
       selectAll: () => state.edits.push("selectAll"), undo: () => state.edits.push("undo"), redo: () => state.edits.push("redo"),
@@ -67,7 +68,7 @@ async function desktop(options: { localOnly?: boolean; notificationsSupported?: 
     setCertificateVerifyProc() {}, setPermissionRequestHandler() {}, setPermissionCheckHandler() {},
     webRequest: { onBeforeSendHeaders(handler: typeof headersHook) { headersHook = handler; } }, fetch: async () => new Response(),
   };
-  let openServer: (() => Promise<void>) | undefined;
+  let openServer: ((hash?: string) => Promise<void>) | undefined;
   let localWindow: (() => FakeWindow | undefined) | undefined;
   const electron = {
     protocol: { registerSchemesAsPrivileged() {}, handle() {} }, net: { fetch: async () => new Response() },
@@ -84,7 +85,7 @@ async function desktop(options: { localOnly?: boolean; notificationsSupported?: 
     exports: {}, URL, Buffer, console, setImmediate,
     process: { platform: "darwin", env: options.invalidEnvironment ? { ASSISTANT_WEB_URL: "invalid" } : options.environment ?? {} },
     require(specifier: string) {
-      if (specifier === "./agent-ipc.js") return { registerDesktopAgent: async (input: { openServer(): Promise<void>; getWindow(): FakeWindow | undefined }) => { openServer = input.openServer; localWindow = input.getWindow; return { close: async () => {} }; } };
+      if (specifier === "./agent-ipc.js") return { registerDesktopAgent: async (input: { openServer(hash?: string): Promise<void>; getWindow(): FakeWindow | undefined }) => { openServer = input.openServer; localWindow = input.getWindow; return { close: async () => {} }; } };
       if (specifier === "electron") return electron;
       if (specifier === "./skills/catalog.js") return { LocalSkillCatalog: class {} };
       if (specifier === "./skills-ipc.js") return { registerLocalSkills() {} };
@@ -109,6 +110,35 @@ async function desktop(options: { localOnly?: boolean; notificationsSupported?: 
     reportMailStatus: (status: unknown) => reportMailStatus?.(status),
   };
 }
+
+test("local navigation reuses the server window and leaves the local Agent alive", async () => {
+  const d = await desktop({ localOnly: true, lan: true });
+  const local = d.main();
+  await d.openServer!("#tasks");
+  const server = d.main();
+  assert.notEqual(local, server); assert.equal(local.destroyed, false);
+  assert.equal(server.webContents.getURL(), "https://192.168.31.5:3443/#tasks");
+  const count = d.windows.length;
+  server.minimize();
+  await d.openServer!("#notes");
+  assert.equal(d.main(), server); assert.equal(d.windows.length, count);
+  assert.equal(server.isMinimized(), false); assert.equal(server.isVisible(), true);
+  assert.equal(server.webContents.getURL(), "https://192.168.31.5:3443/#notes");
+  await d.openServer!();
+  assert.equal(server.webContents.getURL(), "https://192.168.31.5:3443/#notes");
+  assert.equal(local.destroyed, false);
+});
+
+test("server navigation reports offline state and retries when the network returns", async () => {
+  const d = await desktop({ localOnly: true, offline: true });
+  const local = d.main();
+  await assert.rejects(d.openServer!("#tasks"), /服务器未连接/);
+  assert.equal(local.destroyed, false);
+  d.state.offline = false;
+  await d.openServer!("#activity");
+  assert.equal(d.main().webContents.getURL(), "https://assistant.example/#activity");
+  assert.equal(local.destroyed, false);
+});
 
 test("LAN detection changes only the active route, preserves the configured server and scopes credentials", async () => {
   const d = await desktop({ lan: true });
@@ -219,7 +249,7 @@ test("startup network failure stays in a visible main window with retry, not a s
   assert.equal(d.main().isVisible(), true);
   const page = decodeURIComponent(d.main().urls.at(-1)!);
   assert.match(page, /重新连接/); assert.match(page, /https:\/\/assistant.example/);
-  d.state.offline = false; await d.main().loadURL("https://assistant.example");
+  d.state.offline = false; await d.main().loadURL("https://assistant.example"); await flush(); await flush();
   assert.equal(d.state.notifications, 1);
   assert.equal(d.settings().length, 0);
 });
@@ -358,9 +388,8 @@ for (const noSavedConnection of [false, true]) {
   test(`connection read failure never navigates to a backend or falls back to another app (${noSavedConnection})`, async () => {
     const d = await desktop({ connectionError: true, noSavedConnection });
     assert.equal(d.settings().length, 0);
-    assert.ok(d.main().urls.every(url => url.startsWith("data:")));
-    assert.match(decodeURIComponent(d.main().urls.at(-1)!), /连接读取失败/);
-    assert.doesNotMatch(decodeURIComponent(d.main().urls.at(-1)!), /href=/);
+    assert.ok(d.main().urls.every(url => url.startsWith("file:")));
+    assert.match(new URL(d.main().urls.at(-1)!).searchParams.get("message")!, /连接读取失败/);
     let prevented = false;
     d.main().webContents.emit("will-navigate", { preventDefault: () => { prevented = true; } }, noSavedConnection ? "http://127.0.0.1:3000" : "https://assistant.example");
     assert.equal(prevented, true);

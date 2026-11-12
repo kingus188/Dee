@@ -3,6 +3,7 @@ import { MarkdownDocument } from "../editor/MarkdownDocument.js";
 import { MarkdownEditor } from "../editor/MarkdownEditor.js";
 import { renderDocumentMarkdown, type MarkdownHeading } from "../chat/markdown.js";
 import { Icon } from "../ui/Icon.js";
+import { WorkspaceBrand } from "../ui/WorkspaceBrand.js";
 import { useNotesDocument } from "./notes/useNotesDocument.js";
 
 function titleOf(text: string, index: number) {
@@ -57,8 +58,8 @@ export function NotesPage({ owner, active, headerActions }: { owner: number; act
       const offset = doc.text.split("\n").slice(0, heading.line).reduce((sum, line) => sum + line.length + 1, 0);
       source.focus(); source.setSelectionRange(offset, offset);
       source.scrollTop = source.scrollHeight * heading.line / Math.max(1, doc.text.split("\n").length);
-    } else if (doc.editing && paper.current?.querySelector('[data-editor-engine="tiptap"]')) {
-      paper.current.querySelector('[data-editor-engine="tiptap"]')!.dispatchEvent(new CustomEvent("live-markdown-jump", { detail: { line: heading.line } }));
+    } else if (doc.editing && paper.current?.querySelector('[data-editor-engine]')) {
+      paper.current.querySelector('[data-editor-engine]')!.dispatchEvent(new CustomEvent("live-markdown-jump", { detail: { line: heading.line } }));
     } else {
       const target = doc.editing ? paper.current?.querySelectorAll<HTMLElement>(".tiptap h1, .tiptap h2, .tiptap h3, .tiptap h4, .tiptap h5, .tiptap h6")[index] : paper.current?.querySelector<HTMLElement>(`#${heading.id}`);
       target?.scrollIntoView?.({ block: "start" }); target?.focus({ preventScroll: true });
@@ -68,14 +69,14 @@ export function NotesPage({ owner, active, headerActions }: { owner: number; act
   return <div className="workspace-content-page notes-workspace" data-focus={focus} onKeyDown={event => {
     if (active && doc.editing && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); if (!event.nativeEvent.isComposing) void doc.save(); }
   }}>
-    <header className="workspace-header management-header notes-header">
+    <header className="workspace-header management-header notes-header"><div className="workspace-header-identity"><WorkspaceBrand />
       <div className="notes-header-location">
         <button ref={libraryToggle} className="header-button notes-library-toggle" type="button" aria-label={libraryOpen ? "收起笔记目录" : "显示笔记目录"} aria-expanded={libraryOpen} aria-controls={`notes-library-${owner}`} onClick={() => { setFocus(false); setLibraryOpen(!libraryOpen); }}><Icon name="notebook-pen" /><strong>笔记</strong><span className="notes-count">{doc.notes.memos.length}</span><Icon name="chevron-down" /></button>
         <span className="notes-header-divider" aria-hidden="true">/</span>
         <span className="notes-document-title" title={documentTitle}>{documentTitle}</span>
         {doc.dirty && <span className="notes-unsaved-dot" title="有未保存的修改" aria-label="有未保存的修改" />}
       </div>
-      <div className="notes-header-actions">
+      </div><div className="notes-header-actions">
         <div className="notes-document-actions">
           {!doc.editing && hasDocument && <button className="icon-button notes-focus-toggle" type="button" aria-label={focus ? "退出专注阅读" : "专注阅读"} aria-pressed={focus} onClick={() => { setLibraryOpen(false); setFocus(!focus); }}><Icon name="scan-line" /></button>}
           {doc.editing ? <><button className="text-button notes-cancel" type="button" aria-label="取消编辑" disabled={doc.pending} onClick={doc.cancel}>取消<span>编辑</span></button><button className="settings-save" type="button" disabled={!doc.canSave} onClick={() => void doc.save()}>保存笔记</button></> : hasDocument ? <><button className="icon-button notes-new" type="button" aria-label="新增笔记" title="新增笔记" disabled={doc.pending || !doc.base} onClick={create}><Icon name="plus" /></button><button className="header-button notes-edit" type="button" disabled={doc.pending} onClick={doc.edit}><Icon name="pencil" />编辑笔记</button></> : <button className="header-button notes-edit" type="button" disabled={doc.pending || !doc.base} onClick={create}><Icon name="plus" />新增笔记</button>}
@@ -112,7 +113,7 @@ export function NotesPage({ owner, active, headerActions }: { owner: number; act
       <div className="notes-paper-scroll" ref={paper}>
         {!doc.base && !doc.error && <p className="notes-document-placeholder" role="status">正在读取…</p>}
         {hasDocument && <div className="notes-document-meta"><span><Icon name="notebook-pen" />会话 #{owner}</span><span>{doc.editing ? "正在编辑" : "个人笔记"}</span><span>Markdown</span></div>}
-        {doc.editing ? <section className="notes-paper notes-writing" aria-label="笔记编辑" aria-busy={doc.pending}><MarkdownEditor key={doc.index ?? "new"} value={doc.text} onChange={doc.setText} label="笔记正文" disabled={doc.pending} variant="document" /></section> : doc.index !== null ? <section className="notes-paper workspace-reading" aria-label="笔记详情"><MarkdownDocument className="md notes-prose" value={doc.original} /><button className="text-button notes-back" type="button" onClick={() => select(null)}>返回笔记列表</button></section> : doc.base && <section className="notes-blank workspace-content-empty"><span className="notes-blank-eyebrow">你的想法，值得记下来</span><Icon name="notebook-pen" /><h2>{doc.notes.memos.length ? "接着上次的想法" : "从一个想法开始"}</h2><p>{doc.notes.memos.length ? "打开笔记库，继续整理已有记录。也可以另起一篇，写下此刻的想法。" : "灵感、决定，或一段还没想清楚的话。\n在这里慢慢整理，让思路有处安放。"}</p><div className="notes-blank-actions"><button className="settings-save" type="button" disabled={doc.pending} onClick={create}><Icon name="plus" />新增笔记</button>{doc.notes.memos.length > 0 && <button className="text-button" type="button" onClick={() => setLibraryOpen(true)}>打开笔记库<Icon name="arrow-up-right" /></button>}</div><small>笔记保存在当前会话，随时回来接着写。</small></section>}
+        {doc.editing ? <section className="notes-paper notes-writing" aria-label="笔记编辑" aria-busy={doc.pending}><MarkdownEditor key={doc.index ?? "new"} documentId={`notes:${owner}:${doc.index ?? "new"}`} value={doc.text} onChange={doc.setText} label="笔记正文" disabled={doc.pending} variant="document" /></section> : doc.index !== null ? <section className="notes-paper workspace-reading" aria-label="笔记详情"><MarkdownDocument className="md notes-prose" value={doc.original} /><button className="text-button notes-back" type="button" onClick={() => select(null)}>返回笔记列表</button></section> : doc.base && <section className="notes-blank workspace-content-empty"><span className="notes-blank-eyebrow">你的想法，值得记下来</span><Icon name="notebook-pen" /><h2>{doc.notes.memos.length ? "接着上次的想法" : "从一个想法开始"}</h2><p>{doc.notes.memos.length ? "打开笔记库，继续整理已有记录。也可以另起一篇，写下此刻的想法。" : "灵感、决定，或一段还没想清楚的话。\n在这里慢慢整理，让思路有处安放。"}</p><div className="notes-blank-actions"><button className="settings-save" type="button" disabled={doc.pending} onClick={create}><Icon name="plus" />新增笔记</button>{doc.notes.memos.length > 0 && <button className="text-button" type="button" onClick={() => setLibraryOpen(true)}>打开笔记库<Icon name="arrow-up-right" /></button>}</div><small>笔记保存在当前会话，随时回来接着写。</small></section>}
       </div>
       <footer className="notes-status"><span role="status" data-dirty={doc.dirty}>{status}</span><span className="notes-save-shortcut">{doc.editing ? "⌘ / Ctrl + S 保存" : "随时记录，慢慢整理"}</span><span>{doc.editing ? `${doc.text.length.toLocaleString()} / 16000` : `${value.length.toLocaleString()} 字符`}{hasDocument && ` · 约 ${Math.max(1, Math.ceil(value.length / 450))} 分钟阅读`}</span></footer>
     </section>

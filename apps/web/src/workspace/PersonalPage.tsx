@@ -90,7 +90,7 @@ export function PersonalPage({ kind, active }: { kind: "memory" | "skills"; acti
     <button type="button" className="text-button workspace-back" disabled={pending} onClick={() => select(selected, selected ? "view" : "browse")}><Icon name="arrow-left" />取消编辑</button>
     <header className="workspace-edit-heading"><h2 ref={heading} tabIndex={-1}>{selected ? `编辑${title}` : `新增${title}`}</h2><span className="workspace-muted">{selected ? statuses[selected.status] : "本人创建，保存后生效"}</span></header>
     {!memory && <div className="workspace-skill-fields"><label>技能名称<input value={name} maxLength={40} placeholder="例如：每周项目复盘" disabled={pending} onChange={event => setName(event.target.value)} /></label><label>使用场景<input value={description} maxLength={180} placeholder="什么时候使用这项技能" disabled={pending} onChange={event => setDescription(event.target.value)} /></label></div>}
-    <MarkdownEditor key={selected?.id ?? "new"} label={memory ? "记忆正文" : "技能正文"} value={text} onChange={setText} disabled={pending} />
+    <MarkdownEditor key={selected?.id ?? "new"} documentId={`personal:${kind}:${selected?.id ?? "new"}`} label={memory ? "记忆正文" : "技能正文"} value={text} onChange={setText} disabled={pending} />
     <footer className="workspace-edit-actions"><span role="status">{pending ? "正在保存…" : dirty ? "有未保存的修改" : "保存后返回详情"}</span><span>{text.length} / {memory ? 280 : 4000}</span><button type="button" className="settings-save" disabled={pending || !text.trim() || !dirty || text.length > (memory ? 280 : 4000) || (!memory && (!name.trim() || !description.trim()))} onClick={() => void save()}>{pending ? "保存中…" : `保存${title}`}</button></footer>
     {notice}
   </section>;

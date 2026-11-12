@@ -13,7 +13,7 @@ export function safeTeamsAttachment(value?: string) {
   try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password ? url.href : undefined; } catch { return; }
 }
 export function isTeamsConversationList(value: unknown): value is TeamsConversationList {
-  return record(value) && page(value) && typeof value.available === "boolean" && Array.isArray(value.items) && value.items.every(item => record(item) && string(item.id) && !!item.id && string(item.title) &&
+  return record(value) && page(value) && typeof value.available === "boolean" && (value.canSend === undefined || typeof value.canSend === "boolean") && Array.isArray(value.items) && value.items.every(item => record(item) && string(item.id) && !!item.id && string(item.title) &&
     ["oneOnOne", "group", "meeting", "unknown"].includes(String(item.kind)) && (item.updatedAt === undefined || timestamp(item.updatedAt)) && optional(item.preview) && optional(item.sourceUrl));
 }
 function isMessage(value: unknown): value is TeamsConversationMessage {

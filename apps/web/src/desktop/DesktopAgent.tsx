@@ -73,6 +73,7 @@ export function DesktopAgent() {
 
   if (!bridge) return <p role="alert">本机 Agent 连接不可用。</p>;
   const busy = !!snapshot?.busy || sending;
+  const connectionWarning = error || pollError || snapshot?.error || (snapshot && !snapshot.serverConnected ? "服务器未连接" : "");
   const jobs = snapshot?.jobs ?? [];
   const showSettings = modelOpen && agentKind !== "pi";
   const showPanel = showSettings || jobs.length > 0;
@@ -92,13 +93,12 @@ export function DesktopAgent() {
         <header className="conversation-header desktop-agent-header">
           <div className="conversation-heading"><span className="workspace-brand" aria-hidden="true">D</span><h1 className="conversation-title">小 D</h1></div>
           <div className="conversation-header-actions desktop-agent-controls">
-            <span className="desktop-agent-server" role="status"><span className="status-dot" data-connected={snapshot?.serverConnected === true} />{snapshot?.serverConnected ? snapshot.collaboration === "ready" ? "双端已连接" : "服务器已连接" : "服务器未连接"}</span>
+            {connectionWarning ? <span className="desktop-agent-warning" role="alert" aria-label={connectionWarning} title={connectionWarning} tabIndex={0}><Icon name="circle-alert" /></span> : <span className="desktop-agent-server" role="status"><span className="status-dot" data-connected={snapshot?.serverConnected === true} />{snapshot?.serverConnected ? snapshot.collaboration === "ready" ? "双端已连接" : "服务器已连接" : "正在连接"}</span>}
             {agentKind !== "pi" && <button className="header-button" type="button" aria-expanded={showSettings} aria-controls="desktop-agent-model" onClick={() => setModelOpen(value => !value)}>Agent 设置</button>}
             <button className="header-button" type="button" disabled={pending.includes("server")} onClick={() => void action("server", () => bridge.openServer())}>服务器<Icon name="arrow-up-right" /></button>
             <button className="icon-button" type="button" aria-label="连接设置" title="连接设置" disabled={pending.includes("connection")} onClick={() => void action("connection", () => bridge.openConnection())}><Icon name="settings" /></button>
           </div>
         </header>
-        {(error || pollError || snapshot?.error) && <div className="desktop-agent-error" role="alert">{error || pollError || snapshot?.error}</div>}
         <section className="messages-container" ref={scroll} tabIndex={-1} aria-label="与本机小 D 的对话" onScroll={() => { const element = scroll.current!; follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
           {!snapshot && <p role="status">正在读取本机状态…</p>}
           <div id="message-history" aria-live="polite" aria-relevant="additions text">

@@ -7,11 +7,10 @@ import { ReportCalendar, shiftReportDate } from "../dist/daily-reports/ReportCal
 import { App } from "../dist/ui/App.js";
 import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
+import { replaceSource, sourceEditor } from "./lane-source.js";
 
 async function input(dom: Awaited<ReturnType<typeof mount>>["dom"], selector: string, value: string) {
-  if (selector === ".markdown-editor textarea" && !dom.window.document.querySelector(selector)) {
-    await act(async () => { [...dom.window.document.querySelectorAll<HTMLButtonElement>(".markdown-editor-toolbar button")].find(button => button.textContent === "Markdown 源码")!.click(); });
-  }
+  if (selector === ".lane-source") return replaceSource(dom.window.document, value);
   const element = dom.window.document.querySelector(selector)!;
   const prototype = element.tagName === "TEXTAREA" ? dom.window.HTMLTextAreaElement.prototype : dom.window.HTMLInputElement.prototype;
   await act(async () => {
@@ -33,7 +32,7 @@ test("编辑、预览转义、保存去重、切换日期保护和隐藏后草�
   const document = dom.window.document;
   const date = document.querySelector<HTMLInputElement>("#report-date")!.value;
   const markdown = '# 今日完成\n- 进展\n<script>evil()</script>\n[bad](javascript:alert(1))';
-  await input(dom, ".markdown-editor textarea", markdown);
+  await input(dom, ".lane-source", markdown);
   assert.match(document.querySelector(".reports-footer")!.textContent!, /未保存/);
   const leave = new dom.window.Event("beforeunload", { cancelable: true });
   dom.window.dispatchEvent(leave); assert.ok(leave.defaultPrevented);
@@ -45,16 +44,16 @@ test("编辑、预览转义、保存去重、切换日期保护和隐藏后草�
   t.mock.method(dom.window, "confirm", () => false);
   await input(dom, "#report-date", "2024-02-29");
   assert.equal(document.querySelector<HTMLInputElement>("#report-date")!.value, date);
-  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, markdown);
+  assert.equal(sourceEditor(document).state.doc.toString(), markdown);
   await mounted.render(<DailyReports active={false} />);
   await mounted.render(<DailyReports active />);
-  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, markdown);
+  assert.equal(sourceEditor(document).state.doc.toString(), markdown);
   await act(async () => {
     document.querySelector<HTMLButtonElement>(".settings-save")!.click();
     document.querySelector<HTMLButtonElement>(".settings-save")!.click();
   });
   assert.deepEqual(writes, [{ markdown, revision: null }]);
-  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.disabled, true);
+  assert.equal(sourceEditor(document).contentDOM.getAttribute("contenteditable"), "false");
   await act(async () => { resolve({ date, markdown, revision: 1, updatedAt: new Date().toISOString() }); });
   assert.match(document.querySelector(".reports-footer")!.textContent!, /已保存/);
   assert.equal(document.querySelector(".reports-history nav button")!.textContent, date);
@@ -76,10 +75,10 @@ test("加载失败不能覆盖日报，重试后保存冲突保留正文", async
   assert.equal(document.querySelector<HTMLButtonElement>(".settings-save")!.disabled, true);
   failedLoad = false;
   await act(async () => { document.querySelector<HTMLButtonElement>(".reports-error button")!.click(); });
-  await input(dom, ".markdown-editor textarea", "不能丢的内容");
+  await input(dom, ".lane-source", "不能丢的内容");
   await act(async () => { document.querySelector<HTMLButtonElement>(".settings-save")!.click(); });
   assert.match(document.querySelector('[role="alert"]')!.textContent!, /其他页面更新/);
-  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, "不能丢的内容");
+  assert.equal(sourceEditor(document).state.doc.toString(), "不能丢的内容");
   assert.equal(document.querySelector<HTMLButtonElement>(".settings-save")!.disabled, false);
 });
 
@@ -107,12 +106,12 @@ test("导航可打开日报，离开返回保留日报与聊天草稿", async t 
   await input(dom, "#chat-textarea", "聊天草稿");
   await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="每日日报"]')!.click(); });
   assert.equal(document.getElementById("workspace")!.dataset.view, "reports");
-  await input(dom, ".markdown-editor textarea", "日报草稿");
+  await input(dom, ".lane-source", "日报草稿");
   await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="继续对话"]')!.click(); });
   assert.equal(document.querySelector<HTMLTextAreaElement>("#chat-textarea")!.value, "聊天草稿");
   assert.equal(document.querySelector<HTMLElement>(".daily-reports")!.hidden, true);
   await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="每日日报"]')!.click(); });
-  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, "日报草稿");
+  assert.equal(sourceEditor(document).state.doc.toString(), "日报草稿");
 });
 
 test("月历跨越闰日的键盘浏览不直接切换日报，选择后才通知页面", async t => {
@@ -148,7 +147,7 @@ test("空白日报模板保留未保存提示，取消切日后可用快捷键�
   const document = dom.window.document;
   const date = document.querySelector<HTMLInputElement>("#report-date")!.value;
   await act(async () => { document.querySelector<HTMLButtonElement>(".reports-starter button")!.click(); });
-  assert.match(document.querySelector('[aria-label="日报正文"]')!.textContent!, /今日进展.*问题与思考.*明日计划/);
+  assert.match(document.querySelector('[aria-label="日报正文"]')!.textContent!, /今日进展[\s\S]*问题与思考[\s\S]*明日计划/);
   assert.equal(document.querySelector(".reports-starter"), null);
   assert.match(document.querySelector(".reports-footer")!.textContent!, /未保存/);
   t.mock.method(dom.window, "confirm", () => false);
@@ -175,11 +174,11 @@ test("重新进入日报页读取聊天保存的内容和历史，但保留本�
   assert.match(document.querySelector('[aria-label="日报正文"]')!.textContent!, /聊天已保存的日报/);
   assert.match(document.querySelector(".reports-footer")!.textContent!, /已保存/);
   assert.equal(document.querySelector(".reports-history nav button")!.textContent, date);
-  await input(dom, ".markdown-editor textarea", "保留尚未保存的草稿");
+  await input(dom, ".lane-source", "保留尚未保存的草稿");
   await mounted.render(<DailyReports active={false} />);
   external = { ...external, markdown: "别处更新的日报", revision: 2 };
   await mounted.render(<DailyReports active />);
-  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, "保留尚未保存的草稿");
+  assert.equal(sourceEditor(document).state.doc.toString(), "保留尚未保存的草稿");
   assert.match(document.querySelector(".reports-footer")!.textContent!, /未保存/);
 });
 
@@ -190,7 +189,7 @@ test("跨午夜、窗口恢复和重新进入时校准今天，保留选中日�
   const { dom } = mounted, document = dom.window.document;
   const backToToday = () => document.querySelector<HTMLButtonElement>(".reports-today-button")!;
   const markedToday = () => document.querySelector<HTMLElement>('[data-today="true"]')!.dataset.date;
-  await input(dom, ".markdown-editor textarea", "跨日保留的草稿");
+  await input(dom, ".lane-source", "跨日保留的草稿");
   assert.equal(backToToday().disabled, true);
   await act(async () => { t.mock.timers.tick(120_000); });
   assert.equal(document.querySelector<HTMLInputElement>("#report-date")!.value, "2026-10-25");
@@ -207,5 +206,5 @@ test("跨午夜、窗口恢复和重新进入时校准今天，保留选中日�
   await mounted.render(<DailyReports active />);
   assert.equal(markedToday(), "2026-10-28");
   assert.equal(document.querySelector<HTMLInputElement>("#report-date")!.value, "2026-10-25");
-  assert.equal(document.querySelector<HTMLTextAreaElement>(".markdown-editor textarea")!.value, "跨日保留的草稿");
+  assert.equal(sourceEditor(document).state.doc.toString(), "跨日保留的草稿");
 });

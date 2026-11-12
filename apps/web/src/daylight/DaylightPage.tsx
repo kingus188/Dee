@@ -1,6 +1,7 @@
 import { ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN.js'
 import { WorkspaceContainer } from './WorkspaceContainer.js'
+import { WorkspaceBrand } from '../ui/WorkspaceBrand.js'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   AppstoreOutlined,
@@ -154,13 +155,13 @@ function DaylightContent({ active, headerActions, taskId }: DaylightPageProps) {
       {noticeContext}
       <div className="app-shell">
         <main className="main-area" id="daylight-main">
-          <header className="topbar">
+          <header className="topbar"><div className="topbar-identity"><WorkspaceBrand />
             <div className="breadcrumbs">
               <span>工作空间</span>
               <span>/</span>
               <strong>待办</strong>
             </div>
-            <div className="topbar-right">
+            </div><div className="topbar-right">
               {headerActions}
             </div>
           </header>

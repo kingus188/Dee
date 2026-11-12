@@ -8,14 +8,14 @@ import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
 
 const at = "2026-11-06T09:00:00Z", noop = () => {};
-const chats = (): TeamsConversationList => ({ available: true, items: [{ id: "chat", title: "产品协作", kind: "group", sourceUrl: "https://teams.microsoft.com/l/chat/chat" }, { id: "other", title: "另一会话", kind: "oneOnOne" }], fetchedAt: at, nextCursor: null });
+const chats = (): TeamsConversationList => ({ available: true, canSend: true, items: [{ id: "chat", title: "产品协作", kind: "group", sourceUrl: "https://teams.microsoft.com/l/chat/chat" }, { id: "other", title: "另一会话", kind: "oneOnOne" }], fetchedAt: at, nextCursor: null });
 const message = (id: string, patch: Partial<TeamsConversationMessage> = {}): TeamsConversationMessage => ({ id, chatId: "chat", senderName: "陈雨", direction: "in", createdAt: at, text: "请确认交付时间。", deleted: false, unavailable: false, media: [], ...patch });
 const suggestion = (): TeamsTriageItem => ({ id: "chat:in", chatId: "chat", chatLabel: "产品协作", senderName: "陈雨", createdAt: at, text: "请确认交付时间。", revision: 4, attention: "later", reason: "消息包含面向你的行动请求。", uncertainty: "尚未核对完整上下文。", suggestTodo: true, suggestedTitle: "确认交付时间" });
 const page = (items: TeamsConversationMessage[], nextCursor: string | null = null, chatId = "chat"): TeamsConversationMessages => ({ chatId, items, nextCursor, fetchedAt: at });
 const props = { active: true, chatId: "chat", onSelectChat: noop, onAssistant: noop, onDaylight: noop, onSettings: noop };
 function button(doc: Document, text: string) { const found = [...doc.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.trim() === text); assert.ok(found, text); return found; }
 
-test("Teams browser renders real speakers, date groups, sources and read-only controls without synthetic unread", async t => {
+test("Teams browser renders real speakers, date groups, sources and a reply composer without automatic writes", async t => {
   const requests: { path: string; body: unknown }[] = [];
   t.mock.method(apiClient, "request", async (path: string, body?: unknown) => { requests.push({ path, body }); return path === "/api/teams/conversations" ? chats() : page([message("in"), message("out", { direction: "out", senderName: "本人", createdAt: "2026-11-06T10:00:00Z" })]); });
   const view = await mount(t, <TeamsConversations {...props} />), doc = view.dom.window.document;
@@ -25,7 +25,7 @@ test("Teams browser renders real speakers, date groups, sources and read-only co
   assert.match(doc.querySelector('[data-direction="in"]')!.textContent!, /陈雨/);
   assert.match(doc.querySelector('[data-direction="out"]')!.textContent!, /我/);
   assert.equal(doc.querySelector(".teams-header-source")!.getAttribute("href"), chats().items[0].sourceUrl);
-  assert.equal(doc.querySelector("textarea"), null);
+  assert.ok(doc.querySelector("textarea[aria-label='Teams 回复内容']"));
   assert.doesNotMatch(doc.body.textContent!, /未读|发送消息/);
   assert.ok(requests.every(item => item.body === undefined));
 });
@@ -225,7 +225,7 @@ test("Compact threads keep long originals and archived attachments readable with
   assert.equal(doc.querySelector(".msg-image-link")!.getAttribute("href"), `/api/teams/media/${imageId}`);
   assert.equal(doc.querySelector(".msg-image-thumb")!.getAttribute("alt"), "已归档截图.png");
   assert.match(doc.querySelector(".msg-file-card")!.textContent!, /正在保存/);
-  assert.match(doc.querySelector(".teams-readonly-note")!.textContent!, /仅查看消息，回复请前往 Teams/);
+  assert.ok(doc.querySelector("textarea[aria-label='Teams 回复内容']"));
   assert.ok(calls.every(call => call.body === undefined));
 });
 

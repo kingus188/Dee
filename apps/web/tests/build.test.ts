@@ -38,7 +38,7 @@ test("打包后跨页面字号受同一偏好控制，组件尺寸不缩放外�
   assert.doesNotMatch(css, /zoom\s*:/);
   assert.doesNotMatch(css, /100dvh \/ var\(--ui-scale/);
   const prototype = await readFile(new URL("prototype.css", root), "utf8");
-  assert.match(prototype, /\[data-desktop="darwin"\] \.conversation-history \{ padding-top: var\(--header-height\); \}/);
+  assert.match(prototype, /\.conversation-history \{ padding-top: var\(--header-height\); \}/);
   assert.match(prototype, /padding: calc\(18px \* var\(--ui-component-scale, 1\)\)/);
   assert.doesNotMatch(prototype, /var\(--ui-scale/);
 });

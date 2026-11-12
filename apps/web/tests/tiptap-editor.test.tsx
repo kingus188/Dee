@@ -5,7 +5,8 @@ import { JSDOM } from "jsdom";
 import { act, useState, type ReactNode } from "react";
 import type { Editor, TiptapEditorHTMLElement } from "@tiptap/core";
 import type {} from "@tiptap/starter-kit";
-import { MarkdownEditor, type MarkdownEditorProps } from "../dist/editor/MarkdownEditor.js";
+import { TiptapMarkdownEditor as MarkdownEditor } from "../dist/editor/tiptap/TiptapMarkdownEditor.js";
+import type { MarkdownEditorProps } from "../dist/editor/tiptap/types.js";
 
 // JSDOM supplies real DOM selection/mutation APIs but has no layout engine.
 // Only geometry is filled in; Tiptap, input rules, history and onChange are real.

@@ -106,6 +106,7 @@
 .notes-document-placeholder { padding: 48px; font-size: 13px; color: var(--text-muted); }
 .notes-writing .markdown-editor { border: 0; background: transparent; border-radius: 0; }
 .notes-writing .markdown-editor textarea { width: 100%; min-height: 50dvh; border: 0; border-radius: 0; background: transparent; color: var(--text-main); resize: vertical; font: 13px/1.95 var(--font-mono, monospace); overflow-wrap: anywhere; }
+.notes-writing .lane-editor .lane-source { min-height: 50dvh; border-radius: 0; background: transparent; }
 .notes-writing .tiptap-document-editor .tiptap-document-toolbar { gap: 3px; padding: 6px 0; border-radius: 0; background: var(--notes-paper); }
 .notes-writing .tiptap-document-editor[data-variant="document"] .tiptap-document-content { min-height: 55dvh; padding-top: 28px; }
 .notes-workspace[data-focus="true"] .notes-document-meta { visibility: hidden; }
