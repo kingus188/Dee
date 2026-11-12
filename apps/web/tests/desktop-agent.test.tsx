@@ -61,6 +61,38 @@ test("断线仅在 header 显示警告图标，详情可访问且本机输入仍
   assert.match(document.querySelector(".desktop-agent-server")!.textContent!, /双端已连接/);
 });
 
+test("本机 header 为 Pi 和外部 Agent 提供新对话，失败保留草稿且重复点击只提交一次", async t => {
+  for (const agent of ["pi", "codex"] as const) await t.test(agent, async t => {
+    const state = snapshot(); state.agent = agent;
+    state.messages = [{ id: "old", role: "user", text: "旧对话" }];
+    const native = bridge(state);
+    const { dom, render } = await mount(t, null);
+    Object.defineProperty(dom.window, "desktopAgent", { value: native });
+    await render(<DesktopAgent />);
+    const document = dom.window.document, input = document.querySelector<HTMLTextAreaElement>("textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!.call(input, "未发送草稿");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    const button = document.querySelector<HTMLButtonElement>('.desktop-agent-header [aria-label="新对话"]');
+    assert.ok(button); assert.ok(button.querySelector("svg use")); assert.equal(button.textContent, "");
+    const fresh = t.mock.method(native, "newSession", async () => { throw new Error("新建失败"); });
+    await act(async () => button.click());
+    assert.equal(input.value, "未发送草稿");
+    assert.match(document.querySelector("#message-history")!.textContent!, /旧对话/);
+    assert.match(document.querySelector('[role="alert"]')!.getAttribute("aria-label")!, /新建失败/);
+    fresh.mock.mockImplementation(async () => { state.messages = []; });
+    await act(async () => { button.click(); button.click(); });
+    assert.equal(fresh.mock.callCount(), 2);
+    assert.equal(document.querySelector("#message-history")!.textContent, "");
+    assert.equal(input.value, ""); assert.equal(document.activeElement, input);
+    state.busy = true;
+    await render(null); await render(<DesktopAgent />);
+    assert.equal(document.querySelector<HTMLButtonElement>('.desktop-agent-header [aria-label="新对话"]')!.disabled, true);
+    await render(null);
+  });
+});
+
 test("本机助手使用原生平台避让标题栏，不显示目录选择", async t => {
   const native = { ...bridge(snapshot()), platform: "darwin" };
   const { dom, render } = await mount(t, <DesktopAgent />);
@@ -179,7 +211,7 @@ test("本机侧栏与服务模式共用来源、搜索和分组布局，来源�
   assert.match(panel.querySelector(".history-search kbd")!.textContent!, /^(⌘K|Ctrl K)$/);
   assert.equal(panel.querySelector(".history-heading")!.textContent, "当前对话");
   assert.equal(panel.querySelector(".history-row-title")!.textContent, "本机待处理事项");
-  assert.equal(panel.querySelector(".conversation-new-button"), null, "Pi 不提供不支持的新会话操作");
+  assert.ok(panel.querySelector(".conversation-new-button"), "Pi 和外部 Agent 共用新对话入口");
   const source = panel.querySelector<HTMLSelectElement>('[aria-label="切换对话来源"]')!;
   assert.equal(source.value, "assistant");
   await act(async () => {

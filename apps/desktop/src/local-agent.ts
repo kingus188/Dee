@@ -19,6 +19,7 @@ import { loadPiModels, type PiModels } from "./pi-models.js";
 import { PeerConnectionError } from "./peer-connection.js";
 import { peerSessionsForServer, piConversation, syncConversations } from "./conversation-sync.js";
 import type { PeerChange } from "./peer-socket.js";
+const ActiveConversation = defineDoc<{ id: Runtime["root"]["id"] | null }>({ kind: "app.desktop-active-conversation", version: 1, scope: "session", initial: () => ({ id: null }) });
 const Approvals = defineDoc<{ ids: string[] }>({ kind: "app.desktop-peer-approvals", version: 1, scope: "session", initial: () => ({ ids: [] }) });
 const PeerServers = defineDoc<{ origins: Record<string, string> }>({ kind: "app.desktop-peer-servers", version: 1, scope: "session", initial: () => ({ origins: {} }) });
 
@@ -36,6 +37,7 @@ export async function openDesktopAgent(options: {
   driverFactory?: DriverFactory;
 }) {
   let runtime: Runtime | undefined;
+  let conversation: Runtime["root"];
   let catalog: PiModels;
   let collaboration: NonNullable<DesktopAgentSnapshot["collaboration"]> = "connecting";
   let busy = false, error: string | undefined, connectionError: string | undefined, serverConnected = false, closed = false;
@@ -139,6 +141,8 @@ export async function openDesktopAgent(options: {
           const jobs = await peers.list();
           await value.root.commit(async tx => {
             await configure(tx, value.root.id, { model: catalog.agentModel });
+            const active = (await tx.doc(ActiveConversation)).id;
+            if (active) await configure(tx, active, { model: catalog.agentModel });
             for (const job of jobs) if (job.conversationId && !["done", "failed"].includes(job.status)) {
               await configure(tx, job.conversationId as Runtime["root"]["id"], { model: catalog.agentModel });
             }
@@ -146,6 +150,10 @@ export async function openDesktopAgent(options: {
         }
       }, onReport: report,
     }, ctx);
+    const active = (await runtime.harness.snapshot(ActiveConversation, ctx))?.id;
+    const restored = active ? await runtime.harness.conversation(active, ctx) : runtime.root;
+    if (!restored) throw new Error("本机当前对话不存在");
+    conversation = restored;
     if (catalog.configured) {
       runtime.harness.resume();
     }
@@ -235,7 +243,7 @@ export async function openDesktopAgent(options: {
   const timer = setInterval(() => sync(!options.request.onChange || ++ticks % 6 === 0), 5000); timer.unref(); sync();
   return {
     async snapshot(): Promise<DesktopAgentSnapshot> {
-      const value = await runtime!.root.context(ctx), settings = options.settings.get();
+      const value = await conversation.context(ctx), settings = options.settings.get();
       let messages: DesktopAgentSnapshot["messages"] = [];
       for (const entry of value.entries) {
         if (entry.kind === "app.peer-result" && entry.data && typeof entry.data === "object" && "text" in entry.data && typeof entry.data.text === "string") messages.push({ id: String(entry.id), role: "assistant", text: entry.data.text });
@@ -266,7 +274,7 @@ export async function openDesktopAgent(options: {
       if (busy) throw new Error("小D正在执行，请先等待或停止");
       busy = true; error = undefined;
       try {
-        const submission = await runtime!.root.submit({ type: "input", content: input.text, requestId: input.id }, ctx);
+        const submission = await conversation.submit({ type: "input", content: input.text, requestId: input.id }, ctx);
         sync();
         void submission.wait(ctx).then(result => { if (result.status !== "done") report(new Error("本机对话未完成：" + result.status)); }).catch(report).finally(() => { busy = false; sync(); });
       } catch (cause) { busy = false; throw cause; }
@@ -293,9 +301,29 @@ export async function openDesktopAgent(options: {
     async chooseWorkspace(workspace: string) {
       return changeSettings(async () => { await external.detach(); options.settings.saveWorkspace(workspace); await reload(); });
     },
-    async newSession() { return changeSettings(async () => { if (options.settings.get().agent === "pi") throw new Error("Pi 使用现有持久会话"); await external.newSession(); }); },
+    async newSession() {
+      await changeSettings(async () => {
+        if (options.settings.get().agent !== "pi") { await external.newSession(); return; }
+        const id = await runtime!.root.commit(async tx => {
+          const fresh = await tx.createConversation({ ownership: { kind: "ownerless" } });
+          await configure(tx, fresh.id, { model: catalog.agentModel });
+          (await tx.doc(ActiveConversation)).id = fresh.id;
+          return fresh.id;
+        }, ctx);
+        conversation = (await runtime!.harness.conversation(id, ctx))!;
+        error = undefined;
+      });
+      sync(false);
+    },
     async answerApproval(input: AgentApprovalAnswer) { external.answer(input); },
-    async abort() { try { await external.abort(); } finally { await runtime!.root.abort(ctx); for (const job of await peers.list()) if (job.target === nodeId && job.status === "running" && job.conversationId) { const child = await runtime!.harness.conversation(job.conversationId as Runtime["root"]["id"], ctx); await child?.abort(ctx); } } },
+    async abort() {
+      try { await external.abort(); }
+      finally {
+        const inspection = await runtime!.harness.inspect(ctx);
+        const ids = new Set([conversation.id, ...inspection.tasks.map(task => task.record.conversationId), ...inspection.submissions.map(item => item.conversationId)]);
+        for (const id of ids) await (await runtime!.harness.conversation(id, ctx))?.abort(ctx);
+      }
+    },
     async close() { closed = true; clearInterval(timer); unsubscribeConnection?.(); await external.close(); await syncing; if (serverConnected) await syncHistory(options.serverId?.() ?? "server"); options.request.close?.(); await peers.close(); await runtime!.harness.close(ctx); },
   };
 }

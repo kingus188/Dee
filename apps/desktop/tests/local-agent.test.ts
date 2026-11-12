@@ -51,13 +51,15 @@ test("healthy server with missing collaboration is not reported disconnected", a
 });
 test("local Agent owns model, protects tools, persists approvals and returns one durable peer result", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dee-local-agent-"));
-  let calls = 0, allow = false;
+  let calls = 0, allow = false, pauseReply = false;
+  let outbound: { id: string; source: string; sourceSession: { agent: "pi"; sessionId: string }; target: string; targetSession: { agent: "pi"; sessionId: string }; task: string } | undefined;
   const toolResults: string[] = [];
   const model = createServer(async (req, res) => {
     let body = ""; for await (const part of req) body += part;
     const input = JSON.parse(body) as { model: string; messages: Array<{role:string;content?:unknown}> };
     if (input.messages.at(-1)?.role === "tool") toolResults.push(JSON.stringify(input.messages.at(-1)?.content));
     calls++;
+    if (pauseReply) { res.writeHead(200, { "content-type": "text/event-stream" }); res.flushHeaders(); return; }
     const tool = input.messages.at(-1)?.role !== "tool";
     const delta = tool ? { role: "assistant", tool_calls: [{ index: 0, id: "read-fixture", type: "function", function: { name: "read", arguments: JSON.stringify({ path: "fixture.txt" }) } }] } : { role: "assistant", content: "本机验证完成" };
     const chunk = { id: "local-agent-test", object: "chat.completion.chunk", created: 1, model: input.model, choices: [{ index: 0, delta, finish_reason: null }] };
@@ -74,6 +76,8 @@ test("local Agent owns model, protects tools, persists approvals and returns one
   const incoming = { id: randomUUID(), source: "server", target: settings.get().nodeId, task: "读取工作目录 fixture.txt", status: "queued", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   const completions: unknown[] = []; let confirms = 0;
   const options = { directory, settings, loadModels, confirm: async () => { confirms++; return allow; }, request: async (path: string, body?: unknown) => {
+    if (outbound && path === "/api/peers/messages") return { item: { ...outbound, status: "done", result: "远端结果", createdAt: "now", updatedAt: "now" } };
+    if (outbound && path.includes(outbound.id)) return { item: { ...outbound, status: "done", result: "远端结果", createdAt: "now", updatedAt: "now" } };
     if (path.includes("/complete")) { completions.push(body); return { item: { ...incoming, status: "done", result: "本机验证完成" } }; }
     return { items: [incoming] };
   } };
@@ -96,5 +100,28 @@ test("local Agent owns model, protects tools, persists approvals and returns one
     await until(() => agent.snapshot(), snapshot => !snapshot.busy);
     assert.equal(calls, before, "repeated send ID is one submission");
     assert.ok(completions.length > 0);
+    const previous = (await agent.sessions()).find(session => session.agent === "pi")!;
+    await agent.newSession();
+    assert.deepEqual((await agent.snapshot()).messages, [], "new Pi conversation starts without the old context");
+    assert.ok((await agent.readSession({ node: settings.get().nodeId, session: previous })).messages.some(message => message.text === "本机聊天"), "old transcript stays readable");
+    assert.equal((await agent.sessions()).filter(session => session.agent === "pi").length, 3);
+    await agent.close(); agent = await openDesktopAgent(options);
+    assert.deepEqual((await agent.snapshot()).messages, [], "restart restores the newly selected conversation");
+    await agent.send({ id: randomUUID(), text: "新会话消息" });
+    await assert.rejects(agent.newSession(), /先停止当前任务/);
+    const fresh = await until(() => agent.snapshot(), snapshot => !snapshot.busy && snapshot.messages.some(message => message.text === "本机验证完成"));
+    assert.ok(fresh.messages.some(message => message.text === "新会话消息"));
+    assert.ok(!fresh.messages.some(message => message.text === "本机聊天"));
+    await agent.close(); agent = await openDesktopAgent(options);
+    assert.ok((await agent.snapshot()).messages.some(message => message.text === "新会话消息"));
+    const source = (await agent.sessions()).findLast(session => session.agent === "pi")!;
+    await agent.newSession();
+    outbound = { id: randomUUID(), source: settings.get().nodeId, sourceSession: { agent: "pi", sessionId: source.sessionId }, target: "server", targetSession: { agent: "pi", sessionId: "pi-1" }, task: "旧会话协作" };
+    pauseReply = true;
+    await agent.sendPeer(outbound);
+    await until(() => agent.snapshot(), snapshot => snapshot.busy && snapshot.jobs.some(job => job.id === outbound!.id && job.status === "done"));
+    await agent.abort();
+    await until(() => agent.snapshot(), snapshot => !snapshot.busy);
+    assert.deepEqual((await agent.snapshot()).messages, [], "stopping an old source continuation keeps the new conversation selected");
   } finally { await agent.close(); await new Promise<void>((resolve, reject) => model.close(error => error ? reject(error) : resolve())); await rm(directory, { recursive: true, force: true }); }
 });

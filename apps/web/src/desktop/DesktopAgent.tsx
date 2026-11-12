@@ -78,7 +78,14 @@ export function DesktopAgent() {
   const showSettings = modelOpen && agentKind !== "pi";
   const showPanel = showSettings || jobs.length > 0;
   const newDisabled = busy || !snapshot || pending.includes("new-session");
-  const newSession = agentKind !== "pi" ? () => { void action("new-session", () => bridge.newSession()); } : undefined;
+  const newSession = () => {
+    void action("new-session", () => bridge.newSession()).then(created => {
+      if (!created) return;
+      setDraft(""); request.current = null; follow.current = true;
+      if (sidebar.narrow && sidebar.open) sidebar.close();
+      document.querySelector<HTMLTextAreaElement>(".desktop-agent .chat-textarea")?.focus();
+    });
+  };
   const status = { queued: "等待批准", running: "正在执行", done: "已完成", failed: "未完成" };
   function navigate(route: WorkspaceRoute) {
     if (route.page === "chat") { scroll.current?.focus(); return; }
@@ -93,6 +100,7 @@ export function DesktopAgent() {
         <header className="conversation-header desktop-agent-header">
           <div className="conversation-heading"><span className="workspace-brand" aria-hidden="true">D</span><h1 className="conversation-title">小 D</h1></div>
           <div className="conversation-header-actions desktop-agent-controls">
+            <button className="icon-button" type="button" aria-label="新对话" title="新对话" disabled={newDisabled} onClick={newSession}><Icon name="square-pen" /></button>
             {connectionWarning ? <span className="desktop-agent-warning" role="alert" aria-label={connectionWarning} title={connectionWarning} tabIndex={0}><Icon name="circle-alert" /></span> : <span className="desktop-agent-server" role="status"><span className="status-dot" data-connected={snapshot?.serverConnected === true} />{snapshot?.serverConnected ? snapshot.collaboration === "ready" ? "双端已连接" : "服务器已连接" : "正在连接"}</span>}
             {agentKind !== "pi" && <button className="header-button" type="button" aria-expanded={showSettings} aria-controls="desktop-agent-model" onClick={() => setModelOpen(value => !value)}>Agent 设置</button>}
             <button className="header-button" type="button" disabled={pending.includes("server")} onClick={() => void action("server", () => bridge.openServer())}>服务器<Icon name="arrow-up-right" /></button>
