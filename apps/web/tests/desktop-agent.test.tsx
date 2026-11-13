@@ -74,6 +74,17 @@ test("历史协作任务不进入聊天布局，已有消息保持显示", async
   assert.ok(!dom.window.document.body.textContent!.includes("历史委托内容"));
 });
 
+test("空闲外部 Agent 与 Pi 一样只在滚动区保留消息，不增加占据间距的空容器", async t => {
+  const state = snapshot(); state.agent = "omp";
+  state.external = { status: "idle", activities: [], approvals: [] };
+  state.messages = [{ id: "history", role: "user", text: "切换前的消息" }];
+  const { dom, render } = await mount(t);
+  Object.defineProperty(dom.window, "desktopAgent", { value: bridge(state) });
+  await render(<DesktopAgent />);
+  const history = dom.window.document.querySelector("#message-history")!;
+  assert.deepEqual([...history.parentElement!.children].filter(element => !element.hasAttribute("hidden")), [history], "an empty flex item still consumes the scroll area's gap");
+});
+
 test("断线仅在 composer 显示警告图标，详情可访问且本机输入仍可用", async t => {
   const state = snapshot();
   state.error = "服务器连接中断，正在自动重连；本机对话已保留。";

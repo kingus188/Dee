@@ -22,6 +22,7 @@ function Request({ request, answer }: { request: AgentApproval; answer(input: Ag
   </form>;
 }
 export function AgentRequests({ approvals, activities, answer }: { approvals: AgentApproval[]; activities: AgentActivity[]; answer(input: AgentApprovalAnswer): Promise<void> }) {
+  if (!approvals.length && !activities.length) return null;
   return <div className="desktop-agent-progress">
     {activities.length > 0 && <details className="desktop-agent-activities"><summary>执行过程 · {activities.length}</summary>{activities.map(activity => <div key={activity.id} className="desktop-agent-activity"><span>{activity.title}</span><span>{activity.status === "running" ? "执行中" : activity.status === "done" ? "已完成" : "未完成"}</span>{activity.detail && <pre>{activity.detail}</pre>}</div>)}</details>}
     {approvals.map(request => <Request key={request.id} request={request} answer={answer} />)}
