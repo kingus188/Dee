@@ -46,7 +46,8 @@ export async function openAcp(options: DriverOptions): Promise<AgentDriver> {
       if (!sessionId) sessionId = string(object(session).sessionId);
       if (!sessionId) throw new Error("ACP 未返回会话标识");
       const modes = session?.modes?.availableModes;
-      if (modes?.length && !options.config.mode) throw new Error(`请在 ACP 设置指定模式 ID：${modes.map(mode => mode.id).join("、")}`);
+      const mode = options.config.mode ?? session?.modes?.currentModeId;
+      if (modes?.length && !modes.some(item => item.id === mode)) throw new Error(`请在 ACP 设置指定有效模式 ID：${modes.map(mode => mode.id).join("、")}`);
       if (options.config.mode) await ctx.request(acp.methods.agent.session.setMode, { sessionId, modeId: options.config.mode });
       loading = false; options.emit({ type: "session", id: sessionId }); ready();
       await lifetime;

@@ -22,6 +22,7 @@ import type { PeerChange } from "./peer-socket.js";
 const ActiveConversation = defineDoc<{ id: Runtime["root"]["id"] | null }>({ kind: "app.desktop-active-conversation", version: 1, scope: "session", initial: () => ({ id: null }) });
 const Approvals = defineDoc<{ ids: string[] }>({ kind: "app.desktop-peer-approvals", version: 1, scope: "session", initial: () => ({ ids: [] }) });
 const PeerServers = defineDoc<{ origins: Record<string, string> }>({ kind: "app.desktop-peer-servers", version: 1, scope: "session", initial: () => ({ origins: {} }) });
+const ChatContinuity = defineDoc<{ messages: DesktopAgentSnapshot["messages"]; offset: number; context: string; inputs: Record<string, string>; requests: Record<string, string> }>({ kind: "app.desktop-chat-continuity", version: 1, scope: "session", initial: () => ({ messages: [], offset: 0, context: "", inputs: {}, requests: {} }) });
 
 export type AgentRequest = ((path: string, body?: unknown, serverId?: string) => Promise<unknown>) & {
   onChange?(listener: (change: PeerChange) => void): () => void;
@@ -241,8 +242,8 @@ export async function openDesktopAgent(options: {
   });
   let ticks = 0;
   const timer = setInterval(() => sync(!options.request.onChange || ++ticks % 6 === 0), 5000); timer.unref(); sync();
-  return {
-    async snapshot(): Promise<DesktopAgentSnapshot> {
+  const service = {
+    async snapshot(includeContinuity = true): Promise<DesktopAgentSnapshot> {
       const value = await conversation.context(ctx), settings = options.settings.get();
       let messages: DesktopAgentSnapshot["messages"] = [];
       for (const entry of value.entries) {
@@ -261,6 +262,8 @@ export async function openDesktopAgent(options: {
         messages = externalState.messages; agentConfigured = Boolean(settings.workspace);
         try { resolveAgentExecutable(settings.agents[settings.agent as "codex" | "claude" | "acp" | "omp"].executable, options.searchPath); } catch (cause) { agentConfigured = false; agentError = cause instanceof Error ? cause.message : "Agent 未安装"; }
       }
+      const continuity = await runtime!.harness.snapshot(ChatContinuity, ctx);
+      if (includeContinuity && continuity) messages = [...continuity.messages, ...messages.slice(continuity.offset).map(message => ({ ...message, text: message.role === "user" ? continuity.inputs[message.text] ?? message.text : message.text }))];
       return { configured: agentConfigured, piConfigured: configured(), agent: settings.agent, agentConfig: settings.agent === "pi" ? undefined : settings.agents[settings.agent], external: externalState?.external,
         model: catalog.model, workspace: settings.workspace, nodeId,
         busy: busy || peerRuns.size > 0 || external.busy || inspection.tasks.length > 0, messages, jobs: (await peers.list()).map(job => ({ ...job, approved: approved.includes(job.id) })), serverConnected, collaboration, error: externalState?.error ?? agentError ?? error ?? (settings.agent === "pi" ? catalog.error : undefined) ?? connectionError ?? historyError };
@@ -269,12 +272,22 @@ export async function openDesktopAgent(options: {
       if (closed || reconfiguring) throw new Error("本机 Agent 正在重新加载");
       if (peerRuns.size) throw new Error("本机 Pi 正在执行委托任务");
       if (!input || typeof input.id !== "string" || !/^[0-9a-f-]{36}$/i.test(input.id) || typeof input.text !== "string" || !input.text.trim() || input.text.length > 16000) throw new Error("消息无效或过长");
-      if (options.settings.get().agent !== "pi") { await external.send(input); sync(); return; }
+      const continuity = await runtime!.harness.snapshot(ChatContinuity, ctx);
+      const recorded = continuity?.requests?.[input.id];
+      if (recorded && continuity!.inputs[recorded] !== input.text) throw new Error("消息 ID 与已有内容冲突");
+      const text = recorded ?? (continuity?.context ? `以下是当前对话的历史记录，仅作为上下文，继续处理最后的用户消息。\n${continuity.context}\n\n当前用户消息：\n${input.text}` : input.text);
+      if (text !== input.text) await runtime!.root.commit(async tx => { const chat = await tx.doc(ChatContinuity); chat.inputs[text] = input.text; chat.requests[input.id] = text; }, ctx);
+      if (options.settings.get().agent !== "pi") {
+        await external.send({ ...input, text });
+        await runtime!.root.commit(async tx => { (await tx.doc(ChatContinuity)).context = ""; }, ctx);
+        sync(); return;
+      }
       if (!configured()) throw new Error(catalog.error ?? "请先在 Pi 中配置模型");
       if (busy) throw new Error("小D正在执行，请先等待或停止");
       busy = true; error = undefined;
       try {
-        const submission = await conversation.submit({ type: "input", content: input.text, requestId: input.id }, ctx);
+        const submission = await conversation.submit({ type: "input", content: text, requestId: input.id }, ctx);
+        await runtime!.root.commit(async tx => { (await tx.doc(ChatContinuity)).context = ""; }, ctx);
         sync();
         void submission.wait(ctx).then(result => { if (result.status !== "done") report(new Error("本机对话未完成：" + result.status)); }).catch(report).finally(() => { busy = false; sync(); });
       } catch (cause) { busy = false; throw cause; }
@@ -296,18 +309,39 @@ export async function openDesktopAgent(options: {
       await peers.complete(id, { status: "failed", result: "用户拒绝在本机执行" }); sync();
     },
     async selectAgent(input: unknown) {
-      return changeSettings(async () => { await external.detach(); options.settings.selectAgent(input); error = undefined; if (options.settings.get().agent === "pi") await reload(); });
+      return changeSettings(async () => {
+        const before = await service.snapshot();
+        const previousConfig = options.settings.get();
+        await external.detach(); options.settings.selectAgent(input); error = undefined;
+        const selected = options.settings.get();
+        if (selected.agent === before.agent && JSON.stringify(selected.agents) === JSON.stringify(previousConfig.agents)) return;
+        if (options.settings.get().agent === "pi") await reload();
+        const previous = await runtime!.harness.snapshot(ChatContinuity, ctx);
+        const target = await service.snapshot(false);
+        await runtime!.root.commit(async tx => {
+          Object.assign(await tx.doc(ChatContinuity), { messages: before.messages, offset: target.messages.length, context: JSON.stringify(before.messages.map(({ role, text }) => ({ role, text }))), inputs: previous?.inputs ?? {} });
+        }, ctx);
+      });
     },
     async chooseWorkspace(workspace: string) {
-      return changeSettings(async () => { await external.detach(); options.settings.saveWorkspace(workspace); await reload(); });
+      return changeSettings(async () => {
+        const previous = options.settings.get().workspace;
+        await external.detach(); options.settings.saveWorkspace(workspace); await reload();
+        if (workspace !== previous) await runtime!.root.commit(async tx => { Object.assign(await tx.doc(ChatContinuity), { messages: [], offset: 0, context: "", inputs: {}, requests: {} }); }, ctx);
+      });
     },
     async newSession() {
       await changeSettings(async () => {
-        if (options.settings.get().agent !== "pi") { await external.newSession(); return; }
+        if (options.settings.get().agent !== "pi") {
+          await external.newSession();
+          await runtime!.root.commit(async tx => { Object.assign(await tx.doc(ChatContinuity), { messages: [], offset: 0, context: "", inputs: {}, requests: {} }); }, ctx);
+          return;
+        }
         const id = await runtime!.root.commit(async tx => {
           const fresh = await tx.createConversation({ ownership: { kind: "ownerless" } });
           await configure(tx, fresh.id, { model: catalog.agentModel });
           (await tx.doc(ActiveConversation)).id = fresh.id;
+          Object.assign(await tx.doc(ChatContinuity), { messages: [], offset: 0, context: "", inputs: {}, requests: {} });
           return fresh.id;
         }, ctx);
         conversation = (await runtime!.harness.conversation(id, ctx))!;
@@ -326,4 +360,5 @@ export async function openDesktopAgent(options: {
     },
     async close() { closed = true; clearInterval(timer); unsubscribeConnection?.(); await external.close(); await syncing; if (serverConnected) await syncHistory(options.serverId?.() ?? "server"); options.request.close?.(); await peers.close(); await runtime!.harness.close(ctx); },
   };
+  return service;
 }

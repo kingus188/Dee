@@ -1,4 +1,5 @@
 /* Execution controls live inside the shared conversation composer. */
+.chat-column:has(.agent-picker-popover) { z-index: 22; }
 .agent-picker-popover[data-model-view="true"] { grid-template-columns: 42px minmax(0, 1fr) 170px; grid-template-rows: minmax(0, 1fr) auto; width: min(550px, calc(100vw - 40px)); }
 .agent-picker-popover[data-model-view="true"] .agent-picker-option { min-height: 32px; padding-block: 6px; }
 .agent-picker-popover[data-model-view="true"] .agent-picker-main { min-height: 0; }
@@ -79,7 +80,7 @@
   #mascot-card.app-layout .composer-actions:has(.composer-execution) { gap: 4px; }
   .composer-execution { gap: 0; }
   .composer-execution > .icon-button { width: 24px; min-width: 24px; padding: 0; }
-  .composer-execution .agent-picker-popover { width: min(420px, calc(100vw - 140px)); }
+  .composer-execution .desktop-agent-picker .agent-picker-popover { width: min(420px, calc(100vw - 140px)); right: -24px; }
   .composer-execution .local-agent-settings { width: min(420px, calc(100vw - 140px)); }
   .composer-execution > select { width: 48px; min-width: 0; padding-inline: 0; }
   .composer-execution .desktop-agent-warning { width: 24px; }

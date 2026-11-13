@@ -54,11 +54,24 @@ test("明确目标的外部会话可在忙时批准排队，不要求 Pi 配置�
   const document = dom.window.document;
   const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === "批准 Claude Code 执行")!;
   assert.ok(button, document.body.textContent!);
-  assert.equal(button.disabled, false); assert.match(document.body.textContent!, /target-session/);
+  assert.equal(button.disabled, false);
+  assert.ok(!document.body.textContent!.includes("委托任务"));
   await act(async () => button.click());
   assert.equal(approve.mock.callCount(), 1); assert.match(document.body.textContent!, /等待空闲/);
   assert.match(document.querySelector("#message-history")!.textContent!, /当前来源对话/);
   assert.ok(!document.body.textContent!.includes("批准 Pi 执行"));
+});
+
+test("历史协作任务不进入聊天布局，已有消息保持显示", async t => {
+  const state = snapshot(); state.agent = "omp";
+  state.messages = [{ id: "history", role: "user", text: "切换前的消息" }];
+  state.jobs = [{ id: "old", source: "server", target: state.nodeId, task: "历史委托内容", status: "done", createdAt: "now", updatedAt: "now" }];
+  const { dom, render } = await mount(t);
+  Object.defineProperty(dom.window, "desktopAgent", { value: bridge(state) });
+  await render(<DesktopAgent />);
+  assert.match(dom.window.document.querySelector("#message-history")!.textContent!, /切换前的消息/);
+  assert.equal(dom.window.document.querySelector(".desktop-agent-jobs"), null);
+  assert.ok(!dom.window.document.body.textContent!.includes("历史委托内容"));
 });
 
 test("断线仅在 composer 显示警告图标，详情可访问且本机输入仍可用", async t => {
@@ -361,8 +374,7 @@ test("发送防重复，未确认重试使用同一 UUID，服务端任务逐项
   assert.match(document.querySelector(".desktop-agent-job")!.textContent!, /等待批准/);
   assert.equal(document.querySelector(".desktop-agent-job .md strong")!.textContent, "请检查工作目录");
   const jobs = [...document.querySelectorAll(".desktop-agent-job")];
-  assert.match(jobs[1]!.textContent!, /等待服务器/);
-  for (const job of jobs.slice(1)) assert.equal(job.querySelector(".desktop-agent-job-actions"), null);
+  assert.equal(jobs.length, 1, "其他会话及已结束的协作任务不进入当前聊天");
   const buttons = [...document.querySelectorAll<HTMLButtonElement>(".desktop-agent-job-actions button")];
   assert.equal(buttons.length, 2);
   await act(async () => buttons[0]!.click()); assert.equal(approve.mock.calls[0]!.arguments[0], "job-1");

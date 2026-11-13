@@ -15,6 +15,8 @@ export async function registerDesktopAgent(options: { ipc: IpcMain; directory: s
     const response = await dialog.showMessageBox(window, { type: "question", title: "允许本机操作", message: `小 D 请求执行 ${tool}`, detail: JSON.stringify(args, null, 2).slice(0, 10000), buttons: ["拒绝", "允许本次"], defaultId: 0, cancelId: 0, noLink: true });
     return response.response === 1;
   } });
+  const pending = new Set<Promise<unknown>>();
+  let closing: Promise<void> | undefined;
   function trusted(event: IpcMainInvokeEvent) {
     const window = options.getWindow();
     if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error("Untrusted local Agent window");
@@ -43,11 +45,20 @@ export async function registerDesktopAgent(options: { ipc: IpcMain; directory: s
   };
   for (const [name, handler] of Object.entries(handlers)) options.ipc.handle(`desktop:agent:${name}`, async (event, input) => {
     trusted(event);
-    try { return await handler(input as never); }
+    if (closing) throw new Error("本机 Agent 正在退出");
+    const call = Promise.resolve().then(() => handler(input as never));
+    pending.add(call);
+    try { return await call; }
     catch (cause) {
       const message = cause instanceof Error ? cause.message : "本机操作失败";
       throw new Error(message);
     }
+    finally { pending.delete(call); }
   });
-  return agent;
+  return { ...agent, close() {
+    return closing ??= (async () => {
+      await Promise.allSettled([...pending]);
+      await agent.close();
+    })();
+  } };
 }

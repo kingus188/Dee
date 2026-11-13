@@ -42,16 +42,23 @@ export function stopAgent(child: ReturnType<typeof spawnAgent>): Promise<void> {
       await new Promise<void>((resolve, reject) => execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], { timeout: 3000, windowsHide: true }, error => error ? reject(new Error("无法确认 Agent 进程树已停止")) : resolve()));
       return;
     }
-    function group(signal: NodeJS.Signals | 0): boolean {
+    function group(signal: NodeJS.Signals | 0): boolean | null {
       try { process.kill(-child.pid!, signal); return true; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+        // macOS can deny signal-0 probes while a process finishes exiting; only ESRCH confirms it is gone.
+        if (signal === 0 && (error as NodeJS.ErrnoException).code === "EPERM") return null;
+        throw error;
+      }
     }
     // Kill the owned process group even when a wrapper has already exited.
     group("SIGTERM");
     const deadline = Date.now() + 2500, forceAt = Date.now() + 1500;
-    while (group(0)) {
-      if (Date.now() >= forceAt) group("SIGKILL");
+    for (;;) {
+      const exists = group(0);
+      if (exists === false) return;
       if (Date.now() >= deadline) throw new Error("无法确认 Agent 及其工具进程已停止，请核对工作区");
+      if (exists === true && Date.now() >= forceAt) group("SIGKILL");
       await new Promise(resolve => setTimeout(resolve, 25));
     }
   })();

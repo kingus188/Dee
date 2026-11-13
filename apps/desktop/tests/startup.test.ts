@@ -18,7 +18,7 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
   let agentWindow: (() => FakeWindow | undefined) | undefined;
   let agentRequest: ((path: string) => Promise<unknown>) | undefined;
   let localProtocolRegistered = false;
-  const state = { offline: options.offline ?? false, notifications: 0, errors: 0, storageName: "", keychainReads: 0, edits: [] as string[] };
+  const state = { offline: options.offline ?? false, notifications: 0, errors: 0, storageName: "", keychainReads: 0, edits: [] as string[], agentCloses: 0, quitCalls: 0 };
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const saved: { config: { url: string; username?: string }; secret?: string }[] = [];
   let menu: MenuItem[] | null = [];
@@ -71,7 +71,7 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
     requestSingleInstanceLock: () => true, whenReady: () => { state.storageName = app.name; return Promise.resolve(); }, isReady: () => true,
     getPath: (name: string) => paths.get(name) ?? "/synthetic-desktop-state",
     setPath: (name: string, path: string) => { paths.set(name, path); },
-    quit() {}, dock: { setIcon() {} },
+    quit() { state.quitCalls++; }, dock: { setIcon() {} },
   });
   const web = {
     protocol: { handle(scheme: string) { assert.equal(scheme, "dee"); localProtocolRegistered = true; } },
@@ -95,7 +95,7 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
     exports: {}, URL, Buffer, console, setImmediate,
     process: { platform: "darwin", env: options.invalidEnvironment ? { ASSISTANT_WEB_URL: "invalid" } : options.environment ?? {} },
     require(specifier: string) {
-      if (specifier === "./agent-ipc.js") return { registerDesktopAgent: async (input: { openServer(hash?: string): Promise<void>; getWindow(): FakeWindow | undefined; request(path: string): Promise<unknown> }) => { openServer = input.openServer; agentWindow = input.getWindow; agentRequest = input.request; agentRegistered = true; return { close: async () => {} }; } };
+      if (specifier === "./agent-ipc.js") return { registerDesktopAgent: async (input: { openServer(hash?: string): Promise<void>; getWindow(): FakeWindow | undefined; request(path: string): Promise<unknown> }) => { openServer = input.openServer; agentWindow = input.getWindow; agentRequest = input.request; agentRegistered = true; return { close: async () => { state.agentCloses++; } }; } };
       if (specifier === "electron") return electron;
       if (specifier === "./skills/catalog.js") return { LocalSkillCatalog: class {} };
       if (specifier === "./skills-ipc.js") return { registerLocalSkills() {} };
@@ -120,6 +120,26 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
     reportMailStatus: (status: unknown) => reportMailStatus?.(status),
   };
 }
+
+test("quit waits for windows to close before stopping Agent and repeated quit cannot bypass cleanup", async () => {
+  const desktopApp = await desktop();
+  let prevented = 0;
+  const event = { preventDefault() { prevented++; } };
+  desktopApp.app.emit("before-quit", event);
+  assert.equal(prevented, 0, "normal window close and unsaved-change handling must run first");
+  assert.equal(desktopApp.state.agentCloses, 0, "cancelled window closure must leave Agent available");
+  desktopApp.main().close();
+  desktopApp.app.emit("will-quit", event);
+  desktopApp.app.emit("will-quit", event);
+  assert.equal(prevented, 2, "every quit request must wait for the same cleanup");
+  assert.equal(desktopApp.state.agentCloses, 1);
+  assert.equal(desktopApp.state.quitCalls, 0);
+  await desktopApp.flush();
+  assert.equal(desktopApp.state.quitCalls, 1);
+  desktopApp.app.emit("will-quit", event);
+  assert.equal(prevented, 2, "the final quit is allowed after cleanup");
+  assert.equal(desktopApp.state.agentCloses, 1);
+});
 
 test("device credential lookup never accesses the system keychain", async () => {
   const desktopApp = await desktop();

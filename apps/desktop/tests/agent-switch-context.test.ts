@@ -130,13 +130,15 @@ test("24 switches and restart preserve native memory without duplicating message
   }
 }));
 
-test("desktop public entry switches Pi ↔ Codex, restores local memory and exposes missing cross-Agent handoff", async () => {
+test("desktop public entry preserves the conversation and directly forwards context across Pi ↔ Codex", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dee-desktop-switch-"));
+  const piInputs: string[] = [];
   const model = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     const messages = (JSON.parse(body) as { messages: Array<{ role: string; content?: unknown }> }).messages;
     const latest = messages.findLast(message => message.role === "user");
     const latestText = typeof latest?.content === "string" ? latest.content : JSON.stringify(latest?.content);
+    piInputs.push(latestText ?? "");
     const facts = messages.filter(message => message.role === "user").map(message => JSON.stringify(message.content)).filter(text => text.includes("PI_SYNTHETIC_FACT"));
     const answer = latestText?.includes("RECALL") ? facts.length ? "PI_SYNTHETIC_FACT" : "UNKNOWN" : "ACK";
     const chunk = { id: randomUUID(), object: "chat.completion.chunk", created: 1, model: "fixture", choices: [{ index: 0, delta: { role: "assistant", content: answer }, finish_reason: null }] };
@@ -164,7 +166,11 @@ createInterface({input:process.stdin}).on("line",line=>{
   send({id:m.id,result:{thread:{id:threadId}}});
  }
  if(m.method==="turn/start"){
-  const turnId="turn-"+(++turn),text=m.params.input[0].text;
+  const turnId="turn-"+(++turn);let text=m.params.input[0].text;
+  if(text.startsWith("以下是当前对话的历史记录")){
+   const parts=text.split("\\n\\n当前用户消息：\\n");
+   facts.push(parts[0]);text=parts[1];
+  }
   if(text.startsWith("REMEMBER "))facts.push(text.slice(9));
   writeFileSync(threadId+".json",JSON.stringify(facts));
   send({id:m.id,result:{turn:{id:turnId}}});
@@ -181,18 +187,28 @@ createInterface({input:process.stdin}).on("line",line=>{
     agent = await openDesktopAgent(options);
     const say = async (text: string) => { await agent!.send({ id: randomUUID(), text }); await until(async () => !(await agent!.snapshot()).busy); return (await agent!.snapshot()).messages.filter(message => message.role === "assistant").at(-1)!.text; };
     assert.equal(await say("PI_SYNTHETIC_FACT"), "ACK");
+    const original = (await agent.snapshot()).messages;
     await agent.selectAgent({ kind: "codex", config: { executable: bin, args: [] } });
-    assert.equal(await say(recall), "[]", "Pi history is not sent to Codex");
+    assert.deepEqual((await agent.snapshot()).messages, original);
+    await agent.close(); agent = await openDesktopAgent(options);
+    assert.deepEqual((await agent.snapshot()).messages, original, "pending context and display survive restart before the next turn");
+    assert.ok((await say(recall)).includes("PI_SYNTHETIC_FACT"), "Pi context reaches the native Codex turn");
+    const delivered = (await agent.snapshot()).messages;
+    await agent.send({ id: delivered.findLast(message => message.role === "user")!.id, text: recall });
+    assert.deepEqual((await agent.snapshot()).messages, delivered, "retry uses the same native prompt without duplicate messages");
     await say("REMEMBER CODEX_SYNTHETIC_FACT");
     const codexId = (await agent.snapshot()).external!.sessionId;
     await agent.selectAgent({ kind: "pi" });
     assert.equal(await say(recall), "PI_SYNTHETIC_FACT");
-    assert.ok(!(await agent.snapshot()).messages.some(message => message.text.includes("CODEX_SYNTHETIC_FACT")));
+    assert.ok(piInputs.at(-1)!.includes("CODEX_SYNTHETIC_FACT"), "Codex context reaches the Pi model request");
+    assert.ok((await agent.snapshot()).messages.some(message => message.text.includes("CODEX_SYNTHETIC_FACT")));
     await agent.selectAgent({ kind: "codex" });
-    assert.deepEqual(JSON.parse(await say(recall)), ["CODEX_SYNTHETIC_FACT"]);
+    assert.ok((await say(recall)).includes("CODEX_SYNTHETIC_FACT"));
     assert.equal((await agent.snapshot()).external!.sessionId, codexId);
     await agent.close(); agent = await openDesktopAgent(options);
-    assert.deepEqual(JSON.parse(await say(recall)), ["CODEX_SYNTHETIC_FACT"]);
+    assert.ok((await say(recall)).includes("CODEX_SYNTHETIC_FACT"));
+    assert.ok(!(await agent.snapshot()).messages.some(message => message.role === "user" && message.text.startsWith("以下是当前对话的历史记录")));
+    assert.equal((await agent.snapshot()).jobs.length, 0, "switching never creates delegated jobs");
     await agent.send({ id: randomUUID(), text: "WAIT" });
     await until(async () => (await readFile(join(directory, "protocol.jsonl"), "utf8")).includes('"text":"WAIT"'));
     await assert.rejects(agent.selectAgent({ kind: "pi" }), /停止/);
@@ -200,6 +216,9 @@ createInterface({input:process.stdin}).on("line",line=>{
     await assert.rejects(agent.newSession(), /停止/);
     await agent.abort();
     assert.equal((await agent.snapshot()).agent, "codex");
+    await agent.newSession();
+    assert.deepEqual((await agent.snapshot()).messages, []);
+    assert.equal(await say(recall), "[]", "explicit new conversation does not inherit the previous context");
   } finally {
     await agent?.close();
     await new Promise<void>((resolve, reject) => model.close(error => error ? reject(error) : resolve()));

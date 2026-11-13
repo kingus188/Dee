@@ -282,7 +282,7 @@ const send = value => process.stdout.write(JSON.stringify({jsonrpc:'2.0',...valu
 createInterface({input:process.stdin}).on('line', line => {
  const m=JSON.parse(line);
  if(m.method==='initialize') send({id:m.id,result:{protocolVersion:1,agentCapabilities:{loadSession:false}}});
- if(m.method==='session/new') send({id:m.id,result:{sessionId:'acp-native',modes:{currentModeId:'review',availableModes:[{id:'review',name:'Review'}]}}});
+ if(m.method==='session/new') send({id:m.id,result:{sessionId:'acp-native',modes:{currentModeId:process.argv.includes('--missing-mode')?'missing':'review',availableModes:[{id:'review',name:'Review'}]}}});
  if(m.method==='session/set_mode') send({id:m.id,result:{}});
  if(m.method==='session/prompt') {send({method:'session/update',params:{sessionId:'acp-native',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'ACP answer'}}}});send({id:m.id,result:{stopReason:'end_turn'}});}
 });`);
@@ -291,7 +291,10 @@ createInterface({input:process.stdin}).on('line', line => {
   try { await driver.send("one", randomUUID()); await driver.send("two", randomUUID()); } finally { await driver.close(); }
   assert.equal(events.filter(event => event.type === "text").length, 2);
   await assert.rejects(openAcp({ ...config, sessionId: "acp-native" }), /不支持恢复/);
-  await assert.rejects(openAcp({ ...config, config: { executable: bin, args: [] } }), /模式 ID/);
+  const defaultDriver = await openAcp({ ...config, config: { executable: bin, args: [] } });
+  try { await defaultDriver.send("default mode", randomUUID()); } finally { await defaultDriver.close(); }
+  await assert.rejects(openAcp({ ...config, config: { executable: bin, args: [], mode: "unknown" } }), /模式 ID/);
+  await assert.rejects(openAcp({ ...config, config: { executable: bin, args: ["--missing-mode"] } }), /模式 ID/);
 }));
 
 test("OMP uses ACP mode, streams replies, resumes native sessions and forwards peer MCP", async () => temporary(async directory => {
@@ -303,8 +306,9 @@ createInterface({input: process.stdin}).on('line', line => {
  if (m.method === 'initialize') send({id:m.id,result:{protocolVersion:1,agentCapabilities:{loadSession:true}}});
  if (m.method === 'session/new' || m.method === 'session/load') {
   if (m.params.mcpServers[0]?.name !== 'dee_peers' || m.params.mcpServers[0]?.env[0]?.value !== 'mcp') throw Error('wrong MCP');
-  send({id:m.id,result:{sessionId:'omp-native',modes:{}}});
+  send({id:m.id,result:{sessionId:'omp-native',modes:{currentModeId:'default',availableModes:[{id:'default',name:'Default'},{id:'plan',name:'Plan'}]}}});
  }
+ if (m.method === 'session/set_mode') throw Error('must preserve the advertised current mode');
  if (m.method === 'session/prompt') {
   send({method:'session/update',params:{sessionId:'omp-native',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'OMP answer'}}}});
   send({id:m.id,result:{stopReason:'end_turn'}});

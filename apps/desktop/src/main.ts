@@ -42,6 +42,7 @@ const localUrl = "dee://local/";
 protocol.registerSchemesAsPrivileged([{ scheme: "dee", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 let localAgent: Awaited<ReturnType<typeof openDesktopAgent>> | undefined;
 let quitting = false;
+let agentClosed = false;
 let connecting = 0;
 let loading = false;
 let failed = false;
@@ -208,9 +209,13 @@ else {
   app.on("second-instance", showMainWindow);
   app.on("activate", showMainWindow);
   app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-  app.on("before-quit", event => {
-    stopNotifications();
-    if (localAgent && !quitting) { event.preventDefault(); quitting = true; void localAgent.close().catch(error => console.error("Local Agent shutdown failed", error)).finally(() => app.quit()); }
+  app.on("before-quit", () => { stopNotifications(); });
+  app.on("will-quit", event => {
+    if (!localAgent || agentClosed) return;
+    event.preventDefault();
+    if (quitting) return;
+    quitting = true;
+    void localAgent.close().catch(error => console.error("Local Agent shutdown failed", error)).finally(() => { agentClosed = true; app.quit(); });
   });
   void app.whenReady().then(async () => {
     app.setName("Dee");
