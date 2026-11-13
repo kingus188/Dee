@@ -10,6 +10,33 @@ import { mount } from "./dom.js";
 
 const view = (conversationId: number, busy = false) => ({ conversationId, busy, live: {}, inbox: 0, entries: [] }) as unknown as ConversationView;
 
+test("发送与停止共用一个位置，忙碌时仅显示停止图标并调用对应执行端", async t => {
+  const calls: string[] = [];
+  t.mock.method(apiClient, "request", async (path: string) => { calls.push(path); return {}; });
+  const localAbort = t.mock.fn(async () => {});
+  const composer = (state: ConversationView, local = false) => <Composer draft="下一条消息" setDraft={() => {}} view={state} connect={async () => 7} onSent={() => {}} onNewConversation={async () => {}} localExecution={local ? { ready: true, abort: localAbort } : undefined} />;
+  const { dom, render } = await mount(t, composer(view(7)));
+  const doc = dom.window.document;
+  assert.ok(doc.querySelector('#btn-send[aria-label="发送消息"]'));
+  assert.equal(doc.querySelector("#btn-abort"), null);
+  for (const state of [view(7, true), { ...view(7), live: { text: "正在回复" } }, { ...view(7), inbox: 1 }]) {
+    for (const local of [false, true]) {
+      await render(composer(state, local));
+      assert.ok(!doc.querySelector("#btn-send"), "忙碌时不应显示发送按钮");
+      const stop = doc.querySelector<HTMLButtonElement>('#btn-abort[aria-label="停止回复"]')!;
+      assert.ok(stop);
+      assert.equal(stop.textContent, "");
+      assert.equal(stop.querySelector("use")?.getAttribute("href"), "/assets/icons.svg#square");
+      await act(async () => stop.click());
+    }
+  }
+  assert.deepEqual(calls, Array(3).fill("/api/conversations/7/abort"));
+  assert.equal(localAbort.mock.callCount(), 3);
+  await render(composer(view(7)));
+  assert.equal(doc.querySelector("#btn-abort"), null);
+  assert.ok(doc.querySelector("#btn-send"));
+});
+
 test("指令按前缀筛选，只识别独占一行的指令；正文与文件路径不误判", () => {
   assert.deepEqual(commandSuggestions("/").map(item => item.name), ["new", "help", "stop"]);
   assert.deepEqual(commandSuggestions("/NE").map(item => item.name), ["new"]);
@@ -59,7 +86,7 @@ test("/help 本地展示，/stop 只停止当前回复，未知指令和参数�
   const doc = dom.window.document;
   async function send(text?: string) {
     if (text !== undefined) await act(async () => change(text));
-    await act(async () => doc.querySelector<HTMLButtonElement>("#btn-send")!.click());
+    await act(async () => doc.querySelector("textarea")!.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
   }
   await send(); assert.equal(calls.length, 0);
   assert.match(doc.querySelector(".command-menu")!.textContent!, /快捷指令.*\/new.*\/help.*\/stop/s);

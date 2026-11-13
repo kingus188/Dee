@@ -199,7 +199,9 @@
 #workspace[data-view="chat"] .attach-button { position: relative; width: 44px; min-width: 44px; min-height: 40px; padding: 0 12px 0 4px; color: var(--text-muted); }
 #workspace[data-view="chat"] .attach-button::after { content: ""; position: absolute; right: 0; height: 22px; border-right: 1px solid var(--border); }
 #workspace[data-view="chat"] .attach-button .icon { width: 20px; height: 20px; }
-#workspace[data-view="chat"] .btn-abort { min-height: 40px; color: var(--danger); }
+#workspace[data-view="chat"] .btn-abort { display: grid; width: 40px; height: 40px; min-height: 40px; padding: 0; border: 0; border-radius: 50%; background: #d96666; color: #fff; }
+#workspace[data-view="chat"] .btn-abort:hover:not(:disabled) { background: #b94848; color: #fff; }
+#workspace[data-view="chat"] .btn-abort .icon { width: 18px; height: 18px; }
 #workspace[data-view="chat"] .btn-send { width: 40px; height: 40px; border-radius: 50%; background: #668bb3; color: #fff; }
 #workspace[data-view="chat"] .btn-send:hover:not(:disabled) { background: #416a96; color: #fff; }
 #workspace[data-view="chat"] .btn-send:disabled { opacity: .8; }

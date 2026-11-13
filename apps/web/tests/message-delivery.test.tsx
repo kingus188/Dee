@@ -44,7 +44,8 @@ test("发送确认和排队期间立即展示消息，正式历史先于确认�
     Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "新发的问题");
     textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   });
-  await act(async () => { doc.getElementById("btn-send")!.click(); });
+  assert.ok(!doc.getElementById("btn-send"), "忙碌时只显示停止按钮，仍可用 Enter 发送排队消息");
+  await act(async () => { textarea.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
   assert.equal(doc.querySelectorAll(".user-bubble").length, 2);
   assert.match(doc.getElementById("message-history")!.textContent!, /新发的问题/);
   assert.match(doc.getElementById("message-history")!.textContent!, /正在发送/);
