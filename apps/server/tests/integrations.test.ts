@@ -10,6 +10,17 @@ import type { TeamsSender } from "../dist/teams-reply-port.js";
 
 const account = { tenantId: "test", clientId: "test", username: "test", password: "not-a-real-password" };
 
+test("self-chat opt-in requires a model and username; offline never starts it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-integrations-self-")), store = openTeamsStore(dir);
+  try {
+    await writeFile(join(dir, "teams-forward-config.json"), JSON.stringify({ account }));
+    const config = readConfig({ DATA_DIR: dir, TEAMS_CONFIG_DIR: dir });
+    assert.throws(() => startServerIntegrations({ config, store, teamsSender: {}, env: { TEAMS_SELF_CHAT_ENABLED: "1" } }), /自聊测试需要/);
+    const close = startServerIntegrations({ config: { ...config, offline: true }, store, teamsSender: {}, env: { TEAMS_SELF_CHAT_ENABLED: "1" } });
+    await close();
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
 test("paused Teams auto-sync starts no live or archive requests, but an explicit refresh remains available", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-integrations-paused-")), store = openTeamsStore(dir), sender: TeamsSender = {};
   const original = globalThis.fetch; let requests = 0, close = async () => {};

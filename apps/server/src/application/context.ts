@@ -26,6 +26,7 @@ export type AppContext = Runtime & {
   dailyReports: DailyReports;
   notifications: ReturnType<typeof openNotificationOutbox>;
   teamsStore: TeamsStore; teamsSender: TeamsSender;
+  generateSelfChat?: import("../teams-self-chat.js").SelfChatGenerate;
   episodeStore: EpisodeStore; summarize: (prompt: string) => Promise<string>;
   modelLabel: string; modelConfigured: boolean; startedAt: string; redact: (value: unknown) => string; exitIfFatal: (error: unknown) => void;
 };

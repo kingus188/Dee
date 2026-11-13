@@ -16,6 +16,7 @@ import type { ImportantRules } from "./teams-rules.js";
 import { createTeamsEpisodeAccess } from "./teams-episode-access.js";
 import { startTeamsPolling } from "./teams-polling.js";
 import { createTeamsFetch } from "./teams-throttle.js";
+import { startTeamsSelfChat, type SelfChatGenerate } from "./teams-self-chat.js";
 
 type ForwardConfig = { account?: TeamsAccount; ginaHome?: string; important?: ImportantRules };
 
@@ -34,11 +35,12 @@ export type ServerIntegrationsOptions = {
   teamsSender: TeamsSender;
   wechat?: WechatIntegration;
   env?: NodeJS.ProcessEnv;
+  generateSelfChat?: SelfChatGenerate;
   onStuck?: (pending: number, reason: string, preview: string) => void;
 };
 
 /** Start configured Teams Graph synchronization after the HTTP server is listening. */
-export function startServerIntegrations({ config, store, teamsSender, wechat, env = {}, onStuck }: ServerIntegrationsOptions) {
+export function startServerIntegrations({ config, store, teamsSender, wechat, env = {}, generateSelfChat, onStuck }: ServerIntegrationsOptions) {
   if (config.offline || !config.teamsConfigDir) return async () => {};
   const configPath = join(config.teamsConfigDir, "teams-forward-config.json");
   if (!existsSync(configPath)) return async () => {};
@@ -66,6 +68,7 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   }
 
   const dir = config.teamsConfigDir;
+  if (env.TEAMS_SELF_CHAT_ENABLED === "1" && (!generateSelfChat || !env.TEAMS_SELF_CHAT_USERNAME?.trim())) throw new Error("自聊测试需要已配置模型和 TEAMS_SELF_CHAT_USERNAME");
   const authAccount = validAccount ? account : undefined;
   const getToken = authAccount ? createTeamsTokenProvider(authAccount) : createGinaTokenProvider(parsed.ginaHome!, env);
   const sendToken = authAccount ? createTeamsTokenProvider(authAccount, SEND_SCOPE) : getToken;
@@ -101,7 +104,12 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   };
 
   let stopForward: (() => Promise<void>) | undefined;
+  let stopSelfChat: (() => Promise<void>) | undefined;
   try {
+    if (env.TEAMS_SELF_CHAT_ENABLED === "1") stopSelfChat = startTeamsSelfChat({
+      dir: config.dataDir, username: env.TEAMS_SELF_CHAT_USERNAME!, getToken, sendToken,
+      generate: generateSelfChat!, signal: controller.signal, fetchImpl: graphFetch,
+    }, () => { if (active) console.error("Teams 自聊测试未完成，请检查自聊状态与回执；不会自动重发失败消息"); });
     if (wechat?.enabled) stopForward = startTeamsForward({
       dir, store, getToken, rules: parsed.important, sendURL: wechat.sendURL, sendToken: wechat.sendToken, sync, signal: controller.signal,
       injectBatch: wechat.notifyBatch ? (wxid, text, messageIds, sourceRevisions) => active ? wechat.notifyBatch!(wxid, text, messageIds, sourceRevisions) : Promise.reject(new Error("Teams 集成已停止")) : undefined,
@@ -112,6 +120,7 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
   } catch (error) {
     active = false;
     controller.abort();
+    void stopSelfChat?.().catch(() => console.error("Teams 自聊测试关闭失败"));
     delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus; delete teamsSender.read; delete teamsSender.canReadEpisodeSource;
     throw error;
   }
@@ -129,6 +138,6 @@ export function startServerIntegrations({ config, store, teamsSender, wechat, en
     controller.abort();
     delete teamsSender.send; delete teamsSender.refresh; delete teamsSender.syncStatus; delete teamsSender.read; delete teamsSender.canReadEpisodeSource;
     const forwarding = stopForward?.();
-    return closing = Promise.allSettled([...pending, forwarding, stopSync?.(), stopArchive()]).then(() => {});
+    return closing = Promise.allSettled([...pending, forwarding, stopSync?.(), stopArchive(), stopSelfChat?.()]).then(() => {});
   };
 }

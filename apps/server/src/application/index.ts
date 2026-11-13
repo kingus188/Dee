@@ -13,6 +13,7 @@ import { openTeamsStore } from "../teams-store.js";
 import { createTeamsReadPort } from "../teams-read-port.js";
 import { openEpisodeStore } from "../episode-store.js";
 import { createSummarizer } from "../episode-model.js";
+import { createSelfChatGenerator } from "../teams-self-chat.js";
 import { repairConversationTitles } from "../conversation-titles.js";
 import { reviewTeamsNotification } from "../teams-notifications.js";
 import { createTeamsReplyPort, type TeamsSender } from "../teams-reply-port.js";
@@ -103,7 +104,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
         });
       }
       const taskGraph = await runtime.harness.taskGraph(ctx);
-      return { ...runtime, peers, config, ctx, taskGraph, tasks, notifications, daylight, dailyReports, businessDatabase, wechat, modelSettings, wechatSettings, teamsStore, teamsSender, mail, episodeStore, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
+      return { ...runtime, peers, config, ctx, taskGraph, tasks, notifications, daylight, dailyReports, businessDatabase, wechat, modelSettings, wechatSettings, teamsStore, teamsSender, mail, episodeStore, generateSelfChat: modelConfigured ? createSelfChatGenerator(models, agentModel) : undefined, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
     } catch (error) {
       wechat?.stop();
       await runtime.harness.close(ctx);

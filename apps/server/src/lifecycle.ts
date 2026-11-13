@@ -48,7 +48,7 @@ export async function startServer(config: AppConfig, host = config.password || c
       });
     });
     stopIntegrations = startServerIntegrations({
-      config: app.config, store: app.teamsStore, teamsSender: app.teamsSender, env,
+      config: app.config, store: app.teamsStore, teamsSender: app.teamsSender, env, generateSelfChat: app.generateSelfChat,
       wechat: { ...app.config.wechat,
         notifyBatch: app.wechat ? (wxid, text, messageIds, sourceRevisions) => app.wechat!.notify("primary", wxid, text, { kind: "teams", messageIds, sourceRevisions }).then(() => {}) : undefined,
         undelivered: app.wechat ? () => app.wechat!.undelivered() : undefined },
