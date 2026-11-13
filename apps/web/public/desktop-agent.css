@@ -80,6 +80,7 @@
   .composer-execution { gap: 0; }
   .composer-execution > .icon-button { width: 24px; min-width: 24px; padding: 0; }
   .composer-execution .agent-picker-popover { width: min(420px, calc(100vw - 140px)); }
+  .composer-execution .local-agent-settings { width: min(420px, calc(100vw - 140px)); }
   .composer-execution > select { width: 48px; min-width: 0; padding-inline: 0; }
   .composer-execution .desktop-agent-warning { width: 24px; }
   .composer-execution .desktop-agent-picker { flex-shrink: 0; }

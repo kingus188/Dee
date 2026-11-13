@@ -151,6 +151,15 @@ test("执行目标和模型与发送按钮共用工具栏，不额外占据输�
   assert.equal(actions.lastElementChild?.id, "btn-send", "发送按钮保持在工具栏末尾");
 });
 
+test("附件、执行控件和发送按钮保持在同一网格行并对齐底边", async () => {
+  const css = await readFile(new URL("../public/prototype.css", import.meta.url), "utf8");
+  const rule = (selector: string) => css.match(new RegExp(`& \\.${selector} \\{([^}]+)\\}`))?.[1] ?? "";
+  assert.match(rule("composer-main"), /align-items: end;/, "不同高度的附件和操作区不能按中心对齐");
+  assert.match(rule("attach-button"), /grid-row: 2;/);
+  assert.match(rule("composer-actions"), /grid-row: 2;/);
+  assert.match(rule("composer-actions"), /align-items: flex-end;/, "发送按钮也必须对齐较高的执行控件底边");
+});
+
 test("微信提示与附件有独立容器，快捷菜单和输入不在该滚动区域内", async t => {
   const { dom } = await mount(t, <Composer {...props} draft="/" view={{ ...props.view, channel: "wechat" }} />);
   const doc = dom.window.document, context = doc.querySelector(".composer-context")!;
