@@ -1,6 +1,14 @@
 /* Execution controls live inside the shared conversation composer. */
 .chat-column:has(.agent-picker-popover) { z-index: 22; }
-.agent-picker-popover[data-model-view="true"] { grid-template-columns: 42px minmax(0, 1fr) 170px; grid-template-rows: minmax(0, 1fr) auto; width: min(550px, calc(100vw - 40px)); }
+.agent-picker-popover, .agent-picker-popover[data-model-view="true"] { grid-template-columns: 42px 130px minmax(0, 1fr) 120px; grid-template-rows: minmax(0, 1fr) auto; width: min(640px, calc(100vw - 40px)); }
+.agent-picker-agents { min-width: 0; overflow-y: auto; padding: 8px; border-right: 1px solid var(--dee-separator); }
+.agent-picker-agents header { height: 33px; padding: 4px 8px; color: var(--text-muted); font-size: 12px; }
+.agent-picker-main > header { padding: 6px 2px 0; color: var(--text-muted); font-size: 12px; }
+.agent-picker-agents .agent-picker-option { min-height: 36px; gap: 6px; }
+.agent-picker-rail { overflow-x: hidden; }
+.agent-picker-rail button { width: 100%; min-width: 0; }
+.agent-picker-option-text { overflow-wrap: anywhere; }
+.agent-picker-main .agent-picker-option-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-picker-popover[data-model-view="true"] .agent-picker-option { min-height: 32px; padding-block: 6px; }
 .agent-picker-popover[data-model-view="true"] .agent-picker-main { min-height: 0; }
 .agent-picker-reasoning { min-width: 0; overflow-y: auto; padding: 8px 12px; border-left: 1px solid var(--dee-separator); }
@@ -10,8 +18,41 @@
 .agent-picker-footer:has(.agent-picker-permission) { flex-wrap: wrap; }
 .agent-picker-permission select { max-width: 190px; min-width: 0; border: 0; background: transparent; color: var(--text-main); font: inherit; cursor: pointer; }
 @media (max-width: 600px) {
-  .agent-picker-popover[data-model-view="true"] { grid-template-columns: 38px minmax(0, 1fr) 112px; right: -8px; }
+  .agent-picker-popover, .agent-picker-popover[data-model-view="true"] { grid-template-columns: 32px 76px minmax(0, 1fr) 78px; right: -8px; }
+  .agent-picker-agents { padding-inline: 3px; }
+  .agent-picker-agents .agent-picker-mark { display: none; }
   .agent-picker-reasoning { padding-inline: 6px; }
+  .agent-picker-main .agent-picker-mark { display: none; }
+  .agent-picker-main .agent-picker-option { gap: 4px; padding-inline: 3px; }
+  .agent-picker-main .agent-picker-option > .icon { width: 12px; height: 12px; }
+  .agent-picker-reasoning .agent-picker-option { gap: 3px; padding-inline: 2px; font-size: 11px; }
+}
+.desktop-agent-picker .agent-picker-popover[data-compact="true"][data-model-view] { grid-template-columns: 54px minmax(0, 1fr) 58px; }
+.agent-picker-popover[data-compact="true"] .agent-picker-rail, .agent-picker-popover[data-compact="true"] .agent-picker-mark { display: none; }
+.agent-picker-popover[data-compact="true"] .agent-picker-agents, .agent-picker-popover[data-compact="true"] .agent-picker-main, .agent-picker-popover[data-compact="true"] .agent-picker-reasoning { padding-inline: 3px; }
+.agent-picker-popover[data-compact="true"] .agent-picker-option { gap: 2px; padding-inline: 2px; font-size: 11px; }
+.agent-picker-popover[data-compact="true"] .agent-picker-option > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.agent-picker-popover[data-compact="true"] .agent-picker-option > .icon { width: 10px; height: 10px; }
+.desktop-permission-picker { position: relative; flex-shrink: 0; }
+.permission-picker-trigger { display: flex; align-items: center; gap: 4px; padding: 4px; min-height: 30px; border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.permission-picker-trigger .icon { width: 14px; height: 14px; }
+.permission-picker-trigger[aria-expanded="true"] { color: var(--primary); }
+.permission-picker-popover { position: absolute; right: 0; bottom: calc(100% + 10px); z-index: 24; width: 240px; padding: 8px; overflow-y: auto; color: var(--text-main); background: var(--bg-surface); border: 1px solid var(--dee-separator); border-radius: 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 16%); }
+.permission-picker-popover header { padding: 4px 6px 8px; color: var(--text-muted); font-size: 12px; }
+.permission-picker-popover button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.permission-picker-popover button[aria-pressed="true"] { background: var(--primary-light); }
+.permission-picker-popover button:hover { background: var(--bg-subtle); }
+.permission-picker-popover button:disabled { opacity: .45; cursor: default; }
+.permission-picker-popover button span { flex: 1; }
+.permission-picker-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; background: var(--bg-subtle); border-radius: 6px; }
+.permission-picker-options button { justify-content: center; }
+.permission-picker-options button span, .permission-picker-options button > .icon:last-child:not(:first-child) { display: none; }
+.permission-picker-popover > strong { display: block; margin: 10px 6px 0; font-size: 12px; font-weight: 500; }
+.permission-picker-popover .icon { width: 15px; height: 15px; flex-shrink: 0; }
+.permission-picker-popover p { margin: 8px 6px 4px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+@media (max-width: 520px) {
+  .permission-picker-trigger { width: 24px; padding-inline: 4px; }
+  .permission-picker-trigger span, .permission-picker-trigger .icon:last-child { display: none; }
 }
 .composer-actions:has(.composer-execution) { min-width: 0; }
 .composer-actions:has(.composer-execution) .btn-abort { flex-shrink: 0; white-space: nowrap; }
@@ -31,7 +72,7 @@
 .agent-picker-mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; font-size: 20px; font-weight: 500; }
 .agent-picker-mark .icon, .agent-picker-rail .icon { width: 18px; height: 18px; }
 [data-agent="claude"] > .icon { color: #c47752; }
-.agent-picker-popover { position: absolute; z-index: 12; right: 0; bottom: calc(100% + 12px); display: grid; grid-template-columns: 48px minmax(0, 1fr); width: min(420px, calc(100vw - 100px)); max-height: min(380px, calc(100dvh - 180px)); color: var(--text-main); background: var(--bg-surface); border: 1px solid var(--dee-separator); border-radius: 12px; box-shadow: 0 12px 36px rgb(0 0 0 / 16%), 0 2px 8px rgb(0 0 0 / 5%); overflow: hidden; }
+.agent-picker-popover { position: absolute; z-index: 12; right: 0; bottom: calc(100% + 12px); display: grid; grid-template-columns: 42px 130px minmax(0, 1fr) 120px; width: min(640px, calc(100vw - 40px)); max-height: min(380px, calc(100dvh - 180px)); color: var(--text-main); background: var(--bg-surface); border: 1px solid var(--dee-separator); border-radius: 12px; box-shadow: 0 12px 36px rgb(0 0 0 / 16%), 0 2px 8px rgb(0 0 0 / 5%); overflow: hidden; }
 .agent-picker-rail { display: flex; flex-direction: column; gap: 5px; padding: 10px 6px; border-right: 1px solid var(--dee-separator); background: var(--bg-subtle); overflow-y: auto; }
 .agent-picker-rail button { display: grid; place-items: center; flex: none; width: 34px; height: 34px; padding: 0; font: inherit; font-size: 21px; color: var(--text-muted); background: transparent; border: 0; border-radius: 7px; cursor: pointer; }
 .agent-picker-rail button:hover, .agent-picker-rail button[aria-pressed="true"] { color: var(--primary); background: var(--primary-light); }
@@ -80,7 +121,8 @@
   #mascot-card.app-layout .composer-actions:has(.composer-execution) { gap: 4px; }
   .composer-execution { gap: 0; }
   .composer-execution > .icon-button { width: 24px; min-width: 24px; padding: 0; }
-  .composer-execution .desktop-agent-picker .agent-picker-popover { width: min(420px, calc(100vw - 140px)); right: -24px; }
+  .composer-execution .desktop-agent-picker .agent-picker-popover { position: fixed; left: 12px; right: 12px; bottom: 112px; width: auto; }
+  .composer-execution .desktop-agent-picker .agent-picker-popover { grid-template-columns: 32px 76px minmax(0, 1fr) 78px; }
   .composer-execution .local-agent-settings { width: min(420px, calc(100vw - 140px)); }
   .composer-execution > select { width: 48px; min-width: 0; padding-inline: 0; }
   .composer-execution .desktop-agent-warning { width: 24px; }

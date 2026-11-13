@@ -67,7 +67,7 @@ createInterface({input:process.stdin}).on('line',line=>{
  if(m.id==='permission'){if(m.result?.decision!=='decline')throw Error('native permission bypassed');done();}
 });`);
   await chmod(executable, 0o700);
-  const settings = openAgentSettings(desktop); settings.selectAgent({ kind: "codex", config: { executable, args: [] } });
+  const settings = openAgentSettings(desktop); settings.selectAgent({ kind: "codex", config: { executable, args: [], permission: "default" } });
   const transport = createAgentRequest({ origin: () => origin, serverId: () => origin, username: () => undefined, password: () => undefined, token: () => token, fetch, socket: url => new WebSocket(url) });
   let dropAdmissionResponse = false, dropped = 0;
   const request: AgentRequest = Object.assign(async (path: string, body?: unknown, serverId?: string) => {

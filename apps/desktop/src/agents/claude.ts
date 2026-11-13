@@ -38,6 +38,7 @@ export async function openClaude(options: DriverOptions, runQuery = query): Prom
             return process;
           },
           canUseTool: async (tool, input, context) => {
+            if (tool !== "AskUserQuestion" && options.config.permissionMode === "bypassPermissions") return { behavior: "allow", updatedInput: input };
             const qs = tool === "AskUserQuestion" ? questions(input.questions) : undefined;
             const answer = await options.ask({ title: qs ? "Claude 需要补充信息" : `Claude 请求使用 ${tool}`, detail: qs ? "" : JSON.stringify(input, null, 2).slice(0, 12000), questions: qs }, context.signal);
             return answer.allow ? { behavior: "allow", updatedInput: qs ? { ...input, answers: answer.answers ?? {} } : input } : { behavior: "deny", message: "用户未授权此操作" };

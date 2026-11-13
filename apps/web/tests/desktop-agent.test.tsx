@@ -436,6 +436,7 @@ test("external Agent selection does not require Pi API settings and displays bou
 
 for (const [kind, name] of [["claude", "Claude Code"], ["omp", "OMP"]] as const) test(`switching to ${name} uses the Agent bridge and keeps Pi model form out of the external settings`, async t => {
   const state = snapshot(), native = bridge(state);
+  native.agentModels = async () => [{ id: "concrete-model", name: "Concrete model", efforts: [] }];
   const select = t.mock.method(native, "selectAgent", async (input: DesktopAgentSelection) => { state.agent = input.kind; state.agentConfig = { executable: kind, args: [] }; });
   const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native }); await render(<DesktopAgent />);
@@ -443,9 +444,8 @@ for (const [kind, name] of [["claude", "Claude Code"], ["omp", "OMP"]] as const)
   await act(async () => picker.click());
   await act(async () => document.querySelector<HTMLButtonElement>(`[aria-label="选择 ${name}"]`)!.click());
   assert.equal(select.mock.calls[0]!.arguments[0]!.kind, kind);
-  assert.equal(picker.getAttribute("aria-expanded"), "false");
-  assert.match(picker.textContent!, new RegExp(`${name}.*默认模型`));
-  assert.equal(document.activeElement, picker);
+  assert.equal(picker.getAttribute("aria-expanded"), "true");
+  assert.match(picker.textContent!, new RegExp(`${name}.*concrete-model`));
   if (kind === "claude") {
     assert.equal(document.querySelector('[aria-label="Agent 设置"]'), null);
     assert.equal(document.querySelector('[aria-label="外部 Agent 设置"]'), null);
@@ -458,23 +458,22 @@ for (const [kind, name] of [["claude", "Claude Code"], ["omp", "OMP"]] as const)
   assert.equal(document.querySelector<HTMLInputElement>('[name="executable"]')!.value, kind);
 });
 
-test("composer picker filters real Agent options, supports keyboard navigation and dismisses without sending", async t => {
+test("picker keeps Agent, model and reasoning columns visible and supports keyboard dismissal", async t => {
   const state = snapshot(), native = bridge(state);
+  native.agentModels = async () => [{ id: "concrete-model", name: "Concrete model", efforts: ["low", "high"] }];
   const send = t.mock.method(native, "send", async () => {});
-  const select = t.mock.method(native, "selectAgent", async (input: DesktopAgentSelection) => { state.agent = input.kind; });
+  const select = t.mock.method(native, "selectAgent", async (input: DesktopAgentSelection) => { state.agent = input.kind; state.agentConfig = input.config ?? { executable: input.kind, args: [] }; });
   const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native }); await render(<DesktopAgent />);
   const document = dom.window.document, picker = document.querySelector<HTMLButtonElement>('[aria-label="执行 Agent"]')!;
-  assert.ok(picker.closest(".input-box-wrapper .composer-execution"));
-  assert.equal(document.querySelector(".desktop-agent-workspace [aria-label='执行 Agent']"), null);
   await act(async () => picker.click());
+  assert.equal(document.querySelectorAll(".agent-picker-agents button").length, 5);
+  assert.ok(document.querySelector(".agent-picker-main"));
+  assert.ok(document.querySelector(".agent-picker-reasoning"));
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="选择 OMP"]')!.click());
+  assert.equal(picker.getAttribute("aria-expanded"), "true");
+  assert.equal(select.mock.calls[0]!.arguments[0]!.kind, "omp");
   const search = document.querySelector<HTMLInputElement>('[aria-label="搜索 Agent 或模型"]')!;
-  assert.equal(document.activeElement, search);
-  assert.deepEqual([...document.querySelectorAll(".agent-picker-option")].map(option => option.getAttribute("aria-label")), ["选择 Pi", "选择 Codex", "选择 Claude Code", "选择 OMP", "选择 ACP Agent"]);
-  assert.match(document.querySelector('[aria-label="选择 Pi"]')!.textContent!, /local-model/);
-  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="筛选 OMP"]')!.click());
-  assert.equal(document.querySelectorAll(".agent-picker-option").length, 1);
-  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="全部 Agent"]')!.click());
   async function searchFor(value: string) {
     await act(async () => {
       Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!.call(search, value);
@@ -482,29 +481,18 @@ test("composer picker filters real Agent options, supports keyboard navigation a
     });
   }
   await searchFor("missing");
-  assert.match(document.querySelector(".agent-picker-empty")!.textContent!, /没有匹配/);
-  await searchFor(" CODEX ");
-  assert.equal(document.querySelectorAll(".agent-picker-option").length, 1);
+  assert.equal(document.querySelectorAll(".agent-picker-main button").length, 0);
+  assert.equal(document.querySelectorAll(".agent-picker-agents button").length, 5);
+  await searchFor("Concrete");
   search.focus();
   await act(async () => search.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
-  assert.equal(document.activeElement?.getAttribute("aria-label"), "选择 Codex");
+  assert.equal(document.activeElement?.getAttribute("aria-label"), "选择模型 Concrete model");
   await act(async () => document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
   assert.equal(document.querySelector(".agent-picker-popover"), null);
   assert.equal(document.activeElement, picker);
-  assert.equal(select.mock.callCount(), 0);
   await act(async () => picker.click());
   await act(async () => document.body.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true })));
   assert.equal(document.querySelector(".agent-picker-popover"), null);
-  await act(async () => picker.click());
-  const nextSearch = document.querySelector<HTMLInputElement>('[aria-label="搜索 Agent 或模型"]')!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!.call(nextSearch, "Claude");
-    nextSearch.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  });
-  let prevented = false;
-  await act(async () => { prevented = !nextSearch.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); });
-  assert.equal(prevented, true);
-  assert.equal(select.mock.calls[0]!.arguments[0]!.kind, "claude");
   assert.equal(send.mock.callCount(), 0);
 });
 

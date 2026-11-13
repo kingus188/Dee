@@ -4,6 +4,34 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openAgentSettings, validateAgentSelection } from "../dist/agent-settings.js";
+test("Full access is the default for every Agent, legacy settings migrate once and later explicit restrictions survive", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dee-access-defaults-"));
+  try {
+    const initial = openAgentSettings(directory).get();
+    assert.equal(initial.piAccess, "full");
+    assert.equal(initial.agents.codex.sandbox, "danger-full-access");
+    assert.equal(initial.agents.codex.approvalPolicy, "never");
+    assert.equal(initial.agents.claude.permissionMode, "bypassPermissions");
+    assert.equal(initial.agents.omp.access, "full");
+    assert.equal(initial.agents.acp.access, "full");
+    const legacy = { ...initial, permissionDefaultsVersion: undefined, piAccess: "ask", agents: { ...initial.agents, codex: { executable: "codex", args: [], sandbox: "read-only", model: "keep-model" } } };
+    const original = JSON.stringify(legacy);
+    await writeFile(join(directory, "desktop-agent.json"), original);
+    const settings = openAgentSettings(directory);
+    assert.equal(await readFile(join(directory, "desktop-agent.json.before-full-access-v1"), "utf8"), original);
+    assert.equal((await stat(join(directory, "desktop-agent.json.before-full-access-v1"))).mode & 0o777, 0o600);
+    assert.equal(settings.get().agents.codex.model, "keep-model");
+    assert.equal(settings.get().agents.codex.sandbox, "danger-full-access");
+    settings.selectAgent({ kind: "pi", piAccess: "ask" });
+    settings.selectAgent({ kind: "codex", config: { executable: "codex", args: [], sandbox: "read-only", approvalPolicy: "on-request" } });
+    const restored = openAgentSettings(directory).get();
+    assert.equal(restored.piAccess, "ask");
+    assert.equal(restored.agents.codex.sandbox, "read-only");
+    assert.equal(restored.nodeId, initial.nodeId);
+    assert.throws(() => validateAgentSelection({ kind: "pi", piAccess: "invalid" }), /权限/);
+    assert.throws(() => validateAgentSelection({ kind: "omp", config: { executable: "omp", args: [], access: "invalid" } }), /权限/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 test("agent execution options survive validation and reject unsupported values", () => {
   const config = { executable: "codex", args: [], permission: "readOnly", effort: "high" };
   assert.deepEqual(validateAgentSelection({ kind: "codex", config }).config, config);
@@ -57,7 +85,7 @@ test("OMP upgrades existing settings, persists native selection and rejects extr
     settings.selectAgent({ kind: "omp", config: { executable: "/opt/bin/omp", args: [] } });
     const reopened = openAgentSettings(directory).get();
     assert.equal(reopened.agent, "omp");
-    assert.deepEqual((reopened.agents as Record<string, unknown>).omp, { executable: "/opt/bin/omp", args: [] });
+    assert.deepEqual((reopened.agents as Record<string, unknown>).omp, { executable: "/opt/bin/omp", args: [], access: "full" });
     assert.equal(reopened.nodeId, initial.nodeId);
     assert.throws(() => validateAgentSelection({ kind: "omp", config: { executable: "omp", args: ["--no-session"] } }), /额外启动参数/);
   } finally { await rm(directory, { recursive: true, force: true }); }

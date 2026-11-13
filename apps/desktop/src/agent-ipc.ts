@@ -2,6 +2,7 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from "electron";
 import { dialog } from "electron";
 import { openAgentSettings, validateAgentSelection } from "./agent-settings.js";
 import { readAgentModels } from "./agents/models.js";
+import { loadPiModels } from "./pi-models.js";
 import { readAgentPermissions } from "./agents/permissions.js";
 import { openDesktopAgent } from "./local-agent.js";
 import type { AgentRequest } from "./local-agent.js";
@@ -25,9 +26,24 @@ export async function registerDesktopAgent(options: { ipc: IpcMain; directory: s
   }
   const handlers: Record<string, (input: never) => unknown> = {
     permissions: () => { const current = settings.get(); if (current.agent !== "codex" && current.agent !== "claude") return []; return readAgentPermissions(current.agent, current.agents[current.agent], options.searchPath, options.env); },
-    models: () => { const current = settings.get(); if (current.agent === "pi" || !current.workspace) throw new Error("请选择外部 Agent"); return readAgentModels(current.agent, current.agents[current.agent], current.workspace, options.searchPath, options.env); },
+    models: async () => {
+      const current = settings.get();
+      if (!current.workspace) throw new Error("请选择工作目录");
+      if (current.agent === "pi") {
+        const { getSupportedThinkingLevels } = await import("@earendil-works/pi-ai");
+        const catalog = await loadPiModels({ cwd: current.workspace, searchPath: options.searchPath, env: options.env, piModel: current.piModel });
+        return (await catalog.models.getAvailable()).map(model => ({ id: JSON.stringify([model.provider, model.id]), name: `${model.name || model.id} · ${model.provider}`, efforts: getSupportedThinkingLevels(model) }));
+      }
+      return readAgentModels(current.agent, current.agents[current.agent], current.workspace, options.searchPath, options.env);
+    },
     snapshot: () => agent.snapshot(), "select-agent": async input => {
       const selection = validateAgentSelection(input);
+      if (selection.kind === "pi" && selection.piEffort) {
+        const { getSupportedThinkingLevels } = await import("@earendil-works/pi-ai");
+        const catalog = await loadPiModels({ cwd: settings.get().workspace ?? options.directory, searchPath: options.searchPath, env: options.env, piModel: selection.piModel ?? settings.get().piModel });
+        const model = catalog.models.getModel(catalog.agentModel.provider, catalog.agentModel.modelId);
+        if (!model || !getSupportedThinkingLevels(model).includes(selection.piEffort)) throw new Error("该模型不支持所选思考强度");
+      }
       const keys = ["permissionMode", "sandbox", "approvalPolicy"] as const;
       if (selection.config && keys.some(key => selection.config?.[key] !== undefined)) {
         const parameters = await readAgentPermissions(selection.kind, selection.config, options.searchPath, options.env);

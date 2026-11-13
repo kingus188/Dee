@@ -7,6 +7,7 @@ export async function openCodex(options: DriverOptions): Promise<AgentDriver> {
   let threadId = options.sessionId, turnId: string | undefined;
   let settle: { resolve(): void; reject(error: Error): void } | undefined;
   let starting = false;
+  const fullAccess = options.config.sandbox === "danger-full-access" && options.config.approvalPolicy === "never";
   let turnReady: Promise<void> | undefined, releaseStart = () => {};
   const queued: Array<{ method: string; params: Record<string, unknown> }> = [];
   function notify(method: string, params: Record<string, unknown>) {
@@ -35,11 +36,11 @@ export async function openCodex(options: DriverOptions): Promise<AgentDriver> {
         // Codex 0.167.1 encodes single MCP tool approval as an empty form; other elicitations need their own UI.
         const emptyForm = schema.type === "object" && schema.properties !== null && typeof schema.properties === "object" && !Array.isArray(schema.properties) && Object.keys(schema.properties).length === 0 && (schema.required === undefined || (Array.isArray(schema.required) && schema.required.length === 0));
         if (params.mode !== "form" || meta.codex_approval_kind !== "mcp_tool_call" || !string(params.serverName) || !string(meta.tool_name) || !emptyForm) return { action: "decline" };
-        const answer = await options.ask({ title: "Codex 请求 MCP 工具审批", detail: JSON.stringify(params, null, 2).slice(0, 12000) });
+        const answer = fullAccess ? { allow: true } : await options.ask({ title: "Codex 请求 MCP 工具审批", detail: JSON.stringify(params, null, 2).slice(0, 12000) });
         return answer.allow && settle && params.turnId === turnId ? { action: "accept", content: {} } : { action: "decline" };
       }
       if (["item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval"].includes(method)) {
-        const answer = await options.ask({ title: method.includes("commandExecution") ? "Codex 请求执行命令" : "Codex 请求文件或额外权限", detail: JSON.stringify(params, null, 2).slice(0, 12000) });
+        const answer = fullAccess ? { allow: true } : await options.ask({ title: method.includes("commandExecution") ? "Codex 请求执行命令" : "Codex 请求文件或额外权限", detail: JSON.stringify(params, null, 2).slice(0, 12000) });
         return method === "item/permissions/requestApproval" ? { permissions: answer.allow ? object(params.permissions) : {}, scope: "turn" } : { decision: answer.allow ? "accept" : "decline" };
       }
       if (method === "item/tool/requestUserInput") {

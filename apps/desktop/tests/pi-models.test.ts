@@ -55,6 +55,19 @@ test("Pi uses its installed SDK, workspace settings and native auth without expo
   ]);
 });
 
+test("Pi model selection survives restart and overrides the native default", async t => {
+  const f = await fixture(t);
+  const settings = openAgentSettings(f.directory);
+  settings.selectAgent({ kind: "pi", piModel: { provider: "native-provider", modelId: "native-model" }, piEffort: "high" });
+  const restored = openAgentSettings(f.directory).get();
+  assert.deepEqual(restored.piModel, { provider: "native-provider", modelId: "native-model" });
+  assert.equal(restored.piEffort, "high");
+  assert.equal((await loadPiModels({ ...f.options, piModel: restored.piModel })).configured, true);
+  assert.equal((await loadPiModels({ ...f.options, piModel: { provider: "unknown", modelId: "unknown" } })).configured, false);
+  settings.selectAgent({ kind: "pi", piModel: null });
+  assert.equal(openAgentSettings(f.directory).get().piModel, null);
+});
+
 test("missing Pi model, auth or compatible SDK fails closed with safe guidance", async t => {
   const f = await fixture(t);
   f.state.configured = false;

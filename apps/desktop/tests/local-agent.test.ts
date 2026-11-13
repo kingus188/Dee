@@ -70,6 +70,7 @@ test("local Agent owns model, protects tools, persists approvals and returns one
   const port = (model.address() as { port: number }).port;
   const settings = openAgentSettings(directory);
   const modelConfig = { api: "openai-completions", baseUrl: `http://127.0.0.1:${port}/v1`, model: "fixture", apiKey: "fixture-only", contextWindow: 128000, maxTokens: 8192 };
+  settings.selectAgent({ kind: "pi", piAccess: "ask" });
   const loadModels = async () => ({ ...await createModelCatalog(modelConfig), model: { api: modelConfig.api, baseUrl: "", model: modelConfig.model, contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, hasApiKey: true } });
   const workspace = settings.get().workspace!;
   await writeFile(join(workspace, "fixture.txt"), "本机资料");
@@ -93,9 +94,11 @@ test("local Agent owns model, protects tools, persists approvals and returns one
     await until(() => agent.snapshot(), snapshot => snapshot.jobs[0]?.status === "done");
     assert.equal(calls, 2, "reopening cannot repeat completed tools or generation");
     assert.match(toolResults[0]!, /用户未授权/);
-    const id = randomUUID(); allow = true; await agent.send({ id, text: "本机聊天" });
+    settings.selectAgent({ kind: "pi", piAccess: "full" });
+    const id = randomUUID(); await agent.send({ id, text: "本机聊天" });
     await until(() => agent.snapshot(), snapshot => !snapshot.busy && snapshot.messages.some(message => message.text === "本机验证完成"));
     assert.match(toolResults.at(-1)!, /本机资料/);
+    assert.equal(confirms, 1, "Full access executes the tool without a second confirmation, even when confirm would deny");
     const before = calls; await agent.send({ id, text: "本机聊天" });
     await until(() => agent.snapshot(), snapshot => !snapshot.busy);
     assert.equal(calls, before, "repeated send ID is one submission");

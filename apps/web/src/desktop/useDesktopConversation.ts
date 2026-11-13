@@ -10,17 +10,24 @@ export function useDesktopConversation() {
   const [pending, setPending] = useState<string[]>([]);
   const locks = useRef(new Set<string>());
   const current = useRef(snapshot); current.current = snapshot;
-  const refresh = useCallback(async () => { if (bridge) setSnapshot(await bridge.snapshot()); }, [bridge]);
+  const snapshotRequest = useRef(0);
+  const refresh = useCallback(async () => {
+    if (!bridge) return;
+    const request = ++snapshotRequest.current;
+    const next = await bridge.snapshot();
+    if (request === snapshotRequest.current) setSnapshot(next);
+  }, [bridge]);
   useEffect(() => {
     if (!bridge) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     async function poll() {
+      const request = ++snapshotRequest.current;
       try {
         const next = await bridge!.snapshot();
-        if (!stopped) { setSnapshot(next); setPollError(""); }
+        if (!stopped && request === snapshotRequest.current) { setSnapshot(next); setPollError(""); }
       } catch (cause) {
-        if (!stopped) setPollError(cause instanceof Error ? cause.message : "无法读取本机状态，请重试。");
+        if (!stopped && request === snapshotRequest.current) setPollError(cause instanceof Error ? cause.message : "无法读取本机状态，请重试。");
       } finally { if (!stopped) timer = setTimeout(() => void poll(), 1000); }
     }
     void poll();

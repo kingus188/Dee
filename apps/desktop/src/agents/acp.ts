@@ -4,7 +4,7 @@ import { spawnAgent, stopAgent } from "./process.js";
 import { object, string } from "./types.js";
 import type { AgentDriver, DriverOptions } from "./types.js";
 
-export async function openAcp(options: DriverOptions): Promise<AgentDriver> {
+export async function openAcp(options: DriverOptions, inspect?: (options: acp.SessionConfigOption[]) => void): Promise<AgentDriver> {
   options.signal.throwIfAborted();
   const child = spawnAgent(options.config.executable, options.config.args, options.cwd, options.searchPath, options.env);
   let context: acp.ClientContext | undefined, sessionId = options.sessionId, closed = false;
@@ -32,8 +32,8 @@ export async function openAcp(options: DriverOptions): Promise<AgentDriver> {
     })
     .onRequest(acp.methods.client.session.requestPermission, async ctx => {
       if (ctx.params.sessionId !== sessionId) return { outcome: { outcome: "cancelled" as const } };
-      const answer = await options.ask({ title: ctx.params.toolCall.title || "ACP Agent 请求权限", detail: JSON.stringify(ctx.params.toolCall, null, 2).slice(0, 12000) });
-      const option = ctx.params.options.find(option => option.kind === (answer.allow ? "allow_once" : "reject_once"));
+      const answer = options.config.access === "full" ? { allow: true } : await options.ask({ title: ctx.params.toolCall.title || "ACP Agent 请求权限", detail: JSON.stringify(ctx.params.toolCall, null, 2).slice(0, 12000) });
+      const option = ctx.params.options.find(option => option.kind === (answer.allow ? "allow_once" : "reject_once")) ?? (answer.allow && options.config.access === "full" ? ctx.params.options.find(option => option.kind === "allow_always") : undefined);
       return option ? { outcome: { outcome: "selected" as const, optionId: option.optionId } } : { outcome: { outcome: "cancelled" as const } };
     })
     .connectWith(stream, async ctx => {
@@ -45,10 +45,24 @@ export async function openAcp(options: DriverOptions): Promise<AgentDriver> {
       const session = sessionId ? await ctx.request(acp.methods.agent.session.load, { sessionId, cwd: options.cwd, mcpServers }) : await ctx.request(acp.methods.agent.session.new, { cwd: options.cwd, mcpServers });
       if (!sessionId) sessionId = string(object(session).sessionId);
       if (!sessionId) throw new Error("ACP 未返回会话标识");
+      const modelOption = session.configOptions?.find(option => option.category === "model" && option.type === "select");
+      let configOptions = session.configOptions ?? [];
+      if (options.config.model) {
+        if (!modelOption) throw new Error("ACP Agent 未提供模型选择参数");
+        const response = await ctx.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: modelOption.id, value: options.config.model });
+        configOptions = response.configOptions;
+      }
+      inspect?.(configOptions);
+      if (options.config.effort) {
+        const effort = configOptions.find(option => option.category === "thought_level" && option.type === "select");
+        if (!effort || effort.type !== "select" || !effort.options.flatMap(option => "options" in option ? option.options : [option]).some(option => option.value === options.config.effort)) throw new Error("该模型不支持所选思考强度");
+        await ctx.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: effort.id, value: options.config.effort });
+      }
       const modes = session?.modes?.availableModes;
-      const mode = options.config.mode ?? session?.modes?.currentModeId;
+      const configuredMode = options.config.access === "full" && modes?.some(mode => mode.id === "default") ? "default" : options.config.mode;
+      const mode = configuredMode ?? session?.modes?.currentModeId;
       if (modes?.length && !modes.some(item => item.id === mode)) throw new Error(`请在 ACP 设置指定有效模式 ID：${modes.map(mode => mode.id).join("、")}`);
-      if (options.config.mode) await ctx.request(acp.methods.agent.session.setMode, { sessionId, modeId: options.config.mode });
+      if (configuredMode && configuredMode !== session?.modes?.currentModeId) await ctx.request(acp.methods.agent.session.setMode, { sessionId, modeId: configuredMode });
       loading = false; options.emit({ type: "session", id: sessionId }); ready();
       await lifetime;
     });

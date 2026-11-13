@@ -4,9 +4,10 @@ export type DesktopConversation = {
   messages: Array<{ id: string; role: "user" | "assistant"; text: string }>;
 };
 export type DesktopConversationUpload = DesktopConversation & { deviceId: string; revision: number };
-export type ExternalAgentConfig = { executable: string; args: string[]; mode?: string; permission?: "default" | "readOnly" | "autoEdit"; permissionMode?: string; sandbox?: string; approvalPolicy?: string; effort?: string; model?: string };
+export type ExternalAgentConfig = { executable: string; args: string[]; access?: "ask" | "full"; mode?: string; permission?: "default" | "readOnly" | "autoEdit"; permissionMode?: string; sandbox?: string; approvalPolicy?: string; effort?: string; model?: string };
 export type AgentPermissionParameter = { parameter: "permissionMode" | "sandbox" | "approvalPolicy"; values: string[] };
-export type DesktopAgentSelection = { kind: DesktopAgentKind; config?: ExternalAgentConfig };
+export type DesktopPiEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type DesktopAgentSelection = { kind: DesktopAgentKind; config?: ExternalAgentConfig; piAccess?: "ask" | "full"; piModel?: { provider: string; modelId: string } | null; piEffort?: DesktopPiEffort | null };
 export type AgentQuestion = { id: string; text: string; options?: string[]; secret?: boolean };
 export type AgentApproval = { id: string; title: string; detail: string; questions?: AgentQuestion[] };
 export type AgentApprovalAnswer = { id: string; allow: boolean; answers?: Record<string, string> };
@@ -26,6 +27,9 @@ export type DesktopPeerJob = {
   approved?: boolean;
 };
 export type DesktopAgentSnapshot = {
+  piAccess?: "ask" | "full";
+  piEffort?: DesktopPiEffort | null;
+  piModel?: { provider: string; modelId: string } | null;
   agent?: DesktopAgentKind;
   agentConfig?: ExternalAgentConfig;
   external?: ExternalAgentState;

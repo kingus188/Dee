@@ -1,10 +1,21 @@
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { openCodexRpc } from "./codex-rpc.js";
+import { openAcp } from "./acp.js";
 import { resolveAgentExecutable } from "./process.js";
 import { object, string } from "./types.js";
 import type { ExternalAgentConfig } from "@assistant/contracts";
 
 export async function readAgentModels(kind: string, config: ExternalAgentConfig, cwd: string, searchPath?: string, env?: NodeJS.ProcessEnv) {
+  if (kind === "omp") {
+    let models: Array<{ id: string; name: string; efforts: string[] }> = [];
+    const driver = await openAcp({ cwd, searchPath, env, config: { ...config, effort: undefined, args: ["acp"] }, signal: AbortSignal.timeout(20000), emit() {}, failed() {}, ask: async () => { throw new Error("模型查询不接受工具请求"); } }, options => {
+      const model = options.find(option => option.category === "model" && option.type === "select");
+      const effort = options.find(option => option.category === "thought_level" && option.type === "select");
+      const efforts = effort?.type === "select" ? effort.options.flatMap(option => "options" in option ? option.options : [option]).map(option => option.value) : [];
+      if (model?.type === "select") models = model.options.flatMap(option => "options" in option ? option.options : [option]).map(option => ({ id: option.value, name: option.name, efforts })).sort((a, b) => Number(b.id === model.currentValue) - Number(a.id === model.currentValue));
+    });
+    try { return models; } finally { await driver.close(); }
+  }
   if (kind === "codex") {
     const rpc = openCodexRpc({ executable: config.executable, cwd, searchPath, env, notify() {}, request: async () => { throw new Error("模型查询不接受工具请求"); }, failed() {} });
     try {

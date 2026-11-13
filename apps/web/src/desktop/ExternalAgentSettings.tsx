@@ -22,7 +22,7 @@ export function ExternalAgentSettings({ snapshot, bridge, busy, saved }: { snaps
     const data = new FormData(event.currentTarget);
     const permission = String(data.get("permission") ?? "default") as "default" | "readOnly" | "autoEdit";
     locked.current = true; setSaving(true); setError("");
-    void bridge.selectAgent({ kind: snapshot.agent!, config: { executable: String(data.get("executable") ?? ""), args: snapshot.agent === "acp" ? String(data.get("args") ?? "").split(/\r?\n/).filter(Boolean) : [], ...(["codex", "claude"].includes(snapshot.agent!) ? { permission, ...(model ? { model } : {}), ...(effort && efforts.includes(effort) ? { effort } : {}) } : {}), ...(snapshot.agent === "acp" ? { mode: String(data.get("mode") ?? "") } : {}) } })
+    void bridge.selectAgent({ kind: snapshot.agent!, config: { ...((snapshot.agent === "omp" || snapshot.agent === "acp") ? { access: snapshot.agentConfig?.access ?? "full" } : {}), ...(snapshot.agent === "omp" && snapshot.agentConfig?.model ? { model: snapshot.agentConfig.model, effort: snapshot.agentConfig.effort } : {}), executable: String(data.get("executable") ?? ""), args: snapshot.agent === "acp" ? String(data.get("args") ?? "").split(/\r?\n/).filter(Boolean) : [], ...(["codex", "claude"].includes(snapshot.agent!) ? { permission, ...(model ? { model } : {}), ...(effort && efforts.includes(effort) ? { effort } : {}) } : {}), ...(snapshot.agent === "acp" ? { mode: String(data.get("mode") ?? "") } : {}) } })
       .then(saved).catch(() => setError("Agent 配置未保存，请检查可执行文件和参数。")).finally(() => { locked.current = false; setSaving(false); });
   }}>
     <fieldset disabled={saving || busy}>

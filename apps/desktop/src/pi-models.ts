@@ -21,7 +21,7 @@ type PiSdk = {
   }> };
 };
 
-export async function loadPiModels(options: { cwd: string; searchPath?: string; env?: NodeJS.ProcessEnv }): Promise<PiModels> {
+export async function loadPiModels(options: { cwd: string; searchPath?: string; env?: NodeJS.ProcessEnv; piModel?: { provider: string; modelId: string } | null }): Promise<PiModels> {
   const empty = { api: "openai-completions", baseUrl: "", model: "", apiKey: "", contextWindow: 128000, maxTokens: 8192 };
   const fallback = async (error: string): Promise<PiModels> => {
     const { apiKey, ...model } = empty;
@@ -44,9 +44,9 @@ export async function loadPiModels(options: { cwd: string; searchPath?: string; 
       authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json"),
     } : {}) });
     if (models.getError()) return fallback("无法读取 Pi 模型配置，请在 Pi 中检查设置后重试。");
-    const provider = settings.getDefaultProvider(), id = settings.getDefaultModel();
+    const provider = options.piModel?.provider ?? settings.getDefaultProvider(), id = options.piModel?.modelId ?? settings.getDefaultModel();
     const model = provider && id ? models.getModel(provider, id) : undefined;
-    if (!model) return fallback("请先在 Pi 中选择默认模型，然后重新选择 Pi。");
+    if (!model) return { ...await fallback("请先选择 Pi 模型，或在 Pi 中配置默认模型。"), models };
     const configured = models.hasConfiguredAuth(model.provider);
     return { models, agentModel: { provider: model.provider, modelId: model.id }, configured,
       model: { api: model.api, baseUrl: "", model: model.id, contextWindow: model.contextWindow, maxTokens: model.maxTokens, hasApiKey: configured },
