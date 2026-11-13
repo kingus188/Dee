@@ -1,7 +1,7 @@
 import type { ConversationCard } from "../chat/cards.js";
 import { useState } from "react";
 import type { CSSProperties } from "react";
-import { renderMarkdown } from "../chat/markdown.js";
+import { MarkdownContent } from "../chat/MarkdownContent.js";
 import { Icon } from "../ui/Icon.js";
 import { taskColor, taskPriority, taskStatus } from "./related.js";
 
@@ -27,6 +27,6 @@ export function RelatedTaskDetails({ card }: { card: ConversationCard }) {
     </dl>
     {!!task.checklist.length && <ul className="related-checklist" aria-label="子任务（只读）">{task.checklist.map(item => <li key={item.id} data-done={item.done}><Icon name={item.done ? "square-check" : "square"} /><span>{item.title}</span><span className="sr-only">{item.done ? "已完成" : "未完成"}</span></li>)}</ul>}
     {!!task.tags.length && <div className="related-tags" aria-label="标签">{task.tags.map(tag => <span key={tag}>{tag}</span>)}</div>}
-    {task.description && <details className="related-description" onToggle={event => setDescriptionOpen(event.currentTarget.open)}><summary>待办说明</summary>{descriptionOpen && <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(task.description) }} />}</details>}
+    {task.description && <details className="related-description" onToggle={event => setDescriptionOpen(event.currentTarget.open)}><summary>待办说明</summary>{descriptionOpen && <div className="md"><MarkdownContent text={task.description} /></div>}</details>}
   </>;
 }

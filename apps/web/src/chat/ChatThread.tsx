@@ -1,7 +1,7 @@
 import { Fragment, memo, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ConversationView, ViewEntry } from "@assistant/contracts";
-import { renderMarkdown } from "./markdown.js";
+import { MarkdownContent } from "./MarkdownContent.js";
 import { extractLiveInfo } from "./live.js";
 import { chatTurns } from "./turns.js";
 import { describeModelError } from "./model-errors.js";
@@ -32,7 +32,7 @@ export function ResponseCard({ text, streaming = false, timestamp }: { text: str
   }
   return <div className="assistant-wrapper response-card" data-response-card-variant="response">
     <AssistantIdentity timestamp={streaming ? undefined : timestamp} />
-    <div className="assistant-bubble md" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
+    <div className="assistant-bubble md"><MarkdownContent text={text} streaming={streaming} /></div>
     {streaming ? <span className="cursor-blink" aria-label="正在回复" /> : text && <button type="button" className="response-copy" onClick={() => void copy()} aria-label="复制回复"><Icon name="copy" />{copied ? "已复制" : "复制"}</button>}
   </div>;
 }
@@ -74,7 +74,7 @@ function TurnCard({ turn, live, busy, onRetry, onSettings, onQuote }: { turn: Ch
           <span className={`activity-status activity-${activity.status}`} aria-label={{ pending: "等待执行", completed: "已完成", error: "未完成", interrupted: "已停止", ended: "已结束，结果未确认", running: "正在执行" }[activity.status]}>{activity.status === "completed" ? <Icon name="check" /> : activity.status === "error" ? <Icon name="circle-alert" /> : activity.status === "interrupted" ? <Icon name="square" /> : activity.status === "ended" ? <Icon name="circle-help" /> : activity.status === "pending" ? <Icon name="clock-3" /> : <span className="activity-spinner" />}</span>
           <details><summary>{activityLabel(activity.name)}</summary><pre>{activity.text || (activity.status === "interrupted" ? "步骤已停止，尚无完成结果。" : activity.status === "ended" ? "步骤已结束，暂未收到结果。" : "等待执行结果。")}</pre></details>
         </div>)}</div>
-        {intermediate.map(entry => <div className="turn-intermediate md" key={entry.id} dangerouslySetInnerHTML={{ __html: renderMarkdown(entry.text) }} />)}
+        {intermediate.map(entry => <div className="turn-intermediate md" key={entry.id}><MarkdownContent text={entry.text} /></div>)}
         {previousErrors.map(entry => <details className="model-error-details" key={entry.id}><summary>{describeModelError(entry.error!).title}</summary><pre>{entry.error}</pre></details>)}
         {info?.thinking && <pre className="turn-thinking">{info.thinking}</pre>}
       </details>;
@@ -94,8 +94,10 @@ function TurnCard({ turn, live, busy, onRetry, onSettings, onQuote }: { turn: Ch
           <details className="model-error-details"><summary>查看错误详情</summary><pre>{failure.error}</pre></details>
         </div>
       </div>}
-      {!!responses.length && <div className="message-row assistant-row"><ResponseCard text={responses.at(-1)!.text} timestamp={responses.at(-1)!.timestamp} /></div>}
-      {info?.text && <div className="message-row assistant-row"><ResponseCard text={info.text} streaming /></div>}
+      {[
+        ...(responses.length ? [{ key: responses.length - 1, text: responses.at(-1)!.text, timestamp: responses.at(-1)!.timestamp, streaming: false }] : []),
+        ...(info?.text ? [{ key: responses.length, text: info.text, timestamp: undefined, streaming: true }] : []),
+      ].map(response => <div className="message-row assistant-row" key={response.key}><ResponseCard text={response.text} streaming={response.streaming} timestamp={response.timestamp} /></div>)}
       {busy && !info?.text && <div className="message-row assistant-row"><div className="assistant-wrapper response-card"><AssistantIdentity /><p className="turn-thinking turn-loading" role="status"><span className="activity-spinner" aria-hidden="true" />{info?.runningTools.length ? "正在执行…" : "思考中…"}</p></div></div>}
       {records.length > 0 && activityDetails}
     </div>

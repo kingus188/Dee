@@ -19,8 +19,6 @@ function renderInlineMarkdown(text: string) {
 
 export interface MarkdownHeading { id: string; level: number; text: string; line: number }
 
-function renderMarkdown(src: string) { return render(src, 2); }
-
 export function renderDocumentMarkdown(src: string) {
     const headings: MarkdownHeading[] = [];
     return { html: render(src, 0, headings), headings };
@@ -107,4 +105,3 @@ function render(src: string, headingOffset: number, headings?: MarkdownHeading[]
     flushPara();
     return html.join('');
 }
-export { renderMarkdown };

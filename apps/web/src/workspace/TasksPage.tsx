@@ -6,7 +6,7 @@ import { managementCards } from "../tasks/management.js";
 import { CalendarFields, calendarRule, timingDraft } from "../tasks/CalendarFields.js";
 import { RunDetails } from "../tasks/RunDetails.js";
 import { ExecutionHistory } from "../tasks/ExecutionHistory.js";
-import { renderMarkdown } from "../chat/markdown.js";
+import { MarkdownContent } from "../chat/MarkdownContent.js";
 import { errorMessage, mayDiscard, useUnsavedChanges } from "./editing.js";
 
 type Selection = { kind: "schedules"; item: Schedule } | { kind: "reminders"; item: Reminder };
@@ -79,8 +79,8 @@ export function TasksPage({ owner, active }: { owner: number; active: boolean })
       {cards.map(card => {
         const schedule = data.schedules.find(item => card.key === `schedule:${item.id}`), reminder = data.reminders.find(item => card.key === `reminder:${item.id}`);
         const runs = (data.executions ?? []).filter(run => card.key === `${run.kind}:${run.taskId}`);
-        return <article className="workspace-task" key={card.key}><header><h3>{card.title}</h3><span>{card.status}</span></header><article className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(card.text) }} /><p className="workspace-muted">{card.meta}</p>
-          {!card.runs?.length && card.details && <details><summary>执行结果</summary><article className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(card.details) }} /></details>}
+        return <article className="workspace-task" key={card.key}><header><h3>{card.title}</h3><span>{card.status}</span></header><article className="md"><MarkdownContent text={card.text} /></article><p className="workspace-muted">{card.meta}</p>
+          {!card.runs?.length && card.details && <details><summary>执行结果</summary><article className="md"><MarkdownContent text={card.details} /></article></details>}
           {!card.runs?.length && (schedule || runs.length > 0) && <details><summary>逐次执行记录（{runs.length}）</summary><ExecutionHistory runs={runs} /></details>}
           {!!card.runs?.length && <section aria-label="逐次执行与验收">{card.runs.map(run => <RunDetails key={run.id + run.revision} run={run} pending={pending} onAction={action => { if (action.kind === "request") void manage(action.path, action.body); }} />)}</section>}
           <div className="workspace-record-actions">

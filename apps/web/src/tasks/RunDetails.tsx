@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { UnifiedRun } from "@assistant/contracts";
 import type { CardAction } from "../chat/cards.js";
-import { renderMarkdown } from "../chat/markdown.js";
+import { MarkdownContent } from "../chat/MarkdownContent.js";
 import { fmt } from "../ui/elements.js";
 
 const states: Record<UnifiedRun["status"], string> = { queued: "等待执行", running: "正在执行", succeeded: "执行成功", failed: "执行失败", cancelled: "已取消", waiting: "等待继续", review: "待验收", interrupted: "已中断" };
@@ -22,7 +22,7 @@ export function RunDetails({ run, pending, onAction }: { run: UnifiedRun; pendin
       <div><dt>交付</dt><dd>{delivery[run.delivery.status]}{run.delivery.detail && `：${run.delivery.detail}`}</dd></div>
       {run.cancellation !== "not_requested" && <div><dt>停止</dt><dd>{cancellation[run.cancellation]}</dd></div>}
     </dl>
-    {run.result && <article className="md" aria-label="执行成果" dangerouslySetInnerHTML={{ __html: renderMarkdown(run.result) }} />}
+    {run.result && <article className="md" aria-label="执行成果"><MarkdownContent text={run.result} /></article>}
     {run.evidence.length > 0 && <section aria-label="验收依据"><h4>验收依据</h4><ul>{run.evidence.map((item, i) => <li key={i}>{item}</li>)}</ul></section>}
     {run.error && <p role="alert">{run.error}</p>}
     {run.review?.status === "accepted" && <p role="status">已人工验收{run.review.reviewedAt ? ` · ${fmt(run.review.reviewedAt)}` : ""}</p>}

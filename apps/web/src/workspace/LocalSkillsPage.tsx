@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { LocalSkillDetail } from "@assistant/contracts";
-import { renderMarkdown } from "../chat/markdown.js";
+import { MarkdownContent } from "../chat/MarkdownContent.js";
 import { Icon } from "../ui/Icon.js";
 import { PersonalPage } from "./PersonalPage.js";
 import { localSkillError, useLocalSkills } from "./useLocalSkills.js";
@@ -47,7 +47,7 @@ export function LocalSkillsPage({ active, remote, onRemoteChange }: Props) {
         <p className="workspace-local-path">{detail.filePath}</p>
         <div className="workspace-local-sources">{detail.locations.map(location => <span key={`${location.rootId}:${location.path}`} className="workspace-local-source">{location.label}</span>)}</div>
         {detail.issue && <p className="workspace-content-feedback" role="status">{detail.issue}</p>}
-        <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(detail.content.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/, "")) }} />
+        <div className="md"><MarkdownContent text={detail.content.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/, "")} /></div>
       </>}
     </section> : <>
       <div className="workspace-library-controls"><label className="workspace-content-search"><Icon name="search" /><input aria-label="搜索本机技能" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索名称、用途或来源" /></label><label className="workspace-local-filter">来源<select aria-label="技能来源" value={source} onChange={event => setSource(event.target.value)}><option value="all">全部目录</option>{snapshot?.roots.filter(root => root.exists).map(root => <option key={root.id} value={root.id}>{root.label}</option>)}</select></label></div>

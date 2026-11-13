@@ -1,7 +1,7 @@
 import { AgentRuns } from "./AgentRuns.js";
 import { AgentContext } from "./AgentContext.js";
 import { useState } from "react";
-import { renderMarkdown } from "../chat/markdown.js";
+import { MarkdownContent } from "../chat/MarkdownContent.js";
 import { Icon } from "../ui/Icon.js";
 import { ExternalAgentSettings } from "./ExternalAgentSettings.js";
 import { AgentRequests } from "./AgentRequests.js";
@@ -35,7 +35,7 @@ export function DesktopAgent({ local }: { local: LocalConversation }) {
     {snapshot?.external && <AgentRequests activities={snapshot.external.activities} approvals={snapshot.external.approvals} answer={async input => { if (!await action("approval", () => bridge.answerApproval(input))) throw new Error("审批未完成，请重试。"); }} />}
     {snapshot?.jobs.filter(job => job.status === "queued" && job.target === snapshot.nodeId && (job.source === "server" || job.source === snapshot.nodeId)).map(job => <article className="desktop-agent-job" key={job.id}>
       <p role="status">{job.approved ? "等待空闲" : "等待批准"}</p>
-      <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(job.task) }} />
+      <div className="md"><MarkdownContent text={job.task} /></div>
       <div className="desktop-agent-job-actions">{!job.approved && <button type="button" className="header-button" disabled={pending.includes(job.id) || ((!job.targetSession || job.targetSession.agent === "pi") && !(snapshot.piConfigured ?? snapshot.configured)) || !!local.pollError} onClick={() => void action(job.id, () => bridge.approve(job.id))}>批准 {agentNames[job.targetSession?.agent ?? "pi"]} 执行</button>}<button type="button" className="header-button" disabled={pending.includes(job.id) || !!local.pollError} onClick={() => void action(job.id, () => bridge.reject(job.id))}>拒绝</button></div>
     </article>)}
   </>;
