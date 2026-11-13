@@ -181,3 +181,15 @@ test("a transient background result callback failure is retried and the job stil
   assert.equal(f.events.length, 1);
   assert.equal((f.events[0] as { failed: boolean }).failed, false);
 });
+
+test("a void callback never proves delivery to a linked task", async () => {
+  const f = fixture();
+  await schedulePhase(f, "deliver"); await schedulePhase(f, "wait");
+  assert.equal(execution(f)?.deliveryStatus, "unknown");
+});
+test("an explicit skipped callback does not claim a linked task transition", async () => {
+  const f = fixture();
+  f.center = features.createTaskCenter(async () => {}, async () => "not_applicable");
+  await schedulePhase(f, "deliver"); await schedulePhase(f, "wait");
+  assert.equal(execution(f)?.deliveryStatus, "not_applicable");
+});

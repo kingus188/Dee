@@ -14,10 +14,11 @@ export * from "./parameters.js";
 export * from "./calendar.js";
 export { Reminders, normalizeReminder } from "./reminders.js";
 export type { Reminder } from "./reminders.js";
+export type { Delegation } from "./delegation.js";
 export { Delegations } from "./delegation.js";
 export { cancelExecution } from "./executions.js";
 import type { ExecutionRun } from "@assistant/contracts";
-export function createTaskCenter(notifyEvent: NotifyEvent, onSettled: (run: ExecutionRun) => Promise<void> = async () => {}) {
+export function createTaskCenter(notifyEvent: NotifyEvent, onSettled: (run: ExecutionRun) => Promise<"delivered" | "not_applicable" | "unknown" | void> = async () => {}) {
  const schedules = createSchedules(notifyEvent, onSettled);
  const background = createBackground(notifyEvent, () => V3, onSettled);
  const reminders = createReminders(notifyEvent);

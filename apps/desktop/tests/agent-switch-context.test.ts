@@ -190,9 +190,16 @@ createInterface({input:process.stdin}).on("line",line=>{
     const original = (await agent.snapshot()).messages;
     await agent.selectAgent({ kind: "codex", config: { executable: bin, args: [] } });
     assert.deepEqual((await agent.snapshot()).messages, original);
+    assert.equal((await agent.snapshot()).handoff?.source, "pi");
+    assert.equal((await agent.snapshot()).handoff?.target, "codex");
+    assert.equal((await agent.snapshot()).handoff?.status, "pending");
     await agent.close(); agent = await openDesktopAgent(options);
     assert.deepEqual((await agent.snapshot()).messages, original, "pending context and display survive restart before the next turn");
     assert.ok((await say(recall)).includes("PI_SYNTHETIC_FACT"), "Pi context reaches the native Codex turn");
+    assert.equal((await agent.snapshot()).handoff?.status, "submitted");
+    assert.equal((await agent.snapshot()).capabilities?.nativeResume, "supported");
+    assert.equal((await agent.snapshot()).runs?.at(-1)?.status, "succeeded");
+    assert.equal((await agent.snapshot()).runs?.at(-1)?.request, recall, "projection shows original user input, not wrapped handoff prompt");
     const delivered = (await agent.snapshot()).messages;
     await agent.send({ id: delivered.findLast(message => message.role === "user")!.id, text: recall });
     assert.deepEqual((await agent.snapshot()).messages, delivered, "retry uses the same native prompt without duplicate messages");
@@ -215,9 +222,11 @@ createInterface({input:process.stdin}).on("line",line=>{
     await assert.rejects(agent.chooseWorkspace("/synthetic/other-workspace"), /停止/);
     await assert.rejects(agent.newSession(), /停止/);
     await agent.abort();
+    assert.equal((await agent.snapshot()).runs?.at(-1)?.status, "cancelled");
     assert.equal((await agent.snapshot()).agent, "codex");
     await agent.newSession();
     assert.deepEqual((await agent.snapshot()).messages, []);
+    assert.equal((await agent.snapshot()).handoff, undefined);
     assert.equal(await say(recall), "[]", "explicit new conversation does not inherit the previous context");
   } finally {
     await agent?.close();

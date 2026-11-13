@@ -49,5 +49,13 @@ export function managementCards(data: Management, conversationId: string): Conve
       details: [goal.summary, ...goal.history.map(step => `第 ${step.round} 轮：${step.summary}\n${step.evidence.join("\n")}`)].join("\n\n"), actions,
     });
   }
+  for (const run of data.runs ?? []) {
+    let card = cards.find(item => item.key === `${run.source}:${run.taskId}`);
+    if (!card && run.source === "delegate") {
+      card = { key: `delegate:${run.taskId}`, group: "tasks", title: "子 Agent 任务", text: run.text, actions: [] };
+      cards.push(card);
+    }
+    if (card) (card.runs ??= []).push(run);
+  }
   return cards;
 }

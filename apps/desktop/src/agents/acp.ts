@@ -39,6 +39,7 @@ export async function openAcp(options: DriverOptions, inspect?: (options: acp.Se
     .connectWith(stream, async ctx => {
       context = ctx;
       const init = await ctx.request(acp.methods.agent.initialize, { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
+      options.emit({ type: "capabilities", nativeResume: Boolean(init.agentCapabilities?.loadSession) });
       loading = true;
       if (sessionId && !init.agentCapabilities?.loadSession) throw new Error("该 ACP Agent 不支持恢复，请新建会话后继续");
       const mcpServers: acp.McpServer[] = options.peerMcp ? [{ name: "dee_peers", command: options.peerMcp.command, args: options.peerMcp.args, env: Object.entries(options.peerMcp.env).map(([name, value]) => ({ name, value })) }] : [];

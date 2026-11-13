@@ -1,4 +1,27 @@
 export type DesktopAgentKind = "pi" | "codex" | "claude" | "acp" | "omp";
+export type AgentCapabilities = {
+  nativeResume: "supported" | "unsupported" | "unknown";
+  approval: "tool-callback" | "provider-request";
+  cancellation: "runtime-task" | "process-stop";
+  historyTransfer: "text-only";
+  rollback: false;
+};
+export type DesktopHandoff = {
+  source: DesktopAgentKind; target: DesktopAgentKind; createdAt: string;
+  totalMessages: number; includedMessages: number; omittedMessages: number;
+  firstMessageId?: string; lastMessageId?: string;
+  omitted: Array<"attachments" | "tool-state" | "hidden-reasoning">;
+  status: "pending" | "submitted";
+};
+/** Projection of persisted native request records, not user acceptance or external delivery. */
+export type DesktopAgentRun = {
+  id: string; sessionId: string; nativeSessionId?: string;
+  agent: Exclude<DesktopAgentKind, "pi">;
+  status: "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "unknown";
+  request: string; result: string | null;
+  cancellation: "not_requested" | "confirmed" | "unknown";
+  review: "unsupported";
+};
 export type DesktopConversation = {
   sessionId: string; agent: DesktopAgentKind;
   messages: Array<{ id: string; role: "user" | "assistant"; text: string }>;
@@ -27,6 +50,9 @@ export type DesktopPeerJob = {
   approved?: boolean;
 };
 export type DesktopAgentSnapshot = {
+  runs?: DesktopAgentRun[];
+  capabilities?: AgentCapabilities;
+  handoff?: DesktopHandoff;
   piAccess?: "ask" | "full";
   piEffort?: DesktopPiEffort | null;
   piModel?: { provider: string; modelId: string } | null;

@@ -10,6 +10,7 @@ import { request } from "../api/request.js";
 import { Icon } from "../ui/Icon.js";
 import { isDaylightSnapshot } from "../today/data.js";
 import { relatedTaskCards, relatedTaskIds } from "./related.js";
+import { RunDetails } from "./RunDetails.js";
 import { RelatedTaskDetails } from "./RelatedTaskDetails.js";
 
 function CardActions({ actions, pending, onAction }: { actions: CardAction[] | undefined; pending: boolean; onAction: (action: CardAction) => void }) {
@@ -28,7 +29,8 @@ export function Card({ card, pending, onAction }: { card: ConversationCard; pend
   return <article className="conversation-card" data-card-key={card.key} aria-label={card.title} aria-busy={pending}>
     <header className="conversation-card-header"><h3>{card.title}</h3>{card.status && <span className={`conversation-card-status ${card.tone || ""}`}>{card.status}</span>}</header>
     <p className="conversation-card-text">{card.text}</p>{card.meta && <p className="conversation-card-meta">{card.meta}</p>}
-    {card.details && <details><summary>查看详情</summary><pre>{card.details}</pre></details>}
+    {!card.runs?.length && card.details && <details><summary>查看详情</summary><pre>{card.details}</pre></details>}
+    {!!card.runs?.length && <section aria-label="逐次执行与验收">{card.runs.map(run => <RunDetails key={run.id + run.revision} run={run} pending={pending} onAction={onAction} />)}</section>}
     <CardActions actions={card.actions} pending={pending} onAction={onAction} />
   </article>;
 }

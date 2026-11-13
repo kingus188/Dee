@@ -24,7 +24,8 @@ export type Goal = {
   summary: string;
   wakeAt: number | null;
   updates: string[];
-  history: (GoalCheckpoint & { round: number; at: number })[];
+  history: (GoalCheckpoint & { round: number; at: number; startedAt?: number; workerConversationId?: number; executionStatus?: "succeeded" | "failed" | "cancelled" | "interrupted"; error?: string })[];
+  roundStartedAt?: number;
   taskId?: number;
   workerConversationId?: number;
 };

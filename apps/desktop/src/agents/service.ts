@@ -1,3 +1,5 @@
+import { nativeRuns, nativeRequestResults } from "./runs.js";
+import { agentCapabilities } from "./capabilities.js";
 import { randomUUID } from "node:crypto";
 import type { AgentApproval, AgentApprovalAnswer, DesktopAgentKind, ExternalAgentConfig } from "@assistant/contracts";
 import { openCodex } from "./codex.js";
@@ -16,6 +18,7 @@ const factories: Record<ExternalKind, (options: DriverOptions) => Promise<AgentD
 
 export function openExternalAgents(options: { directory: string; binding(): ExternalBinding | undefined; factory?: DriverFactory; searchPath?: string; env?: NodeJS.ProcessEnv; peerTools?: (session: PeerSession) => PeerToolHandler }) {
   const store = openAgentSessionStore(options.directory);
+  let resumeCapability: boolean | undefined;
   let pendingWrite: ReturnType<typeof setTimeout> | undefined;
   function persist(session: StoredAgentSession) {
     clearTimeout(pendingWrite); pendingWrite = undefined;
@@ -42,10 +45,14 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
   const key = (binding: ExternalBinding) => JSON.stringify(binding);
   function current() { const binding = options.binding(); return binding ? store.get(key(binding)) : undefined; }
   function emit(session: StoredAgentSession, requestId: string, event: AgentEvent) {
+    if (event.type === "capabilities") { resumeCapability = event.nativeResume; return; }
     if (event.type === "session") session.nativeId = event.id;
     if (event.type === "text") {
       const id = `${requestId}:${event.id}`;
-      let message = session.messages.find(message => message.id === id && message.role === "assistant");
+      const start = session.messages.findIndex(message => message.role === "user" && message.id === requestId);
+      if (start < 0) throw new Error("Agent 输出没有对应请求");
+      const end = session.messages.findIndex((message, index) => index > start && message.role === "user");
+      let message = session.messages.slice(start + 1, end < 0 ? undefined : end).find(message => message.id === id && message.role === "assistant");
       if (!message) { message = { id, role: "assistant", text: "" }; session.messages.push(message); }
       const text = event.delta ? message.text + event.text : event.text;
       if (text.length > 1_000_000) throw new Error("Agent 回复超过长度限制");
@@ -79,7 +86,7 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
       localSignal.addEventListener("abort", deny, { once: true }); signal?.addEventListener("abort", deny, { once: true });
     });
   }
-  async function detach() { const previous = driver; driver = undefined; boundKey = undefined; driverGeneration++; driverController?.abort(); driverController = undefined; try { await previous?.close(); } finally { await peerTools?.close(); peerTools = undefined; } }
+  async function detach() { resumeCapability = undefined; const previous = driver; driver = undefined; boundKey = undefined; driverGeneration++; driverController?.abort(); driverController = undefined; try { await previous?.close(); } finally { await peerTools?.close(); peerTools = undefined; } }
   async function change(action: () => Promise<void>) {
     if (closed || active || transition) throw new Error("请先等待当前操作结束或停止任务");
     transition = Promise.resolve().then(action);
@@ -108,7 +115,7 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
     },
     snapshot() {
       const session = current();
-      return { messages: session?.messages ?? [], error: store.error ?? session?.error,
+      return { runs: nativeRuns(session, options.binding()?.kind ?? "codex"), capabilities: agentCapabilities(options.binding()?.kind ?? "codex", resumeCapability), messages: session?.messages ?? [], error: store.error ?? session?.error,
         external: { status: session?.status ?? "idle", sessionId: session?.nativeId, activities: session?.activities ?? [], approvals: [...approvals.values()].map(item => item.request) } };
     },
     async send(input: { id: string; text: string }, address?: PeerSession) {
@@ -186,7 +193,7 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
       if (session.requests?.[input.id]?.status === "running") await active;
       const status = session.requests?.[input.id]?.status;
       if (status !== "done") return { status: "failed", result: status === "interrupted" || !status ? "原生 Agent 上次执行结果未知，未自动重放；请核对原会话后使用新请求继续" : "原生 Agent 执行失败或取消，请核对原会话与权限" };
-      const result = session.messages.filter(message => message.role === "assistant" && message.id.startsWith(`${input.id}:`)).map(message => message.text).join("\n");
+      const result = nativeRequestResults(session).get(input.id) ?? "";
       return { status: "done", result: (result || "任务已完成，无文字结果").slice(0, 16000) };
     },
     answer(input: AgentApprovalAnswer) {

@@ -1,6 +1,8 @@
 import type { Conversation } from "@earendil-works/pi-durable";
 import type { Management } from "@assistant/contracts";
-import { Goals, Schedules, BackgroundJobs, Executions, Reminders, normalizeSchedule, normalizeReminder, cancelExecution } from "@assistant/features";
+import { Goals, Schedules, BackgroundJobs, Executions, Delegations, Reminders, normalizeSchedule, normalizeReminder, cancelExecution } from "@assistant/features";
+import { projectUnifiedRuns, type RuntimeObservation } from "./unified-runs.js";
+import { RunReviews, withRunReviews } from "./run-reviews.js";
 import { applyExecutionResult } from "./execution-outcome.js";
 import { HttpError } from "../errors.js";
 import type { AppContext } from "./context.js";
@@ -9,11 +11,14 @@ import type { createViews } from "./views.js";
 export function createManagement(context: AppContext, { simplifyView }: ReturnType<typeof createViews>) {
  const { harness, ctx, tasks } = context;
  async function get(conversation: Conversation): Promise<Management> {
-			const [schedules, background, reminders, executions] = await Promise.all([
+			const [schedules, background, reminders, executions, delegations, allGoals, reviews] = await Promise.all([
 				harness.snapshot(Schedules, conversation.id, ctx),
 				harness.snapshot(BackgroundJobs, conversation.id, ctx),
 				harness.snapshot(Reminders, conversation.id, ctx),
 				harness.snapshot(Executions, conversation.id, ctx),
+                harness.snapshot(Delegations, conversation.id, ctx),
+                harness.snapshot(Goals, ctx),
+                harness.snapshot(RunReviews, conversation.id, ctx),
 			]);
 			// Durable Task 异常终结时，不应继续向用户展示为“运行中”。
 			const backgroundItems = await Promise.all((background?.items ?? []).map(async (item) => {
@@ -40,17 +45,27 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
             for (const run of executionItems) {
               if (!run.deliveryError || run.status !== "done" || !run.daylightTaskId) continue;
               try {
-                await applyExecutionResult(context.daylight, run);
-                await conversation.commit(async tx => { const stored = (await tx.doc(Executions, conversation.id)).items.find(item => item.id === run.id); if (stored) delete stored.deliveryError; }, ctx);
-                delete run.deliveryError;
+                const deliveryStatus = await applyExecutionResult(context.daylight, run);
+                await conversation.commit(async tx => { const stored = (await tx.doc(Executions, conversation.id)).items.find(item => item.id === run.id); if (stored) { delete stored.deliveryError; stored.deliveryStatus = deliveryStatus; } }, ctx);
+                delete run.deliveryError; run.deliveryStatus = deliveryStatus;
               } catch (error) { run.deliveryError = error instanceof Error ? error.message.slice(0, 500) : "关联待办状态同步失败"; }
             }
+            const goals = (allGoals?.items ?? []).filter(goal => goal.conversationId === conversation.id);
+            const runtime = new Map<number, RuntimeObservation>();
+            const taskIds = [...executionItems.map(item => item.runtimeTaskId), ...backgroundItems.map(item => item.taskId), ...(delegations?.items ?? []).map(item => item.runtimeTaskId), ...goals.map(item => item.taskId)];
+            for (const id of new Set(taskIds)) if (id !== undefined) {
+              const task = await harness.getTask(id as import("@earendil-works/pi-durable").TaskId, ctx);
+              if (task) runtime.set(id, { terminal: task.state.status === "terminal", aborted: task.state.status === "terminal" && task.state.outcome.status === "aborted" });
+            }
+            const runs = withRunReviews(projectUnifiedRuns({ conversationId: conversation.id, executions: executionItems,
+              background: backgroundItems, delegations: delegations?.items ?? [], goals, runtime }), reviews?.items ?? {});
             return {
+                runs,
 				schedules: scheduleItems,
 				background: backgroundItems,
 				reminders: reminders?.items ?? [],
 				executions: executionItems,
-                    goals: ((await harness.snapshot(Goals, ctx))?.items ?? []).filter(goal => goal.conversationId === conversation.id),
+                    goals,
 			};
  }
  async function exportMarkdown(conversation: Conversation) {

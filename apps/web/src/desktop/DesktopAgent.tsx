@@ -1,3 +1,5 @@
+import { AgentRuns } from "./AgentRuns.js";
+import { AgentContext } from "./AgentContext.js";
 import { useState } from "react";
 import { renderMarkdown } from "../chat/markdown.js";
 import { Icon } from "../ui/Icon.js";
@@ -27,6 +29,8 @@ export function DesktopAgent({ local }: { local: LocalConversation }) {
   const { bridge, snapshot, action, pending } = local;
   if (!bridge) return null;
   return <>
+    {snapshot && <AgentContext snapshot={snapshot} />}
+    {snapshot && <AgentRuns snapshot={snapshot} />}
     {snapshot?.external?.status === "waiting" && <p className="turn-loading" role="status">等待你处理</p>}
     {snapshot?.external && <AgentRequests activities={snapshot.external.activities} approvals={snapshot.external.approvals} answer={async input => { if (!await action("approval", () => bridge.answerApproval(input))) throw new Error("审批未完成，请重试。"); }} />}
     {snapshot?.jobs.filter(job => job.status === "queued" && job.target === snapshot.nodeId && (job.source === "server" || job.source === snapshot.nodeId)).map(job => <article className="desktop-agent-job" key={job.id}>

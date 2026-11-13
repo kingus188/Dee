@@ -94,7 +94,7 @@ export const GoalTask: Task<Input, Checkpoint, string | null, object> = defineTa
           goal.workers.push(workerId);
           await tx.doc(UsageDoc, workerId);
         }
-        goal.round += 1; goal.updatedAt = Date.now();
+        goal.round += 1; goal.updatedAt = Date.now(); goal.roundStartedAt = goal.updatedAt;
         const worker = await tx.doc(GoalWorker, workerId);
         Object.assign(worker, { goalId: goal.id, revision: goal.revision, round: goal.round, checkpoint: null });
         return { status: "running", checkpoint: { phase: "run", workerId, round: goal.round } };
@@ -126,6 +126,7 @@ export const GoalTask: Task<Input, Checkpoint, string | null, object> = defineTa
         const worker = await tx.doc(GoalWorker, workerId);
         if (error || !worker.checkpoint) {
           latest.status = "blocked"; latest.summary = error ?? "本轮没有提交有效检查点，已停止自动执行。"; latest.updatedAt = Date.now();
+          latest.history.push({ action: "blocked", summary: latest.summary, evidence: [], round, at: latest.updatedAt, startedAt: latest.roundStartedAt, workerConversationId: workerId, executionStatus: "failed", error: latest.summary });
         } else {
           doc.items[index] = advanceGoal(detach(latest), worker.checkpoint);
         }

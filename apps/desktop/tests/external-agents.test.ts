@@ -313,6 +313,7 @@ createInterface({input:process.stdin}).on('line', line => {
   const driver = await openAcp(config);
   try { await driver.send("one", randomUUID()); await driver.send("two", randomUUID()); } finally { await driver.close(); }
   assert.equal(events.filter(event => event.type === "text").length, 2);
+  assert.ok(events.some(event => event.type === "capabilities" && !event.nativeResume));
   await assert.rejects(openAcp({ ...config, sessionId: "acp-native" }), /不支持恢复/);
   const defaultDriver = await openAcp({ ...config, config: { executable: bin, args: [] } });
   try { await defaultDriver.send("default mode", randomUUID()); } finally { await defaultDriver.close(); }
@@ -341,6 +342,7 @@ createInterface({input: process.stdin}).on('line', line => {
   config.peerMcp = { command: process.execPath, args: ["--version"], env: { DEE_FIXTURE: "mcp" } };
   const driver = await openOmp(config);
   try { await driver.send("one", randomUUID()); } finally { await driver.close(); }
+  assert.ok(events.some(event => event.type === "capabilities" && event.nativeResume));
   const resumed = await openOmp({ ...config, sessionId: "omp-native" });
   try { await resumed.send("two", randomUUID()); } finally { await resumed.close(); }
   assert.equal(events.filter(event => event.type === "text").length, 2);
@@ -410,4 +412,26 @@ createInterface({input:process.stdin}).on('line',line=>{
   const driver = await openAcp(config);
   try { await driver.send("continue", randomUUID()); } finally { await driver.close(); }
   assert.deepEqual(events.filter(event => event.type === "text").map(event => event.text), ["resumed answer"]);
+}));
+
+test("colliding provider message IDs stay inside their own request and peer result", async () => temporary(async directory => {
+  const binding: ExternalBinding = { kind: "codex", cwd: directory, config: { executable: "fixture", args: [] } };
+  const factory: DriverFactory = async (_kind, options) => ({
+    abort: async () => {}, close: async () => {},
+    send: async text => {
+      const id = text === "first" ? "b:x" : "x";
+      options.emit({ type: "text", id, text, delta: true });
+      options.emit({ type: "text", id, text: " reply", delta: true });
+    },
+  });
+  const service = openExternalAgents({ directory, binding: () => binding, factory });
+  try {
+    await service.send({ id: "peer:a", text: "first" }); await until(() => !service.busy);
+    await service.send({ id: "peer:a:b", text: "second" }); await until(() => !service.busy);
+    assert.deepEqual(service.snapshot().runs.map(run => run.result), ["first reply", "second reply"]);
+    const target = service.sessions()[0]!;
+    const base = { source: "server", target: "desktop", targetSession: target, status: "queued" as const, createdAt: "now", updatedAt: "now" };
+    assert.equal((await service.runSession({ ...base, id: "a", task: "first" }))?.result, "first reply");
+    assert.equal((await service.runSession({ ...base, id: "a:b", task: "second" }))?.result, "second reply");
+  } finally { await service.close(); }
 }));

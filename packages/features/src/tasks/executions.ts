@@ -9,11 +9,11 @@ export function normalizeDaylightTaskId(value: unknown): string | undefined {
   if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new Error("无效的关联待办标识");
   return value;
 }
-export async function recordExecution(tx: Tx, conversationId: ConversationId, input: Pick<ExecutionRun, "id" | "kind" | "taskId" | "text"> & { daylightTaskId?: string }) {
+export async function recordExecution(tx: Tx, conversationId: ConversationId, input: Pick<ExecutionRun, "id" | "kind" | "taskId" | "text"> & { daylightTaskId?: string; runtimeTaskId?: number }) {
   const doc = await tx.doc(Executions, conversationId);
   let run = doc.items.find(item => item.id === input.id);
   if (!run) {
-    run = { ...input, conversationId, status: "queued", queuedAt: Date.now(), startedAt: null, finishedAt: null, result: null, error: null };
+    run = { ...input, conversationId, status: "queued", queuedAt: Date.now(), startedAt: null, finishedAt: null, result: null, error: null, ...(input.daylightTaskId ? { deliveryStatus: "pending" as const } : {}) };
     doc.items.push(run);
   }
   return run;
@@ -33,20 +33,22 @@ export async function finishExecution(tx: Tx, conversationId: ConversationId, id
     run.error = ("reason" in settled ? settled.reason : undefined) || settled.status;
   }
 }
-export async function deliverExecution(run: ExecutionRun, onSettled: (run: ExecutionRun) => Promise<void>, signal: AbortSignal, commit: (work: (tx: Tx) => Promise<void>) => Promise<unknown>) {
+export async function deliverExecution(run: ExecutionRun, onSettled: (run: ExecutionRun) => Promise<"delivered" | "not_applicable" | "unknown" | void>, signal: AbortSignal, commit: (work: (tx: Tx) => Promise<void>) => Promise<unknown>) {
   let failure: string | undefined;
+  let deliveryStatus: ExecutionRun["deliveryStatus"] = "unknown";
   for (const delay of [0, 100, 400]) {
     if (delay) await sleep(delay, undefined, { signal });
-    try { await onSettled(run); failure = undefined; break; }
+    try { deliveryStatus = (await onSettled(run)) ?? "unknown"; failure = undefined; break; }
     catch (error) {
       if (signal.aborted) throw error;
       failure = error instanceof Error ? error.message.slice(0, 500) : "关联待办状态同步失败";
     }
   }
+  if (run.daylightTaskId) run.deliveryStatus = failure ? "failed" : deliveryStatus;
   if (failure) run.deliveryError = failure; else delete run.deliveryError;
   await commit(async tx => {
     const stored = (await tx.doc(Executions, run.conversationId as ConversationId)).items.find(item => item.id === run.id);
-    if (stored) { if (failure) stored.deliveryError = failure; else delete stored.deliveryError; }
+    if (stored) { if (stored.daylightTaskId) stored.deliveryStatus = failure ? "failed" : deliveryStatus; if (failure) stored.deliveryError = failure; else delete stored.deliveryError; }
   });
 }
 

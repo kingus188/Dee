@@ -54,5 +54,13 @@ export function advanceGoal<T extends GoalSeed>(goal: T, checkpoint: GoalCheckpo
     status = "blocked"; summary = "已达到委托轮次上限，请检查已有结果。";
   }
   return { ...goal, status, summary, updatedAt: now, wakeAt: status === "waiting_time" ? checkpoint.wakeAt! : null,
-    history: [...goal.history, { ...checkpoint, round: goal.round, at: now }] };
+    history: [...goal.history, { ...checkpoint, round: goal.round, at: now, ...(goal.roundStartedAt !== undefined ? { startedAt: goal.roundStartedAt } : {}), ...(goal.workerConversationId !== undefined ? { workerConversationId: goal.workerConversationId } : {}), executionStatus: "succeeded" }] };
+}
+
+// Superseding a live round preserves its identity without claiming the worker has stopped.
+export function closeGoalRound(goal: Goal, status: "cancelled" | "interrupted", now = Date.now()): void {
+  if (goal.round < 1 || goal.history.some(item => item.round === goal.round)) return;
+  goal.history.push({ action: "blocked", summary: status === "cancelled" ? "已请求取消本轮执行" : "本轮已被新的用户指示替代", evidence: [],
+    round: goal.round, at: now, ...(goal.roundStartedAt === undefined ? {} : { startedAt: goal.roundStartedAt }),
+    ...(goal.workerConversationId === undefined ? {} : { workerConversationId: goal.workerConversationId }), executionStatus: status });
 }

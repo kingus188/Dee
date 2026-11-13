@@ -9,7 +9,7 @@ import { detach, finishTask as finish } from "../results.js";
 import type { NotifyEvent } from "./notifications.js";
 
 import type { ExecutionRun } from "@assistant/contracts";
-export function createBackground(notifyEvent: NotifyEvent, getExtension: () => Extension, onSettled: (run: ExecutionRun) => Promise<void> = async () => {}) {
+export function createBackground(notifyEvent: NotifyEvent, getExtension: () => Extension, onSettled: (run: ExecutionRun) => Promise<"delivered" | "not_applicable" | "unknown" | void> = async () => {}) {
   const BackgroundTask: Task<BackgroundInput, BackgroundCheckpoint, string | null, object> = defineTask<BackgroundInput, BackgroundCheckpoint, string | null, object>({
     name: "app.v3.background-agent", version: 1, initial: () => ({ phase: "start" }),
     phases: {
@@ -25,7 +25,7 @@ export function createBackground(notifyEvent: NotifyEvent, getExtension: () => E
             await configure(tx, childId, { extensions: { remove: [getExtension()] }, instructions: "你是后台子 Agent。只执行交给你的任务，简洁汇报结果，不要再委派后台子 Agent。" });
           }
           if (item) item.conversationId = childId;
-          const run = await recordExecution(tx, runtime.conversationId, { id: "background:" + task.input.jobId, kind: "background", taskId: task.input.jobId, text: task.input.text, ...(item?.daylightTaskId ? { daylightTaskId: item.daylightTaskId } : {}) });
+          const run = await recordExecution(tx, runtime.conversationId, { id: "background:" + task.input.jobId, kind: "background", taskId: task.input.jobId, runtimeTaskId: task.id, text: task.input.text, ...(item?.daylightTaskId ? { daylightTaskId: item.daylightTaskId } : {}) });
           run.workerConversationId = childId;
           (await tx.doc(Parents)).children[childId] = runtime.conversationId;
           return { status: "running", checkpoint: { phase: "wait", childId } };
@@ -97,7 +97,7 @@ export function createBackground(notifyEvent: NotifyEvent, getExtension: () => E
     const item: BackgroundJob = { id: randomUUID(), text, status: "running", conversationId: null, createdAt: Date.now(), result: null, ...(daylightTaskId ? { daylightTaskId } : {}) };
     item.taskId = await tx.createTask(BackgroundTask, { jobId: item.id, text }, { ownership: { kind: "conversation" }, background: true });
     doc.items.push(item);
-    await recordExecution(tx, conversationId, { id: "background:" + item.id, kind: "background", taskId: item.id, text, ...(daylightTaskId ? { daylightTaskId } : {}) });
+    await recordExecution(tx, conversationId, { id: "background:" + item.id, kind: "background", taskId: item.id, runtimeTaskId: item.taskId, text, ...(daylightTaskId ? { daylightTaskId } : {}) });
     if (requestId) (doc.applied ??= {})[requestId] = item;
     return detach(item);
   }

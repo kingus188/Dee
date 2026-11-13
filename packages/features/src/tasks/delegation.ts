@@ -4,7 +4,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { Index } from "@assistant/runtime";
 import { resultText as text } from "../results.js";
 import { requireUserInstruction } from "../user-instruction.js";
-export type Delegation = { conversationId: ConversationId; task: string; status: "running" | "done" | "failed" };
+export type Delegation = { conversationId: ConversationId; task: string; status: "running" | "done" | "failed"; runId?: string; runtimeTaskId?: number; startedAt?: number; finishedAt?: number; result?: string; error?: string };
 
 export const Delegations = defineDoc<{ items: Delegation[] }>({
 	kind: "app.delegations",
@@ -35,7 +35,7 @@ export const Delegate: Extension = defineExtension({
 						extensions: { remove: [Delegate] },
 						instructions: "你是主 Agent 派出的子 Agent，只负责完成交给你的这一件事，完成后用简短中文汇报结果。",
 					});
-					(await tx.doc(Delegations, api.conversationId)).items.push({ conversationId: created.id, task: args.task, status: "running" });
+					(await tx.doc(Delegations, api.conversationId)).items.push({ conversationId: created.id, task: args.task, status: "running", runId: `delegate:${api.taskId}`, runtimeTaskId: api.taskId, startedAt: Date.now() });
 					const index = await tx.doc(Index);
 					index.children ??= {};
 					index.children[created.id] = api.conversationId;
@@ -47,10 +47,16 @@ export const Delegate: Extension = defineExtension({
 				const settled = await submission.wait(callContext);
 				const answer = await api.commit(async (tx) => {
 					const item = (await tx.doc(Delegations, api.conversationId)).items.find((i) => i.conversationId === childId);
-					if (item) item.status = settled.status === "done" && settled.type === "input" ? "done" : "failed";
-					if (settled.status !== "done" || settled.type !== "input") return `子 Agent 没有完成：${("reason" in settled ? settled.reason : undefined) ?? settled.status}`;
+					if (item) { item.status = settled.status === "done" && settled.type === "input" ? "done" : "failed"; item.finishedAt ??= Date.now(); }
+					if (settled.status !== "done" || settled.type !== "input") {
+            const error = ("reason" in settled ? settled.reason : undefined) ?? settled.status;
+            if (item) item.error = error;
+            return `子 Agent 没有完成：${error}`;
+          }
 					const content = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0]?.content ?? [];
-					return (typeof content === "string" ? content : content.filter((c) => c.type === "text").map((c) => c.text).join("")) || "子 Agent 完成了，但没有文字结果";
+					const answer = (typeof content === "string" ? content : content.filter((c) => c.type === "text").map((c) => c.text).join("")) || "子 Agent 完成了，但没有文字结果";
+          if (item) item.result = answer.slice(0, 12000);
+          return answer;
 				}, callContext);
 				return text(answer);
 			},

@@ -5,7 +5,7 @@ import type { ConversationId, Tx } from "@earendil-works/pi-durable";
 import type { Goal } from "@assistant/contracts";
 import { Goals, GoalWorker, GOAL_READ_TOOLS, GOAL_TOKEN_LIMIT } from "./documents.js";
 import { GoalTask, accountGoalUsage } from "./runner.js";
-import { goalText, normalizeGoal, normalizeGoalCheckpoint } from "./state.js";
+import { goalText, normalizeGoal, normalizeGoalCheckpoint, closeGoalRound } from "./state.js";
 import { normalizeRequestId } from "../tasks/parameters.js";
 import { detach, resultText } from "../results.js";
 import { requireUserInstruction } from "../user-instruction.js";
@@ -38,6 +38,7 @@ export async function controlGoalInTx(tx: Tx, id: string, action: string, input:
   if (!Number.isInteger(input.revision) || input.revision !== goal.revision) throw new Error("委托版本已变化，请先读取最新状态");
   if (action === "cancel") {
     if (goal.status === "completed" || goal.status === "cancelled") throw new Error("委托已经结束");
+    closeGoalRound(goal, "cancelled");
     goal.status = "cancelled"; goal.wakeAt = null;
   } else if (action === "accept") {
     if (goal.status !== "review") throw new Error("委托尚未交付待验收结果");
@@ -50,6 +51,7 @@ export async function controlGoalInTx(tx: Tx, id: string, action: string, input:
     if (doc.items.filter(item => item.id !== id && (item.status === "running" || item.status === "waiting_time")).length >= 3) throw new Error("同时执行的委托最多 3 个");
     await accountGoalUsage(tx, goal);
     if (goal.usedTokens >= GOAL_TOKEN_LIMIT) throw new Error("委托已达到模型 Token 上限，请创建新委托");
+    closeGoalRound(goal, "interrupted");
     goal.updates.push(update); goal.status = "running"; goal.wakeAt = null;
     delete goal.workerConversationId;
   } else throw new Error("委托操作无效");

@@ -4,6 +4,7 @@ import { request } from "../api/request.js";
 import { MarkdownEditor } from "../editor/MarkdownEditor.js";
 import { managementCards } from "../tasks/management.js";
 import { CalendarFields, calendarRule, timingDraft } from "../tasks/CalendarFields.js";
+import { RunDetails } from "../tasks/RunDetails.js";
 import { ExecutionHistory } from "../tasks/ExecutionHistory.js";
 import { renderMarkdown } from "../chat/markdown.js";
 import { errorMessage, mayDiscard, useUnsavedChanges } from "./editing.js";
@@ -17,13 +18,19 @@ export function TasksPage({ owner, active }: { owner: number; active: boolean })
   const [pending, setPending] = useState(false), [error, setError] = useState(""), [feedback, setFeedback] = useState("");
   const [editing, setEditing] = useState(false);
   const busy = useRef(false), requestId = useRef(crypto.randomUUID());
+  const currentOwner = useRef(owner), loadSequence = useRef(0);
+  currentOwner.current = owner;
   const dirty = editing && (text !== (selected?.item.text ?? "") || minutes !== initialTiming.minutes || every !== initialTiming.every || JSON.stringify(timing) !== initialCalendar);
   useUnsavedChanges(dirty);
   async function load() {
-    try { setData(await request<Management>(`/api/conversations/${owner}/management`)); setReady(true); }
-    catch (error) { setError(errorMessage(error)); }
+    const version = ++loadSequence.current;
+    try {
+      const next = await request<Management>(`/api/conversations/${owner}/management`);
+      if (owner !== currentOwner.current || version !== loadSequence.current) return;
+      setData(next); setReady(true);
+    } catch (error) { if (owner === currentOwner.current && version === loadSequence.current) setError(errorMessage(error)); }
   }
-  useEffect(() => { if (active) void load(); }, [active, owner]);
+  useEffect(() => { setData({ schedules: [], reminders: [], background: [] }); setReady(false); setFeedback(""); setError(""); if (active) void load(); return () => { loadSequence.current++; }; }, [active, owner]);
   function select(value: Selection | null) {
     if (busy.current || !mayDiscard(dirty)) return;
     const nextMinutes = value ? String(Math.max(1, Math.ceil((((value.kind === "schedules" ? value.item.nextAt : value.item.at) ?? Date.now()) - Date.now()) / 60000))) : "10";
@@ -53,11 +60,11 @@ export function TasksPage({ owner, active }: { owner: number; active: boolean })
     } catch (error) { setError(errorMessage(error)); }
     finally { busy.current = false; setPending(false); }
   }
-  async function manage(path: string, body: { revision: number } | Record<string, never> = {}) {
+  async function manage(path: string, body: Record<string, unknown> = {}) {
     if (busy.current) return;
     busy.current = true; setPending(true); setError("");
-    try { await request(path, body); setFeedback("操作已完成"); await load(); }
-    catch (error) { setError(errorMessage(error)); }
+    try { await request(path, body); if (owner === currentOwner.current) { setFeedback("操作已完成"); await load(); } }
+    catch (error) { if (owner === currentOwner.current) setError(errorMessage(error)); }
     finally { busy.current = false; setPending(false); }
   }
   const cards = managementCards(data, String(owner));
@@ -73,8 +80,9 @@ export function TasksPage({ owner, active }: { owner: number; active: boolean })
         const schedule = data.schedules.find(item => card.key === `schedule:${item.id}`), reminder = data.reminders.find(item => card.key === `reminder:${item.id}`);
         const runs = (data.executions ?? []).filter(run => card.key === `${run.kind}:${run.taskId}`);
         return <article className="workspace-task" key={card.key}><header><h3>{card.title}</h3><span>{card.status}</span></header><article className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(card.text) }} /><p className="workspace-muted">{card.meta}</p>
-          {card.details && <details><summary>执行结果</summary><article className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(card.details) }} /></details>}
-          {(schedule || runs.length > 0) && <details><summary>逐次执行记录（{runs.length}）</summary><ExecutionHistory runs={runs} /></details>}
+          {!card.runs?.length && card.details && <details><summary>执行结果</summary><article className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(card.details) }} /></details>}
+          {!card.runs?.length && (schedule || runs.length > 0) && <details><summary>逐次执行记录（{runs.length}）</summary><ExecutionHistory runs={runs} /></details>}
+          {!!card.runs?.length && <section aria-label="逐次执行与验收">{card.runs.map(run => <RunDetails key={run.id + run.revision} run={run} pending={pending} onAction={action => { if (action.kind === "request") void manage(action.path, action.body); }} />)}</section>}
           <div className="workspace-record-actions">
             {schedule && (schedule.status === "active" || schedule.status === "paused") && <button type="button" disabled={pending} onClick={() => select({ kind: "schedules", item: schedule })}>编辑计划</button>}
             {reminder?.status === "scheduled" && <button type="button" disabled={pending} onClick={() => select({ kind: "reminders", item: reminder })}>编辑提醒</button>}

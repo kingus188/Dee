@@ -18,6 +18,7 @@ import { teamsConversationReplyApi } from "../teams-conversation-reply-api.js";
 import { createWorkspace } from "./workspace.js";
 import { createDaylightExecution } from "./daylight-execution.js";
 import { peerApi } from "../peer-api.js";
+import { reviewRunInTx } from "./run-reviews.js";
 import { DesktopTranscript } from "../desktop-conversations.js";
 
 // HTTP 与 WebSocket 共用用例和错误语义。
@@ -92,7 +93,7 @@ export function createApi(context: AppContext) {
     }
     const notesPath = path.match(/^\/api\/conversations\/(\d+)\/notes$/);
     // 纯数据会话入口与笔记不触发生成；其它模型任务仍须配置模型。
-    if (method === "POST" && path.startsWith("/api/conversations") && !notesPath && path !== "/api/conversations/direct" && !context.modelConfigured) throw new HttpError(409, "请在服务器配置模型，然后重启后端");
+    if (method === "POST" && path.startsWith("/api/conversations") && !notesPath && !/^\/api\/conversations\/\d+\/runs\/review$/.test(path) && path !== "/api/conversations/direct" && !context.modelConfigured) throw new HttpError(409, "请在服务器配置模型，然后重启后端");
     if (method === "GET" && path === "/api/info") {
       const meta = await harness.snapshot(Meta, ctx);
       return { status: 200, data: { model: modelLabel, api: config.model.api, configured: context.modelConfigured, pid: process.pid, startedAt, boots: meta?.boots ?? 0 } };
@@ -150,6 +151,11 @@ export function createApi(context: AppContext) {
       if (chat[2] === "fork") return { status: 201, data: await messages.fork(conversation, body) };
       await conversation.abort(ctx);
       return { status: 200, data: { ok: true } };
+    }
+    const reviewPath = path.match(/^\/api\/conversations\/(\d+)\/runs\/review$/);
+    if (method === "POST" && reviewPath) {
+      const conversation = await conversations.getConversation(Number(reviewPath[1]));
+      return { status: 200, data: { item: await conversation.commit(tx => reviewRunInTx(tx, conversation.id, body), ctx) } };
     }
     const executionRuns = path.match(/^\/api\/conversations\/(\d+)\/(schedules|background)\/([0-9a-f-]+)\/runs$/);
     if (method === "GET" && executionRuns) {

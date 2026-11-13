@@ -15,7 +15,7 @@ const submission = (input: ScheduleInput) => ({ type: "input" as const, content:
   entry: { kind: "app.schedule-input", data: { scheduleId: input.scheduleId, at: input.at } } });
 
 import type { ExecutionRun } from "@assistant/contracts";
-export function createSchedules(notifyEvent: NotifyEvent, onSettled: (run: ExecutionRun) => Promise<void> = async () => {}) {
+export function createSchedules(notifyEvent: NotifyEvent, onSettled: (run: ExecutionRun) => Promise<"delivered" | "not_applicable" | "unknown" | void> = async () => {}) {
   const ScheduleTask: Task<ScheduleInput, ScheduleCheckpoint, string | null, object> = defineTask<ScheduleInput, ScheduleCheckpoint, string | null, object>({
     name: "app.v3.schedule", version: 1,
     initial: () => ({ phase: "sleep" }),
@@ -39,7 +39,7 @@ export function createSchedules(notifyEvent: NotifyEvent, onSettled: (run: Execu
           const admitted = (await tx.doc(Executions, runtime.conversationId)).items.find(run => run.id === runId(task.input));
           if (admitted?.submissionId !== undefined) { current = true; return; }
           if (!current) return finish("已取消或已更新");
-          await recordExecution(tx, runtime.conversationId, { id: runId(task.input), kind: "schedule", taskId: task.input.scheduleId, text: task.input.text, ...(item?.daylightTaskId ? { daylightTaskId: item.daylightTaskId } : {}) });
+          await recordExecution(tx, runtime.conversationId, { id: runId(task.input), kind: "schedule", taskId: task.input.scheduleId, runtimeTaskId: task.id, text: task.input.text, ...(item?.daylightTaskId ? { daylightTaskId: item.daylightTaskId } : {}) });
         }, context);
         if (!current) return;
         const parent = await runtime.conversation(runtime.conversationId, context);

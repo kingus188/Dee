@@ -1,3 +1,5 @@
+import { agentCapabilities } from "./agents/capabilities.js";
+import { handoffPrompt, prepareHandoff } from "./agent-handoff.js";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createPeerService, openRuntime } from "@assistant/runtime";
 import type { PeerJob, PeerSession, PeerSubmission, PeerSessionInfo, PeerTranscript, Runtime } from "@assistant/runtime";
@@ -22,7 +24,7 @@ import type { PeerChange } from "./peer-socket.js";
 const ActiveConversation = defineDoc<{ id: Runtime["root"]["id"] | null }>({ kind: "app.desktop-active-conversation", version: 1, scope: "session", initial: () => ({ id: null }) });
 const Approvals = defineDoc<{ ids: string[] }>({ kind: "app.desktop-peer-approvals", version: 1, scope: "session", initial: () => ({ ids: [] }) });
 const PeerServers = defineDoc<{ origins: Record<string, string> }>({ kind: "app.desktop-peer-servers", version: 1, scope: "session", initial: () => ({ origins: {} }) });
-const ChatContinuity = defineDoc<{ messages: DesktopAgentSnapshot["messages"]; offset: number; context: string; inputs: Record<string, string>; requests: Record<string, string> }>({ kind: "app.desktop-chat-continuity", version: 1, scope: "session", initial: () => ({ messages: [], offset: 0, context: "", inputs: {}, requests: {} }) });
+const ChatContinuity = defineDoc<{ messages: DesktopAgentSnapshot["messages"]; offset: number; context: string; inputs: Record<string, string>; requests: Record<string, string>; handoff?: DesktopAgentSnapshot["handoff"] }>({ kind: "app.desktop-chat-continuity", version: 1, scope: "session", initial: () => ({ messages: [], offset: 0, context: "", inputs: {}, requests: {} }) });
 
 export type AgentRequest = ((path: string, body?: unknown, serverId?: string) => Promise<unknown>) & {
   onChange?(listener: (change: PeerChange) => void): () => void;
@@ -265,7 +267,7 @@ export async function openDesktopAgent(options: {
       }
       const continuity = await runtime!.harness.snapshot(ChatContinuity, ctx);
       if (includeContinuity && continuity) messages = [...continuity.messages, ...messages.slice(continuity.offset).map(message => ({ ...message, text: message.role === "user" ? continuity.inputs[message.text] ?? message.text : message.text }))];
-      return { configured: agentConfigured, piConfigured: configured(), agent: settings.agent, agentConfig: settings.agent === "pi" ? undefined : settings.agents[settings.agent], external: externalState?.external,
+      return { runs: externalState?.runs.map(run => ({ ...run, request: continuity?.inputs[run.request] ?? run.request })), capabilities: externalState?.capabilities ?? agentCapabilities("pi"), handoff: continuity?.handoff, configured: agentConfigured, piConfigured: configured(), agent: settings.agent, agentConfig: settings.agent === "pi" ? undefined : settings.agents[settings.agent], external: externalState?.external,
         model: catalog.model, piModel: catalog.agentModel, piEffort: settings.piEffort, piAccess: settings.piAccess, workspace: settings.workspace, nodeId,
         busy: busy || peerRuns.size > 0 || external.busy || inspection.tasks.length > 0, messages, jobs: (await peers.list()).map(job => ({ ...job, approved: approved.includes(job.id) })), serverConnected, collaboration, error: externalState?.error ?? agentError ?? error ?? (settings.agent === "pi" ? catalog.error : undefined) ?? connectionError ?? historyError };
     },
@@ -276,11 +278,11 @@ export async function openDesktopAgent(options: {
       const continuity = await runtime!.harness.snapshot(ChatContinuity, ctx);
       const recorded = continuity?.requests?.[input.id];
       if (recorded && continuity!.inputs[recorded] !== input.text) throw new Error("消息 ID 与已有内容冲突");
-      const text = recorded ?? (continuity?.context ? `以下是当前对话的历史记录，仅作为上下文，继续处理最后的用户消息。\n${continuity.context}\n\n当前用户消息：\n${input.text}` : input.text);
+      const text = recorded ?? (continuity?.context ? handoffPrompt(continuity.context, input.text) : input.text);
       if (text !== input.text) await runtime!.root.commit(async tx => { const chat = await tx.doc(ChatContinuity); chat.inputs[text] = input.text; chat.requests[input.id] = text; }, ctx);
       if (options.settings.get().agent !== "pi") {
         await external.send({ ...input, text });
-        await runtime!.root.commit(async tx => { (await tx.doc(ChatContinuity)).context = ""; }, ctx);
+        await runtime!.root.commit(async tx => { const chat = await tx.doc(ChatContinuity); chat.context = ""; if (chat.handoff) chat.handoff.status = "submitted"; }, ctx);
         sync(); return;
       }
       if (!configured()) throw new Error(catalog.error ?? "请先在 Pi 中配置模型");
@@ -288,7 +290,7 @@ export async function openDesktopAgent(options: {
       busy = true; error = undefined;
       try {
         const submission = await conversation.submit({ type: "input", content: text, requestId: input.id }, ctx);
-        await runtime!.root.commit(async tx => { (await tx.doc(ChatContinuity)).context = ""; }, ctx);
+        await runtime!.root.commit(async tx => { const chat = await tx.doc(ChatContinuity); chat.context = ""; if (chat.handoff) chat.handoff.status = "submitted"; }, ctx);
         sync();
         void submission.wait(ctx).then(result => { if (result.status !== "done") report(new Error("本机对话未完成：" + result.status)); }).catch(report).finally(() => { busy = false; sync(); });
       } catch (cause) { busy = false; throw cause; }
@@ -320,7 +322,7 @@ export async function openDesktopAgent(options: {
         const previous = await runtime!.harness.snapshot(ChatContinuity, ctx);
         const target = await service.snapshot(false);
         await runtime!.root.commit(async tx => {
-          Object.assign(await tx.doc(ChatContinuity), { messages: before.messages, offset: target.messages.length, context: JSON.stringify(before.messages.map(({ role, text }) => ({ role, text }))), inputs: previous?.inputs ?? {} });
+          Object.assign(await tx.doc(ChatContinuity), { messages: before.messages, offset: target.messages.length, ...prepareHandoff(before.messages, before.agent ?? "pi", selected.agent), inputs: previous?.inputs ?? {} });
         }, ctx);
       });
     },
@@ -328,21 +330,21 @@ export async function openDesktopAgent(options: {
       return changeSettings(async () => {
         const previous = options.settings.get().workspace;
         await external.detach(); options.settings.saveWorkspace(workspace); await reload();
-        if (workspace !== previous) await runtime!.root.commit(async tx => { Object.assign(await tx.doc(ChatContinuity), { messages: [], offset: 0, context: "", inputs: {}, requests: {} }); }, ctx);
+        if (workspace !== previous) await runtime!.root.commit(async tx => { const chat = await tx.doc(ChatContinuity); delete chat.handoff; Object.assign(chat, { messages: [], offset: 0, context: "", inputs: {}, requests: {} }); }, ctx);
       });
     },
     async newSession() {
       await changeSettings(async () => {
         if (options.settings.get().agent !== "pi") {
           await external.newSession();
-          await runtime!.root.commit(async tx => { Object.assign(await tx.doc(ChatContinuity), { messages: [], offset: 0, context: "", inputs: {}, requests: {} }); }, ctx);
+          await runtime!.root.commit(async tx => { const chat = await tx.doc(ChatContinuity); delete chat.handoff; Object.assign(chat, { messages: [], offset: 0, context: "", inputs: {}, requests: {} }); }, ctx);
           return;
         }
         const id = await runtime!.root.commit(async tx => {
           const fresh = await tx.createConversation({ ownership: { kind: "ownerless" } });
           await configure(tx, fresh.id, { model: catalog.agentModel, thinkingLevel: options.settings.get().piEffort ?? null });
           (await tx.doc(ActiveConversation)).id = fresh.id;
-          Object.assign(await tx.doc(ChatContinuity), { messages: [], offset: 0, context: "", inputs: {}, requests: {} });
+          const chat = await tx.doc(ChatContinuity); delete chat.handoff; Object.assign(chat, { messages: [], offset: 0, context: "", inputs: {}, requests: {} });
           return fresh.id;
         }, ctx);
         conversation = (await runtime!.harness.conversation(id, ctx))!;

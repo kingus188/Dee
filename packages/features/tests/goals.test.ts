@@ -53,3 +53,14 @@ test("round limits and repeated identical progress block an otherwise endless lo
   assert.equal(limited.status, "blocked");
   assert.match(limited.summary, /轮次/);
 });
+
+test("superseding a goal preserves the interrupted round without reporting success", async () => {
+  const { closeGoalRound } = await import("../dist/goals/state.js");
+  const goal = { ...normalizeGoal(input, now), id: "g", conversationId: 7, round: 1, roundStartedAt: now, workerConversationId: 8 };
+  closeGoalRound(goal, "interrupted", now + 1);
+  closeGoalRound(goal, "interrupted", now + 2);
+  assert.equal(goal.history.length, 1);
+  assert.equal(goal.history[0].executionStatus, "interrupted");
+  assert.equal(goal.history[0].startedAt, now);
+  assert.equal(goal.history[0].workerConversationId, 8);
+});
