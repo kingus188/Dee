@@ -4,7 +4,7 @@ import { MarkdownEditor } from "../editor/MarkdownEditor.js";
 import { renderDocumentMarkdown, type MarkdownHeading } from "../chat/markdown.js";
 import { Icon } from "../ui/Icon.js";
 import { WorkspaceBrand } from "../ui/WorkspaceBrand.js";
-import { useNotesDocument } from "./notes/useNotesDocument.js";
+import { useNotesDocument, type NotesOwner } from "./notes/useNotesDocument.js";
 
 function titleOf(text: string, index: number) {
   const first = text.split(/\r?\n/).find(line => line.trim()) ?? "";
@@ -14,8 +14,9 @@ function previewOf(text: string) {
   return text.split(/\r?\n/).filter(line => line.trim()).slice(1).join(" ").replace(/[#*`>_|]/g, "").slice(0, 100);
 }
 
-export function NotesPage({ owner, active, headerActions }: { owner: number; active: boolean; headerActions?: ReactNode }) {
+export function NotesPage({ owner, active, headerActions }: { owner: NotesOwner; active: boolean; headerActions?: ReactNode }) {
   const doc = useNotesDocument(owner, active);
+  const global = owner === "global";
   const [libraryOpen, setLibraryOpen] = useState(false), [tab, setTab] = useState<"notes" | "outline">("notes");
   const [query, setQuery] = useState(""), [focus, setFocus] = useState(false);
   const paper = useRef<HTMLDivElement>(null), library = useRef<HTMLElement>(null), libraryToggle = useRef<HTMLButtonElement>(null);
@@ -86,7 +87,7 @@ export function NotesPage({ owner, active, headerActions }: { owner: number; act
     </header>
     <aside ref={library} id={`notes-library-${owner}`} className="notes-sidebar" hidden={!libraryOpen} aria-label="笔记导航">
       <header className="notes-library-heading"><div><h2>笔记库</h2><span>{doc.notes.memos.length} 篇</span></div><button className="icon-button" type="button" aria-label="关闭笔记目录" onClick={() => { setLibraryOpen(false); libraryToggle.current?.focus(); }}><Icon name="x" /></button></header>
-      <p className="notes-owner">当前会话 #{owner}</p>
+      {!global && <p className="notes-owner">当前会话 #{owner}</p>}
       <div className="notes-tabs" role="tablist" aria-label="笔记导航方式" onKeyDown={event => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault(); const next = tab === "notes" ? "outline" : "notes"; setTab(next);
@@ -106,14 +107,14 @@ export function NotesPage({ owner, active, headerActions }: { owner: number; act
         {rendered.headings.map((heading, index) => <button type="button" key={heading.id} data-level={heading.level} onClick={() => jump(heading, index)}>{heading.text}</button>)}
         {!rendered.headings.length && <p className="notes-navigation-empty">{hasDocument ? "用 Markdown 标题组织内容，段落会出现在这里。" : "选择一篇笔记，查看文档大纲。"}</p>}
       </nav>
-      <footer className="notes-library-footer"><button className="text-button" type="button" aria-label="新增笔记" disabled={doc.pending || !doc.base} onClick={create}><Icon name="plus" />新建笔记</button><button className="icon-button" type="button" aria-label="重新读取" title="重新读取" disabled={doc.pending} onClick={() => void doc.load()}><Icon name="refresh-cw" /></button><a href={`/api/conversations/${owner}/export.md`} download title="导出聊天记录" aria-label="导出聊天记录"><Icon name="download" /></a></footer>
+      <footer className="notes-library-footer"><button className="text-button" type="button" aria-label="新增笔记" disabled={doc.pending || !doc.base} onClick={create}><Icon name="plus" />新建笔记</button><button className="icon-button" type="button" aria-label="重新读取" title="重新读取" disabled={doc.pending} onClick={() => void doc.load()}><Icon name="refresh-cw" /></button><a href={global ? "/api/notes/export.md" : `/api/conversations/${owner}/export.md`} download title={global ? "导出笔记" : "导出聊天记录"} aria-label={global ? "导出笔记" : "导出聊天记录"}><Icon name="download" /></a></footer>
     </aside>
     <section className="notes-main" aria-label="笔记文档">
       {doc.error && <div role="alert" className="notes-error">{doc.error}{doc.editing ? "。草稿已保留；重新读取前请复制需要保留的正文。" : "。请重新读取后重试。"}<button className="text-button" type="button" disabled={doc.pending} onClick={() => void doc.load()}>重新读取</button></div>}
       <div className="notes-paper-scroll" ref={paper}>
         {!doc.base && !doc.error && <p className="notes-document-placeholder" role="status">正在读取…</p>}
-        {hasDocument && <div className="notes-document-meta"><span><Icon name="notebook-pen" />会话 #{owner}</span><span>{doc.editing ? "正在编辑" : "个人笔记"}</span><span>Markdown</span></div>}
-        {doc.editing ? <section className="notes-paper notes-writing" aria-label="笔记编辑" aria-busy={doc.pending}><MarkdownEditor key={doc.index ?? "new"} documentId={`notes:${owner}:${doc.index ?? "new"}`} value={doc.text} onChange={doc.setText} label="笔记正文" disabled={doc.pending} variant="document" /></section> : doc.index !== null ? <section className="notes-paper workspace-reading" aria-label="笔记详情"><MarkdownDocument className="md notes-prose" value={doc.original} /><button className="text-button notes-back" type="button" onClick={() => select(null)}>返回笔记列表</button></section> : doc.base && <section className="notes-blank workspace-content-empty"><span className="notes-blank-eyebrow">你的想法，值得记下来</span><Icon name="notebook-pen" /><h2>{doc.notes.memos.length ? "接着上次的想法" : "从一个想法开始"}</h2><p>{doc.notes.memos.length ? "打开笔记库，继续整理已有记录。也可以另起一篇，写下此刻的想法。" : "灵感、决定，或一段还没想清楚的话。\n在这里慢慢整理，让思路有处安放。"}</p><div className="notes-blank-actions"><button className="settings-save" type="button" disabled={doc.pending} onClick={create}><Icon name="plus" />新增笔记</button>{doc.notes.memos.length > 0 && <button className="text-button" type="button" onClick={() => setLibraryOpen(true)}>打开笔记库<Icon name="arrow-up-right" /></button>}</div><small>笔记保存在当前会话，随时回来接着写。</small></section>}
+        {hasDocument && <div className="notes-document-meta">{!global && <span><Icon name="notebook-pen" />会话 #{owner}</span>}<span>{doc.editing ? "正在编辑" : "个人笔记"}</span><span>Markdown</span></div>}
+        {doc.editing ? <section className="notes-paper notes-writing" aria-label="笔记编辑" aria-busy={doc.pending}><MarkdownEditor key={doc.index ?? "new"} documentId={`notes:${owner}:${doc.index ?? "new"}`} value={doc.text} onChange={doc.setText} label="笔记正文" disabled={doc.pending} variant="document" /></section> : doc.index !== null ? <section className="notes-paper workspace-reading" aria-label="笔记详情"><MarkdownDocument className="md notes-prose" value={doc.original} /><button className="text-button notes-back" type="button" onClick={() => select(null)}>返回笔记列表</button></section> : doc.base && <section className="notes-blank workspace-content-empty"><span className="notes-blank-eyebrow">你的想法，值得记下来</span><Icon name="notebook-pen" /><h2>{doc.notes.memos.length ? "接着上次的想法" : "从一个想法开始"}</h2><p>{doc.notes.memos.length ? "打开笔记库，继续整理已有记录。也可以另起一篇，写下此刻的想法。" : "灵感、决定，或一段还没想清楚的话。\n在这里慢慢整理，让思路有处安放。"}</p><div className="notes-blank-actions"><button className="settings-save" type="button" disabled={doc.pending} onClick={create}><Icon name="plus" />新增笔记</button>{doc.notes.memos.length > 0 && <button className="text-button" type="button" onClick={() => setLibraryOpen(true)}>打开笔记库<Icon name="arrow-up-right" /></button>}</div>{!global && <small>笔记保存在当前会话，随时回来接着写。</small>}</section>}
       </div>
       <footer className="notes-status"><span role="status" data-dirty={doc.dirty}>{status}</span><span className="notes-save-shortcut">{doc.editing ? "⌘ / Ctrl + S 保存" : "随时记录，慢慢整理"}</span><span>{doc.editing ? `${doc.text.length.toLocaleString()} / 16000` : `${value.length.toLocaleString()} 字符`}{hasDocument && ` · 约 ${Math.max(1, Math.ceil(value.length / 450))} 分钟阅读`}</span></footer>
     </section>

@@ -26,6 +26,7 @@ export function readWorkspaceRoute(hash: string): WorkspaceRoute {
   if (name === "chat" && rawId === "local" && extra === undefined) return { page: "chat", group: null, execution: "local" };
   const id = rawId && /^\d+$/.test(rawId) ? Number(rawId) : undefined;
   const conversationId = id !== undefined && Number.isSafeInteger(id) && id > 0 ? id : undefined;
+  if (name === "notes") return { page: "data", group: "notes" };
   if (Object.hasOwn(groups, name)) return { page: "data", group: groups[name], conversationId };
   const pages: Record<string, WorkspacePage> = { today: "home", chat: "chat", tasks: "daylight", activity: "activity", reports: "reports", settings: "settings" };
   const page = Object.hasOwn(pages, name) ? pages[name] : undefined;
@@ -38,5 +39,5 @@ export function workspaceHash(route: WorkspaceRoute): string {
   const name = route.page === "data" ? route.group === "tasks" ? "schedules" : route.group ?? "memory" : route.page === "home" ? "today" : route.page === "daylight" ? "tasks" : route.page;
   if (route.page === "teams" && route.chatId) return `#teams/${encodeURIComponent(route.chatId)}`;
   if (route.page === "daylight" && route.taskId) return `#tasks/${encodeURIComponent(route.taskId)}`;
-  return `#${name}${route.conversationId && (route.page === "chat" || (route.page === "data" && ["tasks", "notes"].includes(route.group ?? ""))) ? `/${route.conversationId}` : ""}`;
+  return `#${name}${route.conversationId && (route.page === "chat" || (route.page === "data" && route.group === "tasks")) ? `/${route.conversationId}` : ""}`;
 }

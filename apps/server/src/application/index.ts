@@ -21,6 +21,8 @@ import { openDaylightStore, type DaylightStore } from "../daylight-store.js";
 import { createDaylight, migrateLegacyTodos } from "@assistant/features";
 import { openNotificationOutbox } from "../notification-outbox.js";
 import { openBusinessDatabase } from "../postgres.js";
+import { createNotesStore } from "../notes-store.js";
+import { migratePersonalNotes } from "./notes-migration.js";
 import { createDailyReports } from "../daily-reports.js";
 import { existsSync } from "node:fs";
 import { applyExecutionResult } from "./daylight-execution.js";
@@ -45,6 +47,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     businessDatabase = await openBusinessDatabase(config.databaseUrl, config.dataDir, config.test);
     daylight = await openDaylightStore(businessDatabase);
     const dailyReports = await createDailyReports(businessDatabase);
+    const personalNotes = await createNotesStore(businessDatabase);
     const taskSource = join(config.dataDir, "daylight.sqlite"), reportSource = join(config.dataDir, "agent.sqlite");
     if (existsSync(taskSource)) await daylight.importSource(taskSource);
     if (existsSync(reportSource)) await dailyReports.importSource(reportSource);
@@ -84,6 +87,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
       beforeResume: async runtime => {
         peers.bind(runtime, ctx); peerRuntime = runtime;
         await repairConversationTitles(runtime, ctx);
+        await migratePersonalNotes(runtime, personalNotes, ctx);
         episodeStore!.reconcileConversations((await runtime.harness.snapshot(Index, ctx))?.items.map(item => item.id) ?? []);
       },
       extensions: [peers.extension, createDailyReportTools(dailyReports), createDaylight(daylight), createMailInbox(mail), createAssistant(notify, daylight), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query), records: rows => teamsStore!.records(rows),
@@ -104,7 +108,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
         });
       }
       const taskGraph = await runtime.harness.taskGraph(ctx);
-      return { ...runtime, peers, config, ctx, taskGraph, tasks, notifications, daylight, dailyReports, businessDatabase, wechat, modelSettings, wechatSettings, teamsStore, teamsSender, mail, episodeStore, generateSelfChat: modelConfigured ? createSelfChatGenerator(models, agentModel) : undefined, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
+      return { ...runtime, peers, config, ctx, taskGraph, tasks, notifications, daylight, dailyReports, personalNotes, businessDatabase, wechat, modelSettings, wechatSettings, teamsStore, teamsSender, mail, episodeStore, generateSelfChat: modelConfigured ? createSelfChatGenerator(models, agentModel) : undefined, summarize: createSummarizer(models, agentModel), modelLabel, modelConfigured, startedAt: new Date().toISOString(), redact, exitIfFatal };
     } catch (error) {
       wechat?.stop();
       await runtime.harness.close(ctx);

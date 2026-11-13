@@ -24,6 +24,7 @@ export type AppContext = Runtime & {
   daylight: DaylightStore;
   businessDatabase: Pool;
   dailyReports: DailyReports;
+  personalNotes: import("../notes-store.js").NotesStore;
   notifications: ReturnType<typeof openNotificationOutbox>;
   teamsStore: TeamsStore; teamsSender: TeamsSender;
   generateSelfChat?: import("../teams-self-chat.js").SelfChatGenerate;

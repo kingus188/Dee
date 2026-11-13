@@ -12,7 +12,7 @@ export function WorkspaceData({ group, owner, connect, headerActions, skillSourc
   useEffect(() => { if (group) setOpened(old => ({ ...old, [group]: true })); }, [group]);
   useEffect(() => { if (owner !== null) setContext(owner); }, [owner]);
   useEffect(() => {
-    if ((group !== "notes" && group !== "tasks") || context !== null) return;
+    if (group !== "tasks" || context !== null) return;
     let current = true;
     void connect().then(id => { if (current) { setContext(id); setError(""); } }).catch(error => { if (current) setError(error instanceof Error ? error.message : "无法读取当前会话"); });
     return () => { current = false; };
@@ -20,8 +20,11 @@ export function WorkspaceData({ group, owner, connect, headerActions, skillSourc
   return <>
     {opened.memory && <div hidden={group !== "memory"}><PageLoad><PersonalPage kind="memory" active={group === "memory"} /></PageLoad></div>}
     {opened.skills && <div hidden={group !== "skills"}><PageLoad><LocalSkillsPage active={group === "skills"} remote={skillSource === "remote"} onRemoteChange={onSkillSourceChange} /></PageLoad></div>}
-    {(["notes", "tasks"] as const).map(kind => opened[kind] && <div className={kind === "notes" ? "notes-page-host" : undefined} hidden={group !== kind} key={kind}>
-      <PageLoad>{context === null ? error ? <p role="alert" className="workspace-error">{error}</p> : <p role="status">正在读取数据空间…</p> : kind === "notes" ? <NotesPage key={context} owner={context} active={group === kind} headerActions={headerActions} /> : <TasksPage key={context} owner={context} active={group === kind} />}</PageLoad>
-    </div>)}
+    {opened.notes && <div className="notes-page-host" hidden={group !== "notes"}>
+      <PageLoad><NotesPage owner="global" active={group === "notes"} headerActions={headerActions} /></PageLoad>
+    </div>}
+    {opened.tasks && <div hidden={group !== "tasks"}>
+      <PageLoad>{context === null ? error ? <p role="alert" className="workspace-error">{error}</p> : <p role="status">正在读取数据空间…</p> : <TasksPage key={context} owner={context} active={group === "tasks"} />}</PageLoad>
+    </div>}
   </>;
 }

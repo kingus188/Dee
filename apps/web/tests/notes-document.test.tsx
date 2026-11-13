@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { act } from "react";
 import type { JSDOM } from "jsdom";
 import type { ConversationNotes, NotesEditRequest } from "@assistant/contracts";
+import { WorkspaceData } from "../dist/workspace/WorkspaceData.js";
 import { NotesPage } from "../dist/workspace/NotesPage.js";
 import { apiClient } from "../dist/api/socket.js";
 import { mount } from "./dom.js";
@@ -316,4 +317,94 @@ test("富文本正文通过真实粘贴事件编辑，保存正文变化而非�
   await click(document, "保存笔记");
   assert.deepEqual(api.writes, [{ base: original, notes: { todos: [], memos: ["原始正文新增段落"] } }]);
   assert.equal(document.querySelector('[aria-label="笔记详情"] article')?.textContent, "原始正文新增段落");
+});
+
+
+test("个人笔记不创建会话，切换会话仍保留同一本笔记和编辑草稿", async t => {
+  let connects = 0;
+  const reads: string[] = [];
+  t.mock.method(apiClient, "request", async (path: string) => {
+    reads.push(path);
+    return { todos: [], memos: ["# 全局笔记\n\n原正文"], revision: 3 };
+  });
+  const connect = async () => { connects++; return 17; };
+  const { dom, render } = await mount(t, <WorkspaceData group="notes" owner={null} connect={connect} />);
+  for (let i = 0; i < 20 && !dom.window.document.querySelector('[aria-label="笔记详情"]'); i++) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+  }
+  assert.equal(connects, 0, "打开个人笔记不应创建会话");
+  assert.deepEqual(reads, ["/api/notes"]);
+  const document = dom.window.document;
+  await click(document, "编辑笔记");
+  await typeMarkdown(dom, "# 未保存\n\n保留草稿");
+  await render(<WorkspaceData group="notes" owner={42} connect={connect} />);
+  assert.equal(sourceEditor(document).state.doc.toString(), "# 未保存\n\n保留草稿");
+  assert.deepEqual(reads, ["/api/notes"]);
+  assert.equal(document.querySelector('a[download]')?.getAttribute("href"), "/api/notes/export.md");
+  assert.doesNotMatch(document.body.textContent!, /当前会话|会话 #/);
+});
+
+test("个人笔记保存携带原修订号，冲突保留草稿，成功后使用新修订号", async t => {
+  type PersonalNotes = ConversationNotes & { revision: number };
+  let current: PersonalNotes = { todos: [], memos: ["原笔记"], revision: 4 };
+  let conflict = true;
+  type Edit = { index: number | null; text: string; base: { revision: number } };
+  const writes: Edit[] = [];
+  t.mock.method(apiClient, "request", async (path: string, body?: Edit) => {
+    assert.equal(path, "/api/notes");
+    if (!body) return structuredClone(current);
+    writes.push(structuredClone(body));
+    if (conflict) throw new Error("笔记版本已变化，请重新读取");
+    assert.equal(body.base.revision, current.revision);
+    const memos = [...current.memos];
+    if (body.index === null) memos.push(body.text); else memos[body.index] = body.text;
+    current = { todos: [], memos, revision: current.revision + 1 };
+    return structuredClone(current);
+  });
+  const { dom } = await mount(t, <NotesPage owner="global" active />);
+  const document = dom.window.document;
+  await click(document, "编辑笔记");
+  await typeMarkdown(dom, "修改后的笔记");
+  await click(document, "保存笔记");
+  assert.deepEqual(writes[0], { index: 0, text: "修改后的笔记", base: { revision: 4 } });
+  assert.equal(sourceEditor(document).state.doc.toString(), "修改后的笔记");
+  assert.match(document.querySelector('[role="alert"]')!.textContent!, /版本已变化/);
+  assert.equal(document.querySelector('[role="status"]')?.textContent, "有未保存的修改");
+  conflict = false;
+  await click(document, "保存笔记");
+  assert.equal(document.querySelector('[role="status"]')?.textContent, "已保存");
+  await click(document, "编辑笔记");
+  await typeMarkdown(dom, "再次修改");
+  await click(document, "保存笔记");
+  assert.equal(writes[2]!.base.revision, 5);
+  assert.equal(document.querySelector('[aria-label="笔记详情"] article')?.textContent, "再次修改");
+  await click(document, "新增笔记");
+  await typeMarkdown(dom, "新增一篇");
+  await click(document, "保存笔记");
+  assert.deepEqual(writes[3], { index: null, text: "新增一篇", base: { revision: 6 } });
+  assert.equal(document.querySelector('[aria-label="笔记详情"] article')?.textContent, "新增一篇");
+});
+
+
+test("个人笔记超过旧会话总量限制仍可编辑，只提交单篇增量而不回传历史", async t => {
+  const original = { todos: [], memos: Array.from({ length: 1001 }, (_, i) => `笔记 ${i}\n${"正文".repeat(65)}`), revision: 9 };
+  assert.ok(original.memos.reduce((sum, memo) => sum + memo.length, 0) > 128000);
+  const writes: unknown[] = [];
+  t.mock.method(apiClient, "request", async (path: string, body?: { index: number | null; text: string; base: { revision: number } }) => {
+    assert.equal(path, "/api/notes");
+    if (!body) return structuredClone(original);
+    writes.push(structuredClone(body));
+    assert.deepEqual(body, { index: 0, text: "更新首篇", base: { revision: 9 } });
+    assert.ok(JSON.stringify(body).length < 100);
+    return { ...original, memos: [body.text, ...original.memos.slice(1)], revision: 10 };
+  });
+  const { dom } = await mount(t, <NotesPage owner="global" active />);
+  const document = dom.window.document;
+  await click(document, "编辑笔记");
+  await typeMarkdown(dom, "更新首篇");
+  await click(document, "保存笔记");
+  assert.equal(writes.length, 1);
+  assert.equal(document.querySelector('[role="status"]')?.textContent, "已保存");
+  assert.equal(noteButtons(document).length, 1001);
+  assert.equal(document.querySelector('[aria-label="笔记详情"] article')?.textContent, "更新首篇");
 });

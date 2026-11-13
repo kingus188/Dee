@@ -190,3 +190,5 @@ pnpm test
 本项目基于 [xiaomoBoy/pi-durable-assistant](https://github.com/xiaomoBoy/pi-durable-assistant) 继续开发，现作为独立仓库维护，保留原作者版权声明。持久化能力由 [Pi Durable](https://github.com/earendil-works/pi) 提供。
 
 采用 [MIT 许可证](LICENSE)。本项目并非 Pi Durable、微信或模型服务商的官方产品。
+
+个人空间的笔记独立存储在 PostgreSQL，不再随当前会话切换。旧会话笔记会一次性导入并保留原 SQLite 数据；迁移、部署和恢复边界见 [笔记存储说明](docs/NOTES_STORAGE.md)。

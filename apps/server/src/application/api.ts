@@ -31,6 +31,10 @@ export function createApi(context: AppContext) {
   const { dailyReports } = context;
   async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}, peerAuthorized = false) {
     const path = url.pathname;
+    if (path === "/api/notes") {
+      if (method === "GET") return { status: 200, data: await context.personalNotes.get() };
+      if (method === "POST") return { status: 200, data: await context.personalNotes.edit(body.index, body.text, body.base) };
+    }
     const peerResult = await peerApi(context, method, url, body, peerAuthorized);
     if (peerResult) return peerResult;
     const desktopWrite = method === "POST" && path.match(/^\/api\/conversations\/(\d+)\/(?!archive$|restore$|remove$)/);

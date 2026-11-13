@@ -69,7 +69,7 @@ export function attachWebSocket(server: Server, context: AppContext, api: Return
         if (peer && !(url.pathname.startsWith("/api/peers/") || (input.method === "GET" && url.pathname === "/api/info"))) throw new HttpError(403, "设备连接只允许双端协作接口");
         // notes carries both the new content and base, matching the bounded HTTP allowance.
         const limit = peer && input.method === "POST" && url.pathname === "/api/peers/conversations" ? 24 * 1024 * 1024
-          : input.method === "POST" && /^\/api\/conversations\/\d+\/notes$/.test(url.pathname) ? 2_000_000 : 100_000;
+          : input.method === "POST" && (url.pathname === "/api/notes" || /^\/api\/conversations\/\d+\/notes$/.test(url.pathname)) ? 2_000_000 : 100_000;
         if (!/^\/api\/conversations\/\d+\/messages$/.test(url.pathname) && url.pathname !== "/api/daylight/tasks/save" && Buffer.byteLength(text) > limit) throw new HttpError(413, "请求太大");
         pending.add(input.id);
         registered = true;

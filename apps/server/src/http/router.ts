@@ -13,6 +13,11 @@ export function createRouter(context: AppContext, api = createApi(context)) {
     const url = new URL(req.url!, "http://localhost"), path = url.pathname, method = req.method!;
     if (method !== "GET" && !sameOrigin(req)) throw new HttpError(403, "只接受同源请求");
     if (method === "GET") {
+      if (path === "/api/notes/export.md") {
+        const notes = await context.personalNotes.get();
+        res.writeHead(200, { "content-type": "text/markdown; charset=utf-8", "content-disposition": 'attachment; filename="notes.md"', "cache-control": "no-store" });
+        return res.end(notes.memos.join("\n\n---\n\n"));
+      }
       const media = path.match(/^\/api\/teams\/media\/([a-f0-9]{64})$/);
       if (media) {
         const item = context.teamsStore.archive.media(media[1]);
@@ -39,7 +44,7 @@ export function createRouter(context: AppContext, api = createApi(context)) {
     // notes 同时携带新正文和 base；两份 128000 字正文加 JSON 转义仍有明确上限。
     const bodyLimit = /^\/api\/conversations\/\d+\/messages$/.test(path) || path === "/api/daylight/tasks/save" ? 14_000_000
       : path === "/api/peers/conversations" ? 24 * 1024 * 1024
-      : /^\/api\/conversations\/\d+\/notes$/.test(path) ? 2_000_000 : 100_000;
+      : path === "/api/notes" || /^\/api\/conversations\/\d+\/notes$/.test(path) ? 2_000_000 : 100_000;
     const body = method === "POST" ? await readBody(req, bodyLimit) : {};
     const result = await api.dispatch(method, url, body, pairedPeer(req, context.config));
     sendJson(res, result.status, result.data);

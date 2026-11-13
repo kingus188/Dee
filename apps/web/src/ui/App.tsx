@@ -32,7 +32,7 @@ const groupLabels: Record<CardGroup, string> = { tasks: "任务与提醒", memor
 const groupDescriptions: Record<CardGroup, string> = {
   skills: "浏览这台电脑上的技能目录，按来源查找和管理。",
   memory: "查看小 D 记住的偏好与背景，决定哪些继续保留。",
-  notes: "回看这段对话中的想法与决定，需要时再补充。",
+  notes: "整理个人笔记与决定。",
   tasks: "查看这段对话的安排与执行状态。跨对话进展在「通知」中查看。",
 };
 const pageLabels = { home: "今日", chat: "与小 D 对话", teams: "Teams", daylight: "待办", activity: "通知中心", reports: "每日日报", settings: "连接与设置", data: "个人内容" };
@@ -224,7 +224,7 @@ export function App() {
   useEffect(() => { if (service.current) service.current.open = false; }, [route]);
   const mascot = mascotStatus({ currentViewData: view, isDisconnected: connection !== "connected", isRecovered: recoveredUntil > Date.now(), recoveredUntil });
   function prompt(text: string) { setRelatedDrawer(false); setDraft(text); navigate({ page: "chat", group: null, ...(localChat ? { execution: "local" as const } : { conversationId: view?.conversationId }) }); setTimeout(() => document.getElementById("chat-textarea")?.focus(), 0); }
-  function openGroup(next: CardGroup) { navigate({ page: "data", group: next, ...(next === "skills" ? { skillSource: "remote" as const } : {}), ...(["tasks", "notes"].includes(next) && server.view ? { conversationId: server.view.conversationId } : {}) }); }
+  function openGroup(next: CardGroup) { navigate({ page: "data", group: next, ...(next === "skills" ? { skillSource: "remote" as const } : {}), ...(next === "tasks" && server.view ? { conversationId: server.view.conversationId } : {}) }); }
   function openChat(id: number) { setMobileHistoryOpen(false); autoScroll.current = true; navigate({ page: "chat", group: null, conversationId: id }); if (narrow) requestAnimationFrame(() => document.getElementById("chat-textarea")?.focus()); }
   async function startChat() {
     const origin = currentDestination.current;

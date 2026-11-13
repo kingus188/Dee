@@ -3,8 +3,10 @@ import type { ConversationView } from "@assistant/contracts";
 import { request } from "../../api/request.js";
 import { errorMessage, mayDiscard, useUnsavedChanges } from "../editing.js";
 
-type Notes = ConversationView["notes"];
-export function useNotesDocument(owner: number, active: boolean) {
+type Notes = ConversationView["notes"] & { revision?: number };
+export type NotesOwner = number | "global";
+export function useNotesDocument(owner: NotesOwner, active: boolean) {
+  const endpoint = owner === "global" ? "/api/notes" : `/api/conversations/${owner}/notes`;
   const [notes, setNotes] = useState<Notes>({ todos: [], memos: [] });
   const [base, setBase] = useState<Notes | null>(null);
   const [index, setIndex] = useState<number | null>(null), [text, setText] = useState("");
@@ -22,7 +24,7 @@ export function useNotesDocument(owner: number, active: boolean) {
     const current = ++version.current;
     busy.current = true; setPending(true); setError("");
     try {
-      const data = await request<Notes>(`/api/conversations/${owner}/notes`);
+      const data = await request<Notes>(endpoint);
       if (current !== version.current) return;
       setNotes(data); setBase(data); setIndex(data.memos.length ? 0 : null);
       setText(""); setEditing(false); setFeedback("");
@@ -51,16 +53,22 @@ export function useNotesDocument(owner: number, active: boolean) {
   }
   async function save() {
     if (!base || busy.current || !canSave) return;
-    const next: Notes = { todos: [], memos: [...notes.memos] };
-    const savedIndex = index ?? next.memos.length;
-    if (index === null) next.memos.push(text); else next.memos[index] = text;
-    if (next.memos.length > 1000 || next.memos.reduce((total, memo) => total + memo.length, 0) > 128000) {
-      setError("笔记总量已超过 1000 篇或 128000 字符，请先整理现有内容。"); return;
+    const savedIndex = index ?? notes.memos.length;
+    let body: unknown;
+    if (owner === "global") {
+      body = { index, text, base: { revision: base.revision } };
+    } else {
+      const next: Notes = { todos: [], memos: [...notes.memos] };
+      if (index === null) next.memos.push(text); else next.memos[index] = text;
+      if (next.memos.length > 1000 || next.memos.reduce((total, memo) => total + memo.length, 0) > 128000) {
+        setError("笔记总量已超过 1000 篇或 128000 字符，请先整理现有内容。"); return;
+      }
+      body = { notes: next, base };
     }
     const current = ++version.current;
     busy.current = true; setPending(true); setError(""); setFeedback("");
     try {
-      const data = await request<Notes>(`/api/conversations/${owner}/notes`, { notes: next, base });
+      const data = await request<Notes>(endpoint, body);
       if (current !== version.current) return;
       setNotes(data); setBase(data); setIndex(savedIndex); setText(data.memos[savedIndex] ?? text);
       setEditing(false); setFeedback("已保存");

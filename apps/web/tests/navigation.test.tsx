@@ -14,9 +14,11 @@ function view(id: number): ConversationView {
 }
 
 test("固定链接保留聊天和任务所属会话，非法编号不成为可执行上下文", () => {
-  for (const hash of ["#today", "#chat/17", "#schedules/31", "#notes/9", "#tasks", "#activity", "#memory", "#skills", "#reports", "#settings"]) {
+  for (const hash of ["#today", "#chat/17", "#schedules/31", "#notes", "#tasks", "#activity", "#memory", "#skills", "#reports", "#settings"]) {
     assert.equal(workspaceHash(readWorkspaceRoute(hash)), hash);
   }
+  assert.equal(workspaceHash(readWorkspaceRoute("#notes/9")), "#notes", "旧笔记链接归一到个人笔记，不订阅旧会话");
+  assert.equal(readWorkspaceRoute("#notes/9").conversationId, undefined);
   assert.equal(readWorkspaceRoute("#chat/9007199254740992").conversationId, undefined);
   assert.equal(readWorkspaceRoute("#chat/-2").conversationId, undefined);
   assert.equal(readWorkspaceRoute("#__proto__").page, "home");
