@@ -1,4 +1,17 @@
 /* Execution controls live inside the shared conversation composer. */
+.agent-picker-popover[data-model-view="true"] { grid-template-columns: 42px minmax(0, 1fr) 170px; grid-template-rows: minmax(0, 1fr) auto; width: min(550px, calc(100vw - 40px)); }
+.agent-picker-popover[data-model-view="true"] .agent-picker-option { min-height: 32px; padding-block: 6px; }
+.agent-picker-popover[data-model-view="true"] .agent-picker-main { min-height: 0; }
+.agent-picker-reasoning { min-width: 0; overflow-y: auto; padding: 8px 12px; border-left: 1px solid var(--dee-separator); }
+.agent-picker-reasoning header { height: 33px; margin-bottom: 8px; color: var(--text-muted); font-size: 12px; border-bottom: 1px solid var(--dee-separator); }
+.agent-picker-reasoning .agent-picker-option { justify-content: space-between; }
+.agent-picker-permission { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; min-width: 0; }
+.agent-picker-footer:has(.agent-picker-permission) { flex-wrap: wrap; }
+.agent-picker-permission select { max-width: 190px; min-width: 0; border: 0; background: transparent; color: var(--text-main); font: inherit; cursor: pointer; }
+@media (max-width: 600px) {
+  .agent-picker-popover[data-model-view="true"] { grid-template-columns: 38px minmax(0, 1fr) 112px; right: -8px; }
+  .agent-picker-reasoning { padding-inline: 6px; }
+}
 .composer-actions:has(.composer-execution) { min-width: 0; }
 .composer-actions:has(.composer-execution) .btn-abort { flex-shrink: 0; white-space: nowrap; }
 .composer-execution { position: relative; display: flex; align-items: center; min-width: 0; gap: 8px; }

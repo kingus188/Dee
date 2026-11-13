@@ -207,12 +207,16 @@ createInterface({ input: process.stdin }).on('line', line => {
   config.config.model = "native-model";
   config.config.effort = "ultra";
   try { await driver.send("first", randomUUID()); await driver.send("second", randomUUID()); } finally { await driver.close(); }
+  config.config.sandbox = "read-only";
+  config.config.approvalPolicy = "on-request";
   const resumed = await openCodex({ ...config, sessionId: "native-codex" }); await resumed.close();
   const calls = (await readFile(join(directory, "calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
   assert.equal(calls.find(call => call.method === "turn/start").params.model, "native-model");
   assert.equal(calls.find(call => call.method === "turn/start").params.effort, "ultra");
   assert.equal(calls.find(call => call.method === "thread/start").params.sandbox, "workspace-write");
   assert.equal(calls.find(call => call.method === "thread/start").params.approvalPolicy, "untrusted");
+  assert.equal(calls.find(call => call.method === "thread/resume").params.sandbox, "read-only");
+  assert.equal(calls.find(call => call.method === "thread/resume").params.approvalPolicy, "on-request");
   assert.ok(calls.some(call => call.method === "thread/resume" && call.params.threadId === "native-codex"));
   assert.equal(calls.filter(call => String(call.id).startsWith("permission-") && call.result?.decision === "decline").length, 2);
   assert.equal(events.filter(event => event.type === "text" && event.delta).length, 2);
@@ -332,11 +336,12 @@ test("Claude SDK keeps its permission callback, streams content and resumes nati
   };
   const config = options(cwd, process.execPath, events);
   config.config.model = "native-claude-model";
+  config.config.permissionMode = "plan";
   config.config.effort = "max";
   config.peerMcp = { command: process.execPath, args: ["--version"], env: { DEE_FIXTURE: "mcp" } };
   const driver = await openClaude(config, fakeQuery);
   try { await driver.send("one", randomUUID()); await driver.send("two", randomUUID()); } finally { await driver.close(); }
-  assert.equal(calls[0]!.options!.permissionMode, "default");
+  assert.equal(calls[0]!.options!.permissionMode, "plan");
   assert.equal(calls[0]!.options!.model, "native-claude-model");
   assert.equal(calls[0]!.options!.effort, "max");
   assert.equal(calls[0]!.options!.includePartialMessages, true);

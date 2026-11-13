@@ -423,6 +423,11 @@ for (const [kind, name] of [["claude", "Claude Code"], ["omp", "OMP"]] as const)
   assert.equal(picker.getAttribute("aria-expanded"), "false");
   assert.match(picker.textContent!, new RegExp(`${name}.*默认模型`));
   assert.equal(document.activeElement, picker);
+  if (kind === "claude") {
+    assert.equal(document.querySelector('[aria-label="Agent 设置"]'), null);
+    assert.equal(document.querySelector('[aria-label="外部 Agent 设置"]'), null);
+    return;
+  }
   const settingsButton = document.querySelector<HTMLButtonElement>('[aria-label="Agent 设置"]')!;
   await act(async () => settingsButton.click());
   assert.ok(document.querySelector('[aria-label="外部 Agent 设置"]'));
@@ -444,7 +449,7 @@ test("composer picker filters real Agent options, supports keyboard navigation a
   assert.equal(document.activeElement, search);
   assert.deepEqual([...document.querySelectorAll(".agent-picker-option")].map(option => option.getAttribute("aria-label")), ["选择 Pi", "选择 Codex", "选择 Claude Code", "选择 OMP", "选择 ACP Agent"]);
   assert.match(document.querySelector('[aria-label="选择 Pi"]')!.textContent!, /local-model/);
-  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="筛选 Claude Code"]')!.click());
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="筛选 OMP"]')!.click());
   assert.equal(document.querySelectorAll(".agent-picker-option").length, 1);
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="全部 Agent"]')!.click());
   async function searchFor(value: string) {

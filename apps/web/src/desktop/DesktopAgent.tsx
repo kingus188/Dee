@@ -15,9 +15,9 @@ export function DesktopAgentControls({ local }: { local: LocalConversation }) {
   const kind = snapshot?.agent ?? "pi";
   return <>
     {warning && <span className="desktop-agent-warning" role="alert" aria-label={warning} title={warning} tabIndex={0}><Icon name="circle-alert" /></span>}
-    <AgentPicker snapshot={snapshot} disabled={!snapshot || snapshot.busy || pending.length > 0} select={kind => action("agent", () => bridge.selectAgent({ kind }))} settings={() => setSettingsOpen(true)} />
-    {kind !== "pi" && <button className="icon-button" type="button" aria-label="Agent 设置" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(value => !value)}><Icon name="settings" /></button>}
-    {settingsOpen && kind !== "pi" && snapshot && <div className="local-agent-settings" role="dialog" aria-label="本机 Agent 设置"><header><strong>{agentNames[kind]}</strong><button type="button" className="icon-button" aria-label="关闭 Agent 设置" onClick={() => setSettingsOpen(false)}><Icon name="x" /></button></header><ExternalAgentSettings key={kind} snapshot={snapshot} bridge={bridge} busy={snapshot.busy || pending.length > 0} saved={local.refresh} /></div>}
+    <AgentPicker bridge={bridge} saved={local.refresh} snapshot={snapshot} disabled={!snapshot || snapshot.busy || pending.length > 0} select={kind => action("agent", () => bridge.selectAgent({ kind }))} settings={() => setSettingsOpen(true)} />
+    {(kind === "acp" || kind === "omp") && <button className="icon-button" type="button" aria-label="Agent 设置" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(value => !value)}><Icon name="settings" /></button>}
+    {settingsOpen && (kind === "acp" || kind === "omp") && snapshot && <div className="local-agent-settings" role="dialog" aria-label="本机 Agent 设置"><header><strong>{agentNames[kind]}</strong><button type="button" className="icon-button" aria-label="关闭 Agent 设置" onClick={() => setSettingsOpen(false)}><Icon name="x" /></button></header><ExternalAgentSettings key={kind} snapshot={snapshot} bridge={bridge} busy={snapshot.busy || pending.length > 0} saved={local.refresh} /></div>}
   </>;
 }
 

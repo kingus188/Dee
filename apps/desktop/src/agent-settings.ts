@@ -15,7 +15,11 @@ export function validateAgentSelection(input: unknown): DesktopAgentSelection {
   if (config.permission !== undefined && (!["codex", "claude"].includes(kind) || !["default", "readOnly", "autoEdit"].includes(config.permission) || (kind === "claude" && config.permission === "readOnly"))) throw new Error("权限设置无效");
   if (config.effort !== undefined && (typeof config.effort !== "string" || !config.effort.trim() || config.effort.length > 100 || /[\r\n\0]/.test(config.effort) || !["codex", "claude"].includes(kind))) throw new Error("思考强度无效");
   if (config.model !== undefined && (typeof config.model !== "string" || !config.model.trim() || config.model.length > 200 || /[\r\n\0]/.test(config.model) || !["codex", "claude"].includes(kind))) throw new Error("模型无效");
-  return { kind, config: { executable: config.executable.trim(), args: [...config.args], ...(config.model ? { model: config.model } : {}), ...(config.permission ? { permission: config.permission } : {}), ...(config.effort ? { effort: config.effort } : {}), ...(kind === "acp" && config.mode ? { mode: config.mode } : {}) } };
+  for (const key of ["permissionMode", "sandbox", "approvalPolicy"] as const) {
+    const value = config[key];
+    if (value !== undefined && (typeof value !== "string" || !/^[a-zA-Z-]{1,100}$/.test(value) || (key === "permissionMode" ? kind !== "claude" : kind !== "codex"))) throw new Error("原生权限参数无效");
+  }
+  return { kind, config: { executable: config.executable.trim(), args: [...config.args], ...(config.model ? { model: config.model } : {}), ...(config.permission ? { permission: config.permission } : {}), ...(config.permissionMode ? { permissionMode: config.permissionMode } : {}), ...(config.sandbox ? { sandbox: config.sandbox } : {}), ...(config.approvalPolicy ? { approvalPolicy: config.approvalPolicy } : {}), ...(config.effort ? { effort: config.effort } : {}), ...(kind === "acp" && config.mode ? { mode: config.mode } : {}) } };
 }
 export function openAgentSettings(directory: string) {
   const path = join(directory, "desktop-agent.json");

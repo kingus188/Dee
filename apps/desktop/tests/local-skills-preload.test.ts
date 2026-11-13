@@ -17,6 +17,8 @@ test("skills preload exposes only named operations and never a generic IPC or fi
   const agent = bridges.get("desktopAgent")!;
   assert.equal(agent.platform, "darwin");
   const operations: [string, string, unknown[]][] = [
+    ["agentModels", "models", []],
+    ["agentPermissions", "permissions", []],
     ["snapshot", "snapshot", []], ["selectAgent", "select-agent", ["native"]], ["newSession", "new-session", []],
     ["answerApproval", "answer-approval", [{ id: "approval", allow: true }]], ["send", "send", [{ text: "hello" }]],
     ["peerSessions", "peer-sessions", ["server"]], ["readPeerSession", "read-peer-session", [{ id: "session" }]],

@@ -1,0 +1,14 @@
+{
+  "release": "agent-picker-native-20261113-03",
+  "webImage": "pi-durable-verify-web:agent-picker-native-20261113-03",
+  "apiDatabaseWechatNotRestarted": true,
+  "environmentAndMountsUnchanged": true,
+  "rollback": "/home/zhf/pi-durable-verify-EvtOlEt6/updates/agent-picker-native-20261113-03/compose.rollback.yaml",
+  "verification": {
+    "publicAndLocalHashesVerified": true,
+    "apiHealthy": true,
+    "anonymousPeersRejected": true,
+    "modelCalls": 0,
+    "businessWrites": 0
+  }
+}

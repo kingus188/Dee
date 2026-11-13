@@ -1,7 +1,8 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from "electron";
 import { dialog } from "electron";
-import { openAgentSettings } from "./agent-settings.js";
+import { openAgentSettings, validateAgentSelection } from "./agent-settings.js";
 import { readAgentModels } from "./agents/models.js";
+import { readAgentPermissions } from "./agents/permissions.js";
 import { openDesktopAgent } from "./local-agent.js";
 import type { AgentRequest } from "./local-agent.js";
 import { isAppUrl, validateServerRoute } from "./policy.js";
@@ -21,8 +22,17 @@ export async function registerDesktopAgent(options: { ipc: IpcMain; directory: s
     if (url !== options.localUrl && !isAppUrl(url, options.getOrigin())) throw new Error("Untrusted local Agent window");
   }
   const handlers: Record<string, (input: never) => unknown> = {
+    permissions: () => { const current = settings.get(); if (current.agent !== "codex" && current.agent !== "claude") return []; return readAgentPermissions(current.agent, current.agents[current.agent], options.searchPath, options.env); },
     models: () => { const current = settings.get(); if (current.agent === "pi" || !current.workspace) throw new Error("请选择外部 Agent"); return readAgentModels(current.agent, current.agents[current.agent], current.workspace, options.searchPath, options.env); },
-    snapshot: () => agent.snapshot(), "select-agent": input => agent.selectAgent(input), "new-session": () => agent.newSession(), "answer-approval": input => agent.answerApproval(input), send: input => agent.send(input), approve: input => agent.approve(input), reject: input => agent.reject(input), abort: () => agent.abort(),
+    snapshot: () => agent.snapshot(), "select-agent": async input => {
+      const selection = validateAgentSelection(input);
+      const keys = ["permissionMode", "sandbox", "approvalPolicy"] as const;
+      if (selection.config && keys.some(key => selection.config?.[key] !== undefined)) {
+        const parameters = await readAgentPermissions(selection.kind, selection.config, options.searchPath, options.env);
+        for (const key of keys) if (selection.config[key] !== undefined && !parameters.find(item => item.parameter === key)?.values.includes(selection.config[key]!)) throw new Error("Agent 不支持该权限参数");
+      }
+      return agent.selectAgent(selection);
+    }, "new-session": () => agent.newSession(), "answer-approval": input => agent.answerApproval(input), send: input => agent.send(input), approve: input => agent.approve(input), reject: input => agent.reject(input), abort: () => agent.abort(),
     "peer-sessions": input => agent.sessions(input), "read-peer-session": input => agent.readSession(input), "send-peer": input => agent.sendPeer(input), "peer-status": input => agent.peerStatus(input),
     "choose-workspace": async () => {
       const window = options.getWindow(); if (!window) throw new Error("桌面窗口已关闭");

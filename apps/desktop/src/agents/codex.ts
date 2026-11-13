@@ -55,7 +55,7 @@ export async function openCodex(options: DriverOptions): Promise<AgentDriver> {
   try {
     await rpc.request("initialize", { clientInfo: { name: "dee", title: "Dee", version: "0.1.0" }, capabilities: {} });
     rpc.notify("initialized");
-    const response = object(await rpc.request(threadId ? "thread/resume" : "thread/start", { ...(threadId ? { threadId } : {}), cwd: options.cwd, approvalPolicy: options.config.permission === "autoEdit" ? "on-request" : "untrusted", approvalsReviewer: "user", sandbox: options.config.permission === "readOnly" ? "read-only" : "workspace-write", ...(options.peerMcp ? { config: { mcp_servers: { dee_peers: options.peerMcp } } } : {}) }));
+    const response = object(await rpc.request(threadId ? "thread/resume" : "thread/start", { ...(threadId ? { threadId } : {}), cwd: options.cwd, approvalPolicy: options.config.approvalPolicy ?? (options.config.permission === "autoEdit" ? "on-request" : "untrusted"), approvalsReviewer: "user", sandbox: options.config.sandbox ?? (options.config.permission === "readOnly" ? "read-only" : "workspace-write"), ...(options.peerMcp ? { config: { mcp_servers: { dee_peers: options.peerMcp } } } : {}) }));
     threadId = string(object(response.thread).id);
     if (!threadId) throw new Error("Codex 未返回会话标识");
     options.emit({ type: "session", id: threadId });

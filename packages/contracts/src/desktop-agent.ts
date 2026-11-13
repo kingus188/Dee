@@ -4,7 +4,8 @@ export type DesktopConversation = {
   messages: Array<{ id: string; role: "user" | "assistant"; text: string }>;
 };
 export type DesktopConversationUpload = DesktopConversation & { deviceId: string; revision: number };
-export type ExternalAgentConfig = { executable: string; args: string[]; mode?: string; permission?: "default" | "readOnly" | "autoEdit"; effort?: string; model?: string };
+export type ExternalAgentConfig = { executable: string; args: string[]; mode?: string; permission?: "default" | "readOnly" | "autoEdit"; permissionMode?: string; sandbox?: string; approvalPolicy?: string; effort?: string; model?: string };
+export type AgentPermissionParameter = { parameter: "permissionMode" | "sandbox" | "approvalPolicy"; values: string[] };
 export type DesktopAgentSelection = { kind: DesktopAgentKind; config?: ExternalAgentConfig };
 export type AgentQuestion = { id: string; text: string; options?: string[]; secret?: boolean };
 export type AgentApproval = { id: string; title: string; detail: string; questions?: AgentQuestion[] };
@@ -40,6 +41,7 @@ export type DesktopAgentBridge = {
   platform?: string;
   snapshot(): Promise<DesktopAgentSnapshot>;
   agentModels?(): Promise<Array<{ id: string; name: string; efforts: string[] }>>;
+  agentPermissions?(): Promise<AgentPermissionParameter[]>;
   selectAgent(input: DesktopAgentSelection): Promise<void>;
   newSession(): Promise<void>;
   answerApproval(input: AgentApprovalAnswer): Promise<void>;
