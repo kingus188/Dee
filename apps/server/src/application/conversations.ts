@@ -36,35 +36,51 @@ async function quietConversation(id: number) {
 	const taskIds = await conversation.commit(async (tx) => {
 		const ids = [];
 		for (const item of (await tx.doc(Schedules, conversation.id)).items) {
+			if (item.status === "cancelled") {
+				if (item.jobId != null) ids.push(item.jobId);
+				continue;
+			}
 			if (item.status !== "active" && item.status !== "paused") continue;
 			item.status = "cancelled";
 			item.revision = (item.revision ?? 0) + 1;
 			if (item.jobId != null) ids.push(item.jobId);
 		}
 		for (const item of (await tx.doc(Reminders, conversation.id)).items) {
-			if (item.status !== "scheduled") continue;
+			if (item.status !== "scheduled" && item.status !== "cancelled") continue;
 			item.status = "cancelled";
 			if (item.id != null) ids.push(item.id);
 		}
 		for (const item of (await tx.doc(BackgroundJobs, conversation.id)).items) {
-			if (item.status !== "running" || item.taskId == null) continue;
+			if ((item.status !== "running" && item.status !== "cancelled") || item.taskId == null) continue;
 			item.status = "cancelled";
 			ids.push(item.taskId);
 		}
         for (const goal of (await tx.doc(Goals)).items) {
-          if (goal.conversationId !== conversation.id || goal.status === "completed" || goal.status === "cancelled") continue;
-          goal.status = "cancelled"; goal.revision += 1; goal.wakeAt = null; goal.updatedAt = Date.now();
+          if (goal.conversationId !== conversation.id || goal.status === "completed") continue;
+          if (goal.status !== "cancelled") {
+            goal.status = "cancelled"; goal.revision += 1; goal.wakeAt = null; goal.updatedAt = Date.now();
+          }
           if (goal.taskId != null) ids.push(goal.taskId as import("@earendil-works/pi-durable").TaskId);
         }
-		return ids;
+		const pending = [];
+		for (const taskId of new Set(ids)) {
+			const task = await tx.task(taskId);
+			// Historical records can outlive their runtime task; nothing remains to stop.
+			if (task && task.state.status !== "terminal") pending.push(taskId);
+		}
+		return pending;
 	}, ctx);
+	// Cancelled records retain task IDs so a failed stop can be retried after restart.
+	let stopFailed = false;
 	for (const taskId of taskIds) {
 		try {
 			await harness.abortTask(taskId, ctx);
 		} catch (error) {
+			stopFailed = true;
 			console.error("停止会话任务失败：", redact(error instanceof Error ? error.message : error));
 		}
 	}
+	if (stopFailed) throw new HttpError(503, "会话任务已标记取消，但停止执行尚未确认；会话未归档或移除，请重试。");
 }
 
 async function shelveConversation(id: number, action: string) {

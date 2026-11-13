@@ -27,6 +27,8 @@ EXPOSE 8080
 CMD ["node", ".build/scripts/web-server.js"]
 
 FROM node:22-slim AS server
+RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils unzip xsltproc \
+    && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 WORKDIR /app
 COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
@@ -43,6 +45,7 @@ COPY --from=build /app/packages/runtime/dist ./packages/runtime/dist
 COPY --from=build /app/packages/features/dist ./packages/features/dist
 COPY --from=build /app/packages/channel-wechat/dist ./packages/channel-wechat/dist
 COPY --from=build /app/apps/server/dist ./apps/server/dist
+COPY --from=build /app/scripts/teams-self-chat-recovery.mjs ./scripts/teams-self-chat-recovery.mjs
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000 NODE_NO_WARNINGS=1
 RUN mkdir -p /data && chown node:node /data

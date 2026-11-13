@@ -42,7 +42,7 @@ export async function extractDocument(bytes: Buffer, name: string, type: "pdf" |
 			if (/<!\s*(?:DOCTYPE|ENTITY)\b/i.test(xml) || xml.includes("\u0000")) throw new AttachmentError(`附件「${name}」XML 声明或实体暂不支持`);
 			await writeFile(join(dir, "document.xml"), rawXml, { mode: 0o600 });
 			await writeFile(join(dir, "paragraphs.xsl"), stylesheet, { mode: 0o600 });
-			text = (await runParser(options.commands?.xsltproc ?? "/usr/bin/xsltproc", ["--nonet", "--novalid", "--maxdepth", "128", "--stringparam", "name", name, join(dir, "paragraphs.xsl"), join(dir, "document.xml")], name, deadline - Date.now(), DOCUMENT_LIMITS.chars * 4)).toString("utf8").trim();
+			text = (await runParser(options.commands?.xsltproc ?? (existsSync("/usr/bin/xsltproc") ? "/usr/bin/xsltproc" : "xsltproc"), ["--nonet", "--novalid", "--maxdepth", "128", "--stringparam", "name", name, join(dir, "paragraphs.xsl"), join(dir, "document.xml")], name, deadline - Date.now(), DOCUMENT_LIMITS.chars * 4)).toString("utf8").trim();
 		}
 		if (!text.trim()) throw new AttachmentError(`附件「${name}」未提取到文本（扫描 PDF 需要 OCR；DOCX 需包含正文段落）`);
 		if (text.length > DOCUMENT_LIMITS.chars) throw new AttachmentError(`附件「${name}」提取长度超过 ${DOCUMENT_LIMITS.chars} 字符`);

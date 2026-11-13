@@ -16,7 +16,8 @@ export async function createGoalInTx(tx: Tx, conversationId: ConversationId, inp
   const requestId = normalizeRequestId(rawRequestId), key = requestId ? `create:${requestId}` : null, doc = await tx.doc(Goals);
   const previous = key ? doc.items.find(item => item.id === doc.applied[key]) : undefined;
   if (previous) return detach(previous);
-  if (doc.items.length >= 200) throw new Error("委托记录已达到 200 条上限");
+  // Finished history remains available for evidence and request-id replay.
+  if (doc.items.filter(item => item.status !== "completed" && item.status !== "cancelled").length >= 200) throw new Error("未结束委托已达到 200 条上限，请先完成或取消已有委托");
   if (doc.items.filter(item => item.status === "running" || item.status === "waiting_time").length >= 3) throw new Error("同时执行的委托最多 3 个");
   const goal: Goal = { id: randomUUID(), conversationId, ...normalizeGoal(input) };
   goal.taskId = await tx.createTask(GoalTask, { goalId: goal.id, revision: goal.revision }, { ownership: { kind: "conversation" }, background: true });

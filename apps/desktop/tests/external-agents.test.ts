@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, readFile, rm, writeFile, chmod, mkdir, rmdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { openExternalAgents, type ExternalBinding, type DriverFactory } from "../dist/agents/service.js";
 import { openCodex } from "../dist/agents/codex.js";
 import { openAcp } from "../dist/agents/acp.js";
@@ -163,7 +163,8 @@ test("failed intent persistence is rolled back so the same request can be retrie
   const service = openExternalAgents({ directory, binding: () => binding, factory });
   try {
     await service.newSession();
-    const blocked = join(directory, "external-agent-sessions.json.tmp"); await mkdir(blocked);
+    const sessionId = service.sessions()[0]!.sessionId;
+    const blocked = join(directory, "external-agent-sessions", `${createHash("sha256").update(sessionId).digest("hex")}.json.tmp`); await mkdir(blocked);
     const input = { id: randomUUID(), text: "one" };
     await assert.rejects(service.send(input));
     assert.equal(service.snapshot().messages.length, 0);

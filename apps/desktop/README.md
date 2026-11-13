@@ -68,3 +68,9 @@ pnpm run desktop:package
 本机 Agent 新数据保存在 `userData/local-agent/agent.sqlite`，与旧 `userData/data` 和服务器数据分离。`desktop-agent.json` 保存设备 ID、工作目录和 Agent 命令配置，旧模型数据仅保留供回退；`--user-data-dir=<绝对目录>` 可用于隔离验收，不读取原有配置。
 
 `pnpm run check`、`pnpm test` 覆盖连接策略、凭据边界、API 生命周期和 Web 代理。桌面原生窗口、旧凭据迁移、系统通知与真实账号集成需要现场验证。当前无分发签名、公证、安装器、自动更新或跨平台交叉打包。
+
+### 外部 Agent 历史存储
+
+Codex、Claude、ACP、OMP 会话使用 `external-agent-sessions.json` 的版本 2 索引和同级 `external-agent-sessions/` 中的独立会话文件；备份、迁移时须在退出客户端后一起复制。历史不再受所有会话合计 20 MiB 的限制，不会自动删除终态会话。旧版聚合记录在首次写入时迁移，原内容保留为 `external-agent-sessions.json.v1.backup`；迁移提交索引之前失败时，旧索引仍然有效。降级旧客户端前须恢复完整的旧备份，新版产生的会话不能由旧版读取。
+
+流式文本最多每 250 毫秒合并落盘一次，仅重写当前会话；会话 ID、执行请求、审批等待与最终结果立即保存。异常断电可能丢失最近一小段流式文本，但执行请求会保留，重启后标记中断，不自动重放。历史仍在内存中加载，单个超长会话和大量历史的内存/磁盘占用需另做性能验收。

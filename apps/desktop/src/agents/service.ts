@@ -16,6 +16,21 @@ const factories: Record<ExternalKind, (options: DriverOptions) => Promise<AgentD
 
 export function openExternalAgents(options: { directory: string; binding(): ExternalBinding | undefined; factory?: DriverFactory; searchPath?: string; env?: NodeJS.ProcessEnv; peerTools?: (session: PeerSession) => PeerToolHandler }) {
   const store = openAgentSessionStore(options.directory);
+  let pendingWrite: ReturnType<typeof setTimeout> | undefined;
+  function persist(session: StoredAgentSession) {
+    clearTimeout(pendingWrite); pendingWrite = undefined;
+    store.persist(session);
+  }
+  function persistText(session: StoredAgentSession) {
+    if (pendingWrite) return;
+    pendingWrite = setTimeout(() => {
+      pendingWrite = undefined;
+      try { store.persist(session); } catch (error) {
+        rejectExecution?.(error instanceof Error ? error : new Error("无法保存 Agent 输出"));
+      }
+    }, 250);
+    pendingWrite.unref();
+  }
   const approvals = new Map<string, { request: AgentApproval; resolve(value: AgentApprovalAnswer): void }>();
   let active: Promise<void> | undefined, controller: AbortController | undefined, driver: AgentDriver | undefined;
   let boundKey: string | undefined, closed = false;
@@ -44,12 +59,12 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
       }
       if (session.activities.length > 200) session.activities.shift();
     }
-    store.persist();
+    if (event.type === "text") persistText(session); else persist(session);
   }
   async function ask(session: StoredAgentSession, request: Omit<AgentApproval, "id">, signal?: AbortSignal): Promise<AgentApprovalAnswer> {
     if (!controller || controller.signal.aborted || signal?.aborted) return { id: "", allow: false };
     const id = randomUUID();
-    session.status = "waiting"; store.persist();
+    session.status = "waiting"; persist(session);
     return new Promise(resolve => {
       const deny = () => finish({ id, allow: false });
       const timer = setTimeout(deny, 5 * 60_000); timer.unref();
@@ -112,7 +127,7 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
       session.messages = [...session.messages.filter(message => !(input.id.startsWith("peer-result:") && message.id === input.id && message.role === "assistant")), { id: input.id, role: "user", text: input.text }];
       session.status = "running"; session.error = undefined; session.activities = [];
       session.requests = { ...session.requests, [input.id]: { status: "running" } };
-      try { store.persist(); } catch (error) { Object.assign(session, previous); throw error; }
+      try { persist(session); } catch (error) { Object.assign(session, previous); throw error; }
       controller = new AbortController();
       const signal = controller.signal;
       let fail!: (error: Error) => void;
@@ -152,7 +167,7 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
           for (const approval of [...approvals.values()]) approval.resolve({ id: approval.request.id, allow: false });
           for (const activity of session.activities) if (activity.status === "running") activity.status = "failed";
           session.requests![input.id] = { status: session.status === "done" ? "done" : session.status === "cancelled" ? "cancelled" : session.status === "interrupted" ? "interrupted" : "failed" };
-          store.persist();
+          persist(session);
         }
       })().finally(() => { active = undefined; controller = undefined; rejectExecution = undefined; });
       // send acknowledges persisted intent; snapshot carries the eventual execution result.

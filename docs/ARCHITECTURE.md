@@ -6,8 +6,8 @@
 
 | 位置 / 包名 | 职责 |
 | --- | --- |
-| `apps/server` / `@assistant/server` | API、鉴权、HTTP/WebSocket/SSE、持久化、任务调度、Teams/微信/邮件集成；不提供静态页面 |
-| `apps/desktop` / `@assistant/desktop` | Electron 薄客户端、连接配置、安全存储与 API 邮件通知；不依赖后端运行时代码 |
+| `apps/server` / `@assistant/server` | API、鉴权、HTTP/WebSocket/SSE、持久化、任务调度、Teams/微信/邮件集成；同源提供构建后的 Web 页面 |
+| `apps/desktop` / `@assistant/desktop` | Electron 客户端、连接配置、安全存储、API 邮件通知及本机 Agent 执行；本机 Pi 使用 runtime/features |
 | `apps/web` / `@assistant/web` | React 界面，由 esbuild 打包；通过独立静态/代理服务 `scripts/web-server.ts` 连接后端 |
 | `packages/contracts` / `@assistant/contracts` | 可序列化的 HTTP/WebSocket 数据类型，浏览器和服务端共同使用；无 Node 或 SDK 依赖 |
 | `packages/runtime` / `@assistant/runtime` | 模型目录、会话索引、Harness 与 SQLite 生命周期；不注册具体助手功能 |
@@ -28,7 +28,7 @@ flowchart LR
   Wechat --> Runtime
 ```
 
-图中表示代码依赖。桌面端加载独立 Web，浏览器与桌面都经 Web 服务同源 `/api` 代理访问后端；WebSocket、SSE、上传和下载保持流式转发。API 后端不读取前端 dist；Web 服务不读取账号或数据目录。只有后端运行时打开数据库、采集消息并调度任务。`start:api`、`start:web`、`desktop` 可分别构建和启动，桌面包只包含客户端。
+图中表示代码依赖。桌面端默认加载后端提供的 Web 页面，也可使用独立 Web 网关代理 `/api`；WebSocket、SSE、上传和下载保持流式转发。API 后端提供前端 dist，独立 Web 服务不读取账号或数据目录。云端运行时管理服务端数据库、消息采集与任务调度；桌面端另有本机 Agent 运行时及独立会话存储。`start:api`、`start:web`、`desktop` 可分别构建和启动，桌面包只包含客户端。
 
 ## 开发命令
 
@@ -101,3 +101,7 @@ Docker 共用构建阶段，分别生成 `server` 与 `web` 目标；Web 镜像�
 本次组织结构调整不升级 Pi SDK、不更换数据库、不更换 UI 框架。真实模型、真实微信、浏览器交互和实际 Docker 部署需要分别验收。
 
 React 对话与 WebSocket 协议细节见 [Web 对话](WEB_CHAT.md)。
+
+## dev 验收环境
+
+`dev` 与 `main` 的 push/PR 均运行工作区 CI。CI 使用隔离 PostgreSQL 服务，安装 PDF/DOCX 解析工具 `poppler-utils`、`unzip` 和 `xsltproc`；server 镜像也显式安装这些依赖。测试通过不代表真实模型、外部消息投递或 Electron 原生交互已验收。

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { chmodSync } from "node:fs";
@@ -45,9 +46,15 @@ export function openTeamsSelfChat({ dir, username, getToken, sendToken, generate
     CREATE TABLE IF NOT EXISTS account (id INTEGER PRIMARY KEY CHECK(id=1), user_id TEXT NOT NULL, since INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS replies (source_id TEXT PRIMARY KEY, state TEXT NOT NULL, reply_id TEXT);
     CREATE UNIQUE INDEX IF NOT EXISTS replies_receipt ON replies(reply_id) WHERE reply_id IS NOT NULL`);
+  if (!db.prepare("PRAGMA table_info(replies)").all().some(column => column.name === "claim_token")) {
+    db.exec("ALTER TABLE replies ADD COLUMN claim_token TEXT");
+  }
+  // A previous process stopped before POST or before verifying its result.
+  // Neither state is automatically replayed; the operator must resolve it.
+  db.exec("UPDATE replies SET state='failed',claim_token=NULL WHERE state='processing'; UPDATE replies SET state='unknown',claim_token=NULL WHERE state='sending'");
   const graph = createTeamsGraph(fetchImpl, signal);
   let running: Promise<{ ok: boolean }> | undefined;
-  const seen = (id: string) => !!db.prepare("SELECT 1 FROM replies WHERE source_id=? OR reply_id=?").get(id, id);
+  const seen = (id: string) => !!db.prepare("SELECT 1 FROM replies WHERE (source_id=? AND state!='retry') OR reply_id=?").get(id, id);
   async function tick() {
     const token = await getToken();
     signal.throwIfAborted();
@@ -74,12 +81,36 @@ export function openTeamsSelfChat({ dir, username, getToken, sendToken, generate
       return { ok: true };
     }
     if (db.prepare("SELECT 1 FROM replies WHERE state IN ('sending','unknown')").get()) throw new Error("自聊回复发送结果未知，已暂停；请核实回执，不会自动重发");
+    // Explicit retries remain reachable even when newer notes fill the first page.
+    for (const row of db.prepare("SELECT source_id FROM replies WHERE state='retry'").all()) {
+      if (messages.some(message => message.id === row.source_id)) continue;
+      let source: Message;
+      try {
+        source = await graph<Message>(token, graphPageUrl(`${path}/${encodeURIComponent(String(row.source_id))}`));
+      } catch (error) {
+        const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
+        // A missing/inaccessible source cannot be retried safely. Keep its failure visible,
+        // but do not let it starve unrelated new notes. Transient/auth failures retain the queue.
+        if (status !== 403 && status !== 404) throw error;
+        db.prepare("UPDATE replies SET state='failed' WHERE source_id=? AND state='retry'").run(row.source_id);
+        continue;
+      }
+      if (source.id !== row.source_id || source.chatId !== SELF_CHAT_ID || source.from?.user?.id !== me.id
+          || !Number.isFinite(Date.parse(source.createdDateTime)) || source.deletedDateTime || source.messageType !== "message") {
+        db.prepare("UPDATE replies SET state='failed' WHERE source_id=? AND state='retry'").run(row.source_id);
+        throw new Error("重试消息与账号或目标不一致，未发送");
+      }
+      messages.push(source);
+    }
     for (const message of messages.sort((a, b) => Date.parse(a.createdDateTime) - Date.parse(b.createdDateTime))) {
       signal.throwIfAborted();
       if (seen(message.id) || Date.parse(message.createdDateTime) < since || message.messageType !== "message" || message.deletedDateTime || message.from?.user?.id !== me.id) continue;
       const text = messageText(message);
       if (!text || text.startsWith(SELF_CHAT_REPLY_PREFIX)) continue;
-      if (!db.prepare("INSERT OR IGNORE INTO replies(source_id,state) VALUES(?,'processing')").run(message.id).changes) continue;
+      const claimToken = randomUUID();
+      const claimed = db.prepare("INSERT OR IGNORE INTO replies(source_id,state,claim_token) VALUES(?,'processing',?)").run(message.id, claimToken).changes
+        || db.prepare("UPDATE replies SET state='processing',claim_token=? WHERE source_id=? AND state='retry'").run(claimToken, message.id).changes;
+      if (!claimed) continue;
       let posting = false;
       try {
         if (Date.parse(message.createdDateTime) > now() + 60_000 || now() - Date.parse(message.createdDateTime) > 86400_000 || (message.body?.content?.length ?? 0) > 8000 || message.attachments?.length || /<img\b/i.test(message.body?.content ?? "")) throw new Error("自聊测试仅接受一天内的短文本");
@@ -93,16 +124,18 @@ export function openTeamsSelfChat({ dir, username, getToken, sendToken, generate
         const auth = await sendToken();
         signal.throwIfAborted();
         // Commit before POST: an interrupted request must never become retryable.
-        db.prepare("UPDATE replies SET state='sending' WHERE source_id=?").run(message.id);
+        if (!db.prepare("UPDATE replies SET state='sending' WHERE source_id=? AND state='processing' AND claim_token=?").run(message.id, claimToken).changes) {
+          throw new Error("自聊执行已被中断，未发送");
+        }
         posting = true;
         const receipt = await graph<Message>(auth, graphPageUrl(path), { body: { contentType: "text", content } });
         if (!receipt.id) throw new Error("自聊发送缺少回执");
-        db.prepare("UPDATE replies SET reply_id=? WHERE source_id=?").run(receipt.id, message.id);
+        db.prepare("UPDATE replies SET reply_id=? WHERE source_id=? AND claim_token=?").run(receipt.id, message.id, claimToken);
         const delivered = await graph<Message>(token, graphPageUrl(`${path}/${encodeURIComponent(receipt.id)}`));
         if (delivered.chatId !== SELF_CHAT_ID || delivered.from?.user?.id !== me.id || messageText(delivered) !== content) throw new Error("自聊回复回读不一致");
-        db.prepare("UPDATE replies SET state='sent' WHERE source_id=?").run(message.id);
+        db.prepare("UPDATE replies SET state='sent' WHERE source_id=? AND claim_token=?").run(message.id, claimToken);
       } catch (error) {
-        db.prepare("UPDATE replies SET state=? WHERE source_id=?").run(posting ? "unknown" : "failed", message.id);
+        db.prepare("UPDATE replies SET state=? WHERE source_id=? AND claim_token=?").run(posting ? "unknown" : "failed", message.id, claimToken);
         throw error;
       }
     }
@@ -110,7 +143,7 @@ export function openTeamsSelfChat({ dir, username, getToken, sendToken, generate
   }
   return {
     refresh: () => running ??= tick().finally(() => { running = undefined; }),
-    status: () => db.prepare("SELECT source_id,state,reply_id FROM replies ORDER BY rowid DESC LIMIT 10").all(),
+    status: () => db.prepare("SELECT source_id,state,reply_id FROM replies ORDER BY CASE WHEN state IN ('failed','unknown','retry','processing','sending') THEN 0 ELSE 1 END, rowid DESC LIMIT 100").all(),
     close: async () => { try { await running; } finally { db.close(); } },
   };
 }

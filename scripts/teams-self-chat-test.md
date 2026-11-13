@@ -18,7 +18,7 @@ Teams 自聊 AI 自动回复测试
 
 核心实现：`apps/server/src/teams-self-chat.ts`；仅访问当前账号 `/me` 和 `48:notes/messages`，生成器无工具权限，回复始终带 `[Dee AI 测试回复]` 前缀。首次成功读取建立历史基线，之后处理新短文本；不处理附件、截图、超过 8000 字符的原始正文和超过一天的消息。消息文本沿用现有 Teams 提取器（最多 2000 字符），每次仅把这一条新消息交给模型，不带历史上下文。
 
-每条消息在模型调用前以源 ID 原子占用，发送前写入 `sending`，回读一致后写入 `sent`；源 ID 和回复 ID 均去重。模型失败或发送前原文变化会记为 `failed`，不自动重试该条。发送开始后失败记为 `unknown`，或中断留下 `sending`，均暂停整个自聊发送，必须人工核实；没有自动清除未知状态的接口。状态库只保存账号绑定、起始时间、源 ID、发送状态及回执 ID，不保存正文或凭据。5 秒串行轮询，失败指数退避到 5 分钟，并遵循 Graph Retry-After。
+每条消息在模型调用前以源 ID 原子占用，发送前写入 `sending`，回读一致后写入 `sent`；源 ID 和回复 ID 均去重。模型失败或发送前原文变化会记为 `failed`，不自动重试该条。发送开始后失败记为 `unknown`，或中断留下 `sending`，均暂停整个自聊发送，必须人工核实；可以使用下文的本地恢复入口显式处理，不能自动重发。状态库只保存账号绑定、起始时间、源 ID、发送状态、回执 ID 及恢复操作审计，不保存正文或凭据。5 秒串行轮询，失败指数退避到 5 分钟，并遵循 Graph Retry-After。
 
 后端已接入 `startServerIntegrations` 生命周期；默认关闭。后端显式设置 `TEAMS_SELF_CHAT_ENABLED=1`、`TEAMS_SELF_CHAT_USERNAME=haifeng.zhang`，并配置已有 Teams 目录和模型才开启，`PI_OFFLINE=1` 强制关闭。状态库位于后端 `DATA_DIR/teams-self-chat.sqlite`。不改变原有离开回复、其他私聊、群聊或微信转发。
 
@@ -34,3 +34,41 @@ Teams 自聊 AI 自动回复测试
 真实常驻验收：09:21:54 UTC 发送测试问题，源 ID `1794561714391`；09:22:09 UTC 常驻服务发送模型回复，ID `1794561729177`，状态为 `sent` 且 Graph 按 ID 回读一致。回复：「[Dee AI 测试回复] 把工作消息按紧急度和截止时间分类，提取每项的任务、负责人和截止日期，整理成可跟踪的待办清单。」随后 SIGTERM 重启，launchd 已拉起新进程；状态保留，同一验收问题后只有一条 AI 回复，没有重发或自回复循环。服务保持运行，等待用户继续在 Teams 自聊发消息。
 
 本轮验证：`npm run check`、脚本语法检查、相关 21 项测试、`git diff --check` 均通过。`npm test` 实际结果：1152 项，1090 通过、60 失败、2 跳过；大量数据库/服务启动失败报告缺少 `DATABASE_URL`，另有日报工具链验证失败，不能视为全量通过。未部署远端后端、未重装桌面客户端、未做多日稳定性或真实关机重启验收。没有提交或推送。
+
+
+## 失败核对与恢复
+
+这是本地运维入口，不增加后台自动重试或新的发送权限。先正常停止自聊宿主服务，保留状态库；同一状态库只允许一个自聊宿主运行。重启会将遗留 `processing` 归为 `failed`、`sending` 归为 `unknown`，不会自动重放。之后查询状态、核对具体源消息和回执，再处理。不要删除数据库来解除阻塞，这会丢失去重信息。
+
+构建后使用（`<Graph用户ID>` 是该状态库已绑定的 Graph `/me` ID，不是用户名；命令不读取或输出凭据）：
+
+```sh
+node scripts/teams-self-chat-recovery.mjs '<DATA_DIR>' '<Graph用户ID>' status
+node scripts/teams-self-chat-recovery.mjs '<DATA_DIR>' '<Graph用户ID>' retry '<源消息ID>' failed
+node scripts/teams-self-chat-recovery.mjs '<DATA_DIR>' '<Graph用户ID>' skip '<源消息ID>' unknown
+```
+
+- `retry` 只接受 `failed`，排队重新生成；下一轮仍核对账号、原文、一天时限及回执。输入已经过期或不再符合规则时不会发送。它不会重试 `unknown` 或 `sending`。失败不自动循环重试，避免无界模型消耗。
+- `skip` 可处理 `failed`、`unknown` 和已排队的 `retry`。对 `unknown` 必须先在 Teams 核对是否已送达，再决定放弃该条并允许后续新消息继续；该操作不标记已送达，也绝不重发原消息。需要补发时由用户明确发起新的消息。
+- 命令要求填写刚查到的当前状态；状态变化或账号不匹配会拒绝，源 ID、旧状态、操作及时间保留在 `recovery_audit`。`processing` 和 `sending` 不允许直接操作，防止修改正在执行的调用；先关闭并重启宿主使其中断状态归类。
+- `status` 列出全部记录，宿主的状态查询优先显示未完成/待核对项。此入口不自动验证远端投递，且没有新增客户端恢复面板。
+
+### 容器部署
+
+server 镜像包含同一恢复 CLI。仓库 compose 的服务名是 `pi-durable-assistant`，默认 `DATA_DIR=/data`，状态库在持久卷内的 `/data/teams-self-chat.sqlite`；若部署覆盖了 `DATA_DIR`，请使用实际容器内路径，勿在另一个空目录创建状态库。
+
+可以先只查询：
+
+```sh
+docker compose exec pi-durable-assistant node scripts/teams-self-chat-recovery.mjs /data '<Graph用户ID>' status
+```
+
+修改前正常停止宿主，再用同一服务定义挂载原持久卷运行一次性 CLI。例如，已在 Teams 根据源消息和实际回复/回执核对完毕，决定放弃某条 `unknown` 而不是重发：
+
+```sh
+docker compose stop pi-durable-assistant
+docker compose run --rm --no-deps pi-durable-assistant node scripts/teams-self-chat-recovery.mjs /data '<Graph用户ID>' skip '<源消息ID>' unknown
+docker compose up -d pi-durable-assistant
+```
+
+恢复命令不负责 Graph 投递核验。仅凭网络超时不能认定未投递；`skip` 只解除该条阻塞，保留不确定性。缺页源消息明确返回 403/404 时会回到 `failed`，不再阻塞其他新消息；429、网络错误或登录失效则保留 `retry`，等待连接/授权恢复。
