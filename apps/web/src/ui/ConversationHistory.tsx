@@ -6,9 +6,10 @@ import { ConversationHistoryRow } from "./ConversationHistoryRow.js";
 import { Icon } from "./Icon.js";
 import { historyGroups } from "./history-groups.js";
 
-export function ConversationHistory({ active, currentId, workingId, onOpen, onClose, onNew, newDisabled = false, autoFocus = true, refreshKey = 0, load = false, onItems, onTeams, local }: {
+export function ConversationHistory({ active, currentId, workingId, onOpen, onClose, onNew, newDisabled = false, autoFocus = true, refreshKey = 0, load = false, onItems, onTeams, onAssistant, source, local }: {
   active: boolean; currentId: number | null; onOpen: (id: number) => void; onClose: () => void;
   load?: boolean; onItems?: (items: ConversationItem[]) => void; onTeams?: () => void;
+  source?: "assistant" | "teams"; onAssistant?: () => void;
   onNew?: () => void; newDisabled?: boolean; autoFocus?: boolean; refreshKey?: number;
   workingId?: number;
   local?: { title: string; current: boolean; busy: boolean; detail?: string; status?: "waiting" | "running" | "done" | "failed" | "cancelled" | "interrupted"; open(): void };
@@ -59,7 +60,7 @@ export function ConversationHistory({ active, currentId, workingId, onOpen, onCl
   const localRow = local && <ConversationHistoryRow href="#chat/local" title={local.title} source="本机" detail={local.detail ?? ""} current={local.current} status={local.status ?? (local.busy ? "running" : undefined)} onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); local.open(); }} />;
   const localFound = local && `${local.title} 本机 ${local.detail ?? ""}`.toLocaleLowerCase().includes(needle);
   return <aside ref={panel} id="conversation-history" className="conversation-history" hidden={!active} aria-label="历史对话">
-    <ConversationHistoryContent query={query} onQuery={setQuery} onClose={onClose} onTeams={onTeams} onNew={onNew} newDisabled={newDisabled} bottom={<>
+    <ConversationHistoryContent query={query} onQuery={setQuery} onClose={onClose} source={source} onAssistant={onAssistant} onTeams={onTeams} onNew={onNew} newDisabled={newDisabled} bottom={<>
       {localFound && local?.busy && <details className="history-working" open><summary>{local.status === "waiting" ? "等待确认" : "运行中"}<span>1</span><Icon name="chevron-right" /></summary>{localRow}</details>}
       {working && <details className="history-working" open><summary>运行中<span>1</span><Icon name="chevron-right" /></summary>{row(working)}</details>}
       {!needle && history.length > 6 && <button className="history-older" type="button" aria-expanded={older} onClick={() => setOlder(value => !value)}><span>{older ? "收起更早的对话" : "显示更早的对话"}</span><span>{history.length - 6}</span><Icon name={older ? "chevron-down" : "chevron-right"} /></button>}
