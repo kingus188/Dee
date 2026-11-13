@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session, shell, protocol, net, safeStorage } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session, shell, protocol, net } from "electron";
 import { registerDesktopAgent } from "./agent-ipc.js";
 import { createAgentRequest, openPeerCredentials } from "./peer-connection.js";
 import type { openDesktopAgent } from "./local-agent.js";
@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { showMailNotification, startMailNotifications, type MailNotificationStatus } from "./mail-notifications.js";
 import { selectServer } from "./network.js";
 
-// Electron captures this name for safeStorage before ready; keep the existing keychain identity.
+// Keep the existing application identity and user data directory across upgrades.
 app.setName("Pi Durable Assistant");
 // Keep existing connection settings, certificate pins and local skill state across the rename.
 const userData = app.commandLine.getSwitchValue("user-data-dir") || join(app.getPath("appData"), "Pi Durable Assistant");
@@ -317,7 +317,7 @@ else {
     localAgent = await registerDesktopAgent({ ipc: ipcMain, directory: app.getPath("userData"), localUrl, searchPath: process.env.PATH, env: { ...process.env },
       getWindow: () => window, getOrigin: () => startupError ? "" : activeOrigin, serverId: () => config.url, openServer: showServerWorkspace, openConnection: showConnection,
       request: createAgentRequest({ origin: () => activeOrigin, serverId: () => config.url, username: () => config.username, password: () => password,
-        token: server => openPeerCredentials(app.getPath("userData"), safeStorage).get(server), fetch: (url, init) => peerTransport.fetch(url, init),
+        token: server => openPeerCredentials(app.getPath("userData")).get(server), fetch: (url, init) => peerTransport.fetch(url, init),
         socket: (url, headers, origin) => new net.WebSocket(url, { session: peerTransport, headers, origin, useSessionCookies: false }) }) });
     Menu.setApplicationMenu(null);
     initialized = true;

@@ -16,8 +16,9 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
   const windows: FakeWindow[] = [];
   let agentRegistered = false;
   let agentWindow: (() => FakeWindow | undefined) | undefined;
+  let agentRequest: ((path: string) => Promise<unknown>) | undefined;
   let localProtocolRegistered = false;
-  const state = { offline: options.offline ?? false, notifications: 0, errors: 0, storageName: "", edits: [] as string[] };
+  const state = { offline: options.offline ?? false, notifications: 0, errors: 0, storageName: "", keychainReads: 0, edits: [] as string[] };
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const saved: { config: { url: string; username?: string }; secret?: string }[] = [];
   let menu: MenuItem[] | null = [];
@@ -79,6 +80,7 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
   };
   let openServer: ((hash?: string) => Promise<void>) | undefined;
   const electron = {
+    get safeStorage(): never { state.keychainReads++; throw new Error("System keychain must not be accessed"); },
     protocol: { registerSchemesAsPrivileged() {}, handle() {} }, net: { fetch: async () => new Response() },
     app, BrowserWindow: FakeWindow,
     dialog: { showErrorBox() { state.errors++; } },
@@ -93,7 +95,7 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
     exports: {}, URL, Buffer, console, setImmediate,
     process: { platform: "darwin", env: options.invalidEnvironment ? { ASSISTANT_WEB_URL: "invalid" } : options.environment ?? {} },
     require(specifier: string) {
-      if (specifier === "./agent-ipc.js") return { registerDesktopAgent: async (input: { openServer(hash?: string): Promise<void>; getWindow(): FakeWindow | undefined }) => { openServer = input.openServer; agentWindow = input.getWindow; agentRegistered = true; return { close: async () => {} }; } };
+      if (specifier === "./agent-ipc.js") return { registerDesktopAgent: async (input: { openServer(hash?: string): Promise<void>; getWindow(): FakeWindow | undefined; request(path: string): Promise<unknown> }) => { openServer = input.openServer; agentWindow = input.getWindow; agentRequest = input.request; agentRegistered = true; return { close: async () => {} }; } };
       if (specifier === "electron") return electron;
       if (specifier === "./skills/catalog.js") return { LocalSkillCatalog: class {} };
       if (specifier === "./skills-ipc.js") return { registerLocalSkills() {} };
@@ -112,12 +114,19 @@ async function desktop(options: { notificationsSupported?: boolean; offline?: bo
   const main = () => windows.filter(w => !w.destroyed && w.options.title !== "连接 Dee").at(-1)!;
   const settings = () => windows.filter(w => !w.destroyed && w.options.title === "连接 Dee");
   const openSettings = () => main().webContents.emit("before-input-event", { preventDefault() {} }, { meta: true, key: ",", type: "keyDown" });
-  return { openServer, agentWindow, app, windows, main, settings, openSettings, state, handlers, flush, saved, headersHook,
+  return { openServer, agentWindow, agentRequest, app, windows, main, settings, openSettings, state, handlers, flush, saved, headersHook,
     menu: () => menu,
     mailStatus: () => handlers.get("desktop:notification-status")!({ sender: main().webContents, senderFrame: main().webContents.mainFrame }),
     reportMailStatus: (status: unknown) => reportMailStatus?.(status),
   };
 }
+
+test("device credential lookup never accesses the system keychain", async () => {
+  const desktopApp = await desktop();
+  assert.ok(desktopApp.agentRequest);
+  await assert.rejects(desktopApp.agentRequest("/api/peers/bootstrap"));
+  assert.equal(desktopApp.state.keychainReads, 0);
+});
 
 test("startup and server navigation use one workspace with its local Agent bridge", async () => {
   const d = await desktop({ lan: true });

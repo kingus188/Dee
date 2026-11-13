@@ -3,9 +3,10 @@ import { join } from "node:path";
 import { basicAuth, type CredentialStorage } from "./connection-config.js";
 import { validateWebUrl } from "./policy.js";
 import { openPeerSocket, PeerConnectionError, type PeerSocket } from "./peer-socket.js";
+import { openCredentialStorage } from "./credential-storage.js";
 export { PeerConnectionError } from "./peer-socket.js";
 
-export function openPeerCredentials(directory: string, storage: CredentialStorage) {
+export function openPeerCredentials(directory: string, storage: CredentialStorage = openCredentialStorage(directory)) {
   const file = join(directory, "desktop-peers.json");
   const available = () => storage.isEncryptionAvailable() && storage.getSelectedStorageBackend?.() !== "basic_text";
   const stored = () => existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) as Record<string, string> : {};
