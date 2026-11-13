@@ -31,7 +31,7 @@ export function validPeerSession(value: unknown): value is PeerSession {
 export const samePeerSession = (a?: PeerSession, b?: PeerSession) => a?.agent === b?.agent && a?.sessionId === b?.sessionId;
 export async function piPeerSessions(runtime: Runtime, ctx: Context): Promise<PeerSessionInfo[]> {
   const index = await runtime.harness.snapshot(Index, ctx);
-  const excluded = new Set(index?.items.filter(item => item.archivedAt || item.channel === "desktop").map(item => item.id));
+  const excluded = new Set(index?.items.filter(item => item.archivedAt || item.archivingAt || item.channel === "desktop").map(item => item.id));
   const items: PeerSessionInfo[] = [];
   let cursor: Cursor | undefined;
   do {

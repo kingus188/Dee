@@ -321,3 +321,24 @@
     & :is(.model-settings, .data-panel, .daily-reports, .daylight-workspace, .today-page, .activity-page) :is(.header-button, .icon-button, .settings-save) { min-height: 44px; }
   }
 }
+
+/* Conversation lifecycle controls stay outside the navigation link. */
+.conversation-history .history-conversation { position: relative; min-width: 0; }
+.conversation-history .history-conversation > .history-row { padding-right: 32px; }
+.conversation-history .history-conversation-actions { min-width: 0; }
+.conversation-history .history-conversation-actions > summary { position: absolute; right: 4px; top: 4px; z-index: 1; display: flex; align-items: center; justify-content: center; width: 28px; min-height: 28px; margin-left: auto; border-radius: 5px; color: var(--text-muted); cursor: pointer; list-style: none; }
+.conversation-history .history-conversation-actions > summary::-webkit-details-marker { display: none; }
+.conversation-history .history-conversation-actions > summary:focus-visible { outline: 2px solid var(--border-focus); }
+.conversation-history .history-conversation-controls { padding: 6px 8px 10px; display: grid; gap: 8px; }
+.conversation-history .history-conversation-controls label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.conversation-history .history-conversation-controls select { min-width: 0; max-width: 65%; color: var(--text-main); background: var(--bg-subtle); }
+.conversation-history .history-conversation-controls button, .conversation-history .history-archive-filter button { color: var(--text-muted); background: transparent; border: 0; border-radius: 5px; padding: 6px 8px; cursor: pointer; }
+.conversation-history .history-conversation-controls button:disabled { cursor: wait; opacity: .6; }
+.conversation-history .history-conversation-controls p { margin: 0; color: var(--text-main); font-size: 12px; overflow-wrap: anywhere; }
+.conversation-history .history-archive-filter { display: flex; gap: 4px; flex: none; }
+.conversation-history .history-archive-filter button[aria-pressed="true"] { color: var(--text-main); background: var(--dee-fill); }
+@media (max-width: 900px) {
+  .conversation-history .history-conversation-actions > summary { width: 44px; min-height: 44px; }
+  .conversation-history .history-conversation > .history-row { padding-right: 48px; }
+  .conversation-history .history-conversation-controls button, .conversation-history .history-archive-filter button, .conversation-history .history-conversation-controls select { min-height: 44px; }
+}

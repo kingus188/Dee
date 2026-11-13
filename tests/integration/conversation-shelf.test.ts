@@ -1,3 +1,4 @@
+import { readView } from "./helpers.js";
 import type { ConversationItem } from "@assistant/contracts";
 import type { AddressInfo } from "node:net";
 import type { ChildProcess } from "node:child_process";
@@ -81,6 +82,11 @@ test("会话可以归档、恢复，并从列表移除", { timeout: 30000 }, asy
     const first = await post(app.origin, "/api/conversations");
     const second = await post(app.origin, "/api/conversations");
     const prefix = "/api/conversations/" + first.id;
+    assert.equal((await (await fetch(app.origin + "/api/conversations")).json()).find((item: ConversationItem) => item.id === first.id).status, "active");
+    await post(app.origin, prefix + "/status", { status: "waiting" });
+    assert.equal((await readView(app.origin, first.id)).status, "waiting");
+    const invalidStatus = await fetch(app.origin + prefix + "/status", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "running" }) });
+    assert.equal(invalidStatus.status, 400);
     const created = await post(app.origin, prefix + "/schedules", {
       text: "归档前的计划", minutesFromNow: 10, everyMinutes: 0, requestId: "shelf-schedule",
     });
@@ -96,12 +102,23 @@ test("会话可以归档、恢复，并从列表移除", { timeout: 30000 }, asy
     assert.equal(archivedItem!.archivedAt, archived.archivedAt);
     assert.equal(afterArchive.find((item) => item.id === second.id)!.archivedAt ?? null, null);
 
+    const archivedView = await readView(app.origin, first.id);
+    assert.equal(archivedView.readOnly, true);
+    assert.equal(archivedView.status, "waiting");
+    assert.ok(archivedView.archivedAt);
+    const blocked = await fetch(app.origin + prefix + "/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "should not send" }) });
+    assert.equal(blocked.status, 409);
+    await stop(app.child); app = await launch(dir, await freePort());
+    assert.equal((await readView(app.origin, first.id)).status, "waiting");
+    assert.equal((await readView(app.origin, first.id)).readOnly, true);
     const management = await (await fetch(app.origin + prefix + "/management")).json();
     assert.equal(management.schedules.length, 1);
     assert.equal(management.schedules[0].status, "cancelled");
 
     const restored = await post(app.origin, prefix + "/restore", {});
     assert.equal(restored.archivedAt, null);
+    assert.equal((await readView(app.origin, first.id)).readOnly, undefined);
+    assert.equal(restored.status, "waiting");
     const afterRestore: ConversationItem[] = await (await fetch(app.origin + "/api/conversations")).json();
     assert.equal(afterRestore.find((item) => item.id === first.id)!.archivedAt, null);
 

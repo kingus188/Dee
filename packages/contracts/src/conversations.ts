@@ -1,8 +1,10 @@
 import type { AttachmentSummary } from "./attachments.js";
 import type { Reminder } from "./tasks.js";
 
+export type ConversationStatus = "active" | "waiting" | "completed";
 export type ConversationItem = {
   id: number; title: string; createdAt: string; archivedAt?: string | null;
+  status?: ConversationStatus; archivingAt?: string | null;
   channel?: string; forkOf?: number; forkAtEntry?: number;
 };
 export type ServerInfo = { pid: number; startedAt: string; boots: number; model: string; api: string; configured: boolean };
@@ -38,6 +40,7 @@ export type NotesEditRequest = { notes: ConversationNotes; base: ConversationNot
 export type ConversationView = {
   conversationId: number; entries: ViewEntry[]; live: LiveView; busy: boolean; inbox: number;
   readOnly?: boolean;
+  status?: ConversationStatus; archivedAt?: string | null; archivingAt?: string | null;
   /** Display source of this Dee conversation, not an external inbox or a send permission. */
   channel?: string;
   notes: ConversationNotes;

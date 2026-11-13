@@ -9,8 +9,8 @@ export function ConversationHistoryRow({ href, title, source, detail, createdAt,
   onClick: MouseEventHandler<HTMLAnchorElement>;
 }) {
   const state = status && {
-    running: { icon: "loader-circle", label: "运行中" }, waiting: { icon: "circle-pause", label: "等待确认" }, done: { icon: "circle-check", label: "已完成" },
-    failed: { icon: "circle-alert", label: "未完成" }, cancelled: { icon: "circle-slash", label: "已取消" }, interrupted: { icon: "circle-pause", label: "已中断" },
+    running: { icon: "loader-circle", label: "Running" }, waiting: { icon: "circle-pause", label: "Awaiting confirmation" }, done: { icon: "circle-check", label: "Completed" },
+    failed: { icon: "circle-alert", label: "Failed" }, cancelled: { icon: "circle-slash", label: "Cancelled" }, interrupted: { icon: "circle-pause", label: "Interrupted" },
   }[status];
   return <a className="history-row" href={href} title={`${title}\n${source} · ${detail}${hint ? `\n${hint}` : ""}`} aria-current={current ? "true" : undefined} onClick={onClick}>
     <span className="history-row-meta"><span className="history-row-source"><span className="history-row-avatar" aria-hidden="true">D</span><span className="history-channel">{source}</span></span>

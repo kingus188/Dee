@@ -1,5 +1,5 @@
 import type { ConversationId, Tx } from "@earendil-works/pi-durable";
-import { Index } from "@assistant/runtime";
+import { Index, conversationStatus } from "@assistant/runtime";
 import type { ConversationItem } from "@assistant/runtime";
 import { Goals, Schedules, Reminders, BackgroundJobs } from "@assistant/features";
 import { WechatState } from "@assistant/channel-wechat";
@@ -83,7 +83,19 @@ async function quietConversation(id: number) {
 	if (stopFailed) throw new HttpError(503, "会话任务已标记取消，但停止执行尚未确认；会话未归档或移除，请重试。");
 }
 
+const operations = new Map<number, Promise<unknown>>();
+async function withOperation<T>(id: number, operation: () => Promise<T>): Promise<T> {
+  const previous = operations.get(id) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(operation);
+  operations.set(id, next);
+  try { return await next; }
+  finally { if (operations.get(id) === next) operations.delete(id); }
+}
 async function shelveConversation(id: number, action: string) {
+  return withOperation(id, () => shelve(id, action));
+}
+async function shelve(id: number, action: string) {
+	if (!["archive", "restore", "remove"].includes(action)) throw new HttpError(400, "会话操作无效");
 	const index = await harness.snapshot(Index, ctx);
 	if (!(index?.items ?? []).some((item) => sameConversation(item.id, id))) {
 		throw new HttpError(400, "会话不在列表里");
@@ -94,7 +106,17 @@ async function shelveConversation(id: number, action: string) {
 	// Write the durable privacy tombstone before any await that can fail or
 	// leave an in-flight summary/notification running. Archive is not deletion.
 	if (action === "remove") episodeStore.revokeSource(`conv:${id}`);
-	if (action !== "restore") await quietConversation(id);
+	if (action !== "restore") {
+    // Persist intent before stopping: concurrent clients cannot submit new work during archival.
+    await root.commit(async tx => {
+      const item = (await tx.doc(Index)).items.find(item => sameConversation(item.id, id));
+      if (!item) throw new HttpError(404, "会话不在列表里");
+      item.archivingAt ??= new Date().toISOString();
+    }, ctx);
+    await quietConversation(id);
+    try { await (await getConversation(id)).abort(ctx); }
+    catch { throw new HttpError(503, "停止会话回复尚未确认；会话未归档，请重试归档或取消归档。"); }
+  }
 	return root.commit(async (tx) => {
 		const items = (await tx.doc(Index)).items;
 		const at = items.findIndex((item) => sameConversation(item.id, id));
@@ -104,15 +126,25 @@ async function shelveConversation(id: number, action: string) {
 			return { id: removed.id, removed: true };
 		}
 		const item = items[at];
+    item.archivingAt = null;
 		if (action === "archive") {
 			if (!item.archivedAt) item.archivedAt = new Date().toISOString();
 		} else {
 			item.archivedAt = null;
 		}
-		return { id: item.id, archivedAt: item.archivedAt ?? null };
+		return { id: item.id, status: conversationStatus(item), archivedAt: item.archivedAt ?? null, archivingAt: null };
 	}, ctx);
 }
 
 
-return { getConversation, registerIn, updateTitle, shelveConversation };
+async function setStatus(id: number, status: unknown) {
+  if (status !== "active" && status !== "waiting" && status !== "completed") throw new HttpError(400, "对话状态无效");
+  return root.commit(async tx => {
+    const item = (await tx.doc(Index)).items.find(item => sameConversation(item.id, id));
+    if (!item) throw new HttpError(404, "会话不在列表里");
+    item.status = status;
+    return { ...item, status: conversationStatus(item) };
+  }, ctx);
+}
+return { getConversation, registerIn, updateTitle, shelveConversation, setStatus, withOperation };
 }

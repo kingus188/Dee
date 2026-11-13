@@ -1,4 +1,4 @@
-import { Index, Meta } from "@assistant/runtime";
+import { Index, Meta, conversationStatus } from "@assistant/runtime";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { personalError, EditConflictError, Notes, editNotesInTx, Goals, createGoalInTx, controlGoalInTx } from "@assistant/features";
 import type { AppContext } from "./context.js";
@@ -30,6 +30,11 @@ export function createApi(context: AppContext) {
    const daylightExecution = createDaylightExecution(context, conversations, tasks);
   const { dailyReports } = context;
   async function dispatch(method: string, url: URL, body: Record<string, unknown> = {}, peerAuthorized = false) {
+    const write = method === "POST" && url.pathname.match(/^\/api\/conversations\/(\d+)\/(?!archive$|restore$|remove$)/);
+    if (write) return conversations.withOperation(Number(write[1]), () => dispatchInner(method, url, body, peerAuthorized));
+    return dispatchInner(method, url, body, peerAuthorized);
+  }
+  async function dispatchInner(method: string, url: URL, body: Record<string, unknown>, peerAuthorized: boolean) {
     const path = url.pathname;
     if (path === "/api/notes") {
       if (method === "GET") return { status: 200, data: await context.personalNotes.get() };
@@ -37,8 +42,13 @@ export function createApi(context: AppContext) {
     }
     const peerResult = await peerApi(context, method, url, body, peerAuthorized);
     if (peerResult) return peerResult;
-    const desktopWrite = method === "POST" && path.match(/^\/api\/conversations\/(\d+)\/(?!archive$|restore$|remove$)/);
+    const desktopWrite = method === "POST" && path.match(/^\/api\/conversations\/(\d+)\/(?!archive$|restore$|remove$|status$)/);
     if (desktopWrite && (await harness.snapshot(DesktopTranscript, Number(desktopWrite[1]) as ConversationId, ctx))?.value) throw new HttpError(409, "这是本机对话历史，请在原本机 Agent 中继续");
+    const conversationWrite = method === "POST" && path.match(/^\/api\/conversations\/(\d+)\/(?!archive$|restore$|remove$|status$|fork$|abort$)/);
+    if (conversationWrite) {
+      const item = (await harness.snapshot(Index, ctx))?.items.find(item => Number(item.id) === Number(conversationWrite[1]));
+      if (item?.archivedAt || item?.archivingAt) throw new HttpError(409, "对话已归档或正在停止，请先恢复对话");
+    }
     if (method === "GET" && path === "/api/goals") return { status: 200, data: { items: (await harness.snapshot(Goals, ctx))?.items ?? [] } };
     const newGoal = path.match(/^\/api\/conversations\/(\d+)\/goals$/);
     const goalControl = path.match(/^\/api\/goals\/([0-9a-f-]+)\/(resume|cancel|accept)$/i);
@@ -96,8 +106,9 @@ export function createApi(context: AppContext) {
       if (method === "POST") return { status: 200, data: context.wechatSettings.save(body) };
     }
     const notesPath = path.match(/^\/api\/conversations\/(\d+)\/notes$/);
-    // 纯数据会话入口与笔记不触发生成；其它模型任务仍须配置模型。
-    if (method === "POST" && path.startsWith("/api/conversations") && !notesPath && !/^\/api\/conversations\/\d+\/runs\/review$/.test(path) && path !== "/api/conversations/direct" && !context.modelConfigured) throw new HttpError(409, "请在服务器配置模型，然后重启后端");
+    const lifecyclePath = /^\/api\/conversations\/\d+\/(status|archive|restore|remove)$/.test(path);
+    // 纯数据会话入口、状态、归档与笔记不触发生成；其它模型任务仍须配置模型。
+    if (method === "POST" && path.startsWith("/api/conversations") && !notesPath && !lifecyclePath && !/^\/api\/conversations\/\d+\/runs\/review$/.test(path) && path !== "/api/conversations/direct" && !context.modelConfigured) throw new HttpError(409, "请在服务器配置模型，然后重启后端");
     if (method === "GET" && path === "/api/info") {
       const meta = await harness.snapshot(Meta, ctx);
       return { status: 200, data: { model: modelLabel, api: config.model.api, configured: context.modelConfigured, pid: process.pid, startedAt, boots: meta?.boots ?? 0 } };
@@ -136,12 +147,14 @@ export function createApi(context: AppContext) {
     if (method === "POST" && path === "/api/conversations/direct") return { status: 200, data: { id: await openDirectChat(context) } };
     if (method === "POST" && path === "/api/conversations/direct/new") return { status: 200, data: { id: await openDirectChat(context, { fresh: true }) } };
     if (path === "/api/conversations") {
-      if (method === "GET") return { status: 200, data: [...((await harness.snapshot(Index, ctx))?.items ?? [])].reverse() };
+      if (method === "GET") return { status: 200, data: [...((await harness.snapshot(Index, ctx))?.items ?? [])].reverse().map(item => ({ ...item, status: conversationStatus(item) })) };
       if (method === "POST") {
         const conversation = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model: agentModel }, init: conversations.registerIn({ title: "新对话" }) }, ctx);
         return { status: 201, data: { id: conversation.id } };
       }
     }
+    const statusPath = method === "POST" && path.match(/^\/api\/conversations\/(\d+)\/status$/);
+    if (statusPath) return { status: 200, data: await conversations.setStatus(Number(statusPath[1]), body.status) };
     const shelf = method === "POST" && path.match(/^\/api\/conversations\/(\d+)\/(archive|restore|remove)$/);
     if (shelf) return { status: 200, data: await conversations.shelveConversation(Number(shelf[1]), shelf[2]) };
     const chat = path.match(/^\/api\/conversations\/(\d+)\/(messages|fork|abort)$/);

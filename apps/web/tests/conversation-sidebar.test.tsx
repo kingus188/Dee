@@ -16,7 +16,7 @@ test("运行中的会话只出现在底部分组，完成后回到历史；搜�
   assert.equal(doc.querySelectorAll('.history-list a[href="#chat/9"]').length, 0);
   const running = doc.querySelector<HTMLAnchorElement>('.history-bottom a[href="#chat/9"]')!;
   assert.equal(running.getAttribute("aria-current"), "true");
-  assert.equal(running.querySelector(".history-row-status")?.textContent, "运行中");
+  assert.equal(running.querySelector(".history-row-status")?.textContent, "Running");
   assert.match(doc.querySelector('a[href="#chat/1"]')!.getAttribute("title")!, /微信接收方/);
   await act(async () => running.click());
   assert.deepEqual(opened, [9]);
@@ -49,9 +49,9 @@ test("本机侧栏使用真实 Agent 状态和目录，等待批准不误标为�
   const doc = dom.window.document;
   assert.equal(doc.querySelector(".history-bottom .history-row-title")?.textContent, "处理侧栏布局");
   assert.equal(doc.querySelector(".history-row-detail")?.textContent, "dee-agent");
-  assert.equal(doc.querySelector(".history-row-status")?.textContent, "等待确认");
+  assert.equal(doc.querySelector(".history-row-status")?.textContent, "Awaiting confirmation");
   assert.equal(doc.querySelectorAll(".history-row").length, 1);
   await render(<Sidebar snapshot={{ ...state, busy: false, external: { status: "done", activities: [], approvals: [] } }} />);
   assert.equal(doc.querySelector(".history-working"), null);
-  assert.equal(doc.querySelector(".history-list .history-row-status")?.textContent, "已完成");
+  assert.equal(doc.querySelector(".history-list .history-row-status")?.textContent, "Completed");
 });

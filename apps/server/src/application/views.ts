@@ -1,7 +1,7 @@
 import type { Message } from "@earendil-works/pi-ai";
 import type { ConversationId, ConversationView, InboxState, LiveState, UsageState } from "@earendil-works/pi-durable";
 import type { ViewEntry, ConversationView as ClientView } from "@assistant/contracts";
-import { Index } from "@assistant/runtime";
+import { Index, conversationStatus } from "@assistant/runtime";
 import { WechatState } from "@assistant/channel-wechat";
 import { Notes, Reminders, Delegations, BackgroundJobs, Parents, splitUserContent, withQuote } from "@assistant/features";
 import type { AppContext } from "./context.js";
@@ -15,9 +15,11 @@ const contentText = (content: Message["content"] | undefined) =>
 
 // 把 Harness 的视图压成前端要的样子
 async function simplifyView(conversationId: ConversationId, value: ConversationView): Promise<ClientView> {
-	const desktop = (await harness.snapshot(DesktopTranscript, conversationId, ctx))?.value;
+	const indexed = (await harness.snapshot(Index, ctx))?.items.find(item => item.id === conversationId);
+  const lifecycle = { status: conversationStatus(indexed ?? {}), archivedAt: indexed?.archivedAt ?? null, archivingAt: indexed?.archivingAt ?? null };
+  const desktop = (await harness.snapshot(DesktopTranscript, conversationId, ctx))?.value;
 	if (desktop) return {
-		conversationId, channel: "desktop", readOnly: true,
+		conversationId, channel: "desktop", readOnly: true, ...lifecycle,
 		entries: desktop.messages.map((message, index) => ({ id: index + 1, kind: message.role, text: message.text })),
 		live: {}, busy: false, inbox: 0, notes: { todos: [], memos: [] }, usage: null, tasks: [], reminders: [], subagents: [], parentId: null,
 	};
@@ -95,6 +97,8 @@ async function simplifyView(conversationId: ConversationId, value: ConversationV
 		}));
 	return {
 		conversationId,
+    ...lifecycle,
+    ...(lifecycle.archivedAt || lifecycle.archivingAt ? { readOnly: true } : {}),
 		channel,
 		entries,
 		live,

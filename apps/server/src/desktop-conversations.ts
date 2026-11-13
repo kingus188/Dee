@@ -31,7 +31,7 @@ export async function savePeerSessionCatalog(context: Runtime & { ctx: Context }
 
 export async function desktopPeerSessions(context: Runtime & { ctx: Context }, deviceId: string, session?: PeerSession): Promise<PeerSessionInfo[] | PeerTranscript> {
   const ids = (await context.harness.snapshot(Sessions, context.ctx))?.ids ?? {};
-  const visible = new Set((await context.harness.snapshot(Index, context.ctx))?.items.filter(item => !item.archivedAt).map(item => item.id));
+  const visible = new Set((await context.harness.snapshot(Index, context.ctx))?.items.filter(item => !item.archivedAt && !item.archivingAt).map(item => item.id));
   const catalog = (await context.harness.snapshot(PeerSessionCatalog, context.ctx))?.devices[deviceId];
   const items: PeerSessionInfo[] = (catalog?.items ?? []).filter(item => !ids[`${deviceId}/${item.sessionId}`] || visible.has(ids[`${deviceId}/${item.sessionId}`])).map(item => ({ ...item, syncedAt: catalog!.syncedAt }));
   for (const [key, id] of Object.entries(ids)) {

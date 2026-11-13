@@ -1,10 +1,14 @@
 import type { ConversationId, EntryId } from "@earendil-works/pi-durable";
 import { defineDoc } from "@earendil-works/pi-durable";
+export type ConversationStatus = "active" | "waiting" | "completed";
+export const conversationStatus = (item: { status?: ConversationStatus }): ConversationStatus => item.status ?? "active";
 export type ConversationItem = {
   id: ConversationId;
   title: string;
   createdAt: string;
   archivedAt?: string | null;
+  archivingAt?: string | null;
+  status?: ConversationStatus;
   channel?: string;
   forkOf?: ConversationId;
   forkAtEntry?: EntryId;

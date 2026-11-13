@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { configure } from "@earendil-works/pi-durable";
-import { createModelCatalog, createPeerService, openRuntime } from "@assistant/runtime";
+import { Index, createModelCatalog, createPeerService, openRuntime } from "@assistant/runtime";
 
 test("addressed peer delivery resumes the requested context and returns once to its source", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "dee-peer-sessions-"));
@@ -88,5 +88,30 @@ test("status tools never schedule a queued same-node destination from its source
     await peers.submit({ id, source: nodeId, target: nodeId, sourceSession: { agent: "pi", sessionId: `pi-${runtime.root.id}` }, targetSession: { agent: "pi", sessionId: `pi-${target}` }, task: "await approval" });
     assert.equal((await (await runtime.root.submit({ type: "input", content: "inspect status" }, ctx)).wait(ctx)).status, "done");
     assert.equal(authorizedCalls, 0); assert.equal((await peers.get(id))!.status, "queued");
+  } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
+});
+
+
+test("archiving conversations cannot be addressed by a peer until explicitly restored", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "dee-peer-archiving-"));
+  const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, fauxAssistantMessage("ok"));
+  const peers = createPeerService({ nodeId: "server", configured: () => true });
+  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], onReport: () => {} }, ctx); peers.bind(runtime, ctx);
+  try {
+    const target = await runtime.root.commit(async tx => {
+      const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
+      await configure(tx, child.id, { model: runtime.agentModel });
+      (await tx.doc(Index)).items.push({ id: child.id, title: "stopping", createdAt: "2026-01-01", archivingAt: "2026-01-02" });
+      return child.id;
+    }, ctx);
+    const targetSession = { agent: "pi" as const, sessionId: `pi-${target}` };
+    assert.ok(!(await peers.sessions()).some(item => item.sessionId === targetSession.sessionId));
+    await assert.rejects(peers.readSession(targetSession), /不存在|不可用/);
+    const job = await peers.submit({ id: randomUUID(), source: "server", target: "server", task: "must not run", targetSession, sourceSession: { agent: "pi", sessionId: `pi-${runtime.root.id}` } });
+    assert.equal((await peers.run(job.id)).status, "failed");
+    const targetConversation = (await runtime.harness.conversation(target, ctx))!;
+    assert.equal((await targetConversation.context(ctx)).entries.length, 0);
+    await runtime.root.commit(async tx => { (await tx.doc(Index)).items[0].archivingAt = null; }, ctx);
+    assert.ok((await peers.sessions()).some(item => item.sessionId === targetSession.sessionId));
   } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
 });

@@ -19,9 +19,10 @@ async function harness(t: TestContext, desktop = false) {
     receive({ conversationId: id, ...(desktop ? { channel: "desktop", readOnly: true } : {}), entries: [{ id: 1, kind: "user", text: `讨论 ${id}` }, { id: 2, kind: "assistant", text: "已收到。" }], live: {}, busy: false, inbox: 0, notes: { todos: [], memos: [] }, usage: null, tasks: [], reminders: [], subagents: [], parentId: null });
   });
   const calls: string[] = [];
+  let lifecycle: { archivedAt?: string | null; archivingAt?: string | null } = {};
   t.mock.method(apiClient, "request", async (path: string) => {
     calls.push(path);
-    if (path === "/api/conversations") return [{ id: 12, title: "产品方案跟进", channel: desktop ? "desktop" : "web", createdAt: "2026-10-21", archivedAt: null }, { id: 19, title: "季度计划", channel: "web", createdAt: "2026-10-22", archivedAt: null }];
+    if (path === "/api/conversations") return [{ id: 12, title: "产品方案跟进", channel: desktop ? "desktop" : "web", createdAt: "2026-10-21", archivedAt: null, ...lifecycle }, { id: 19, title: "季度计划", channel: "web", createdAt: "2026-10-22", archivedAt: null }];
     if (path.startsWith("/api/teams/conversations/messages?")) return { chatId: new URL(path, "http://localhost").searchParams.get("chatId"), items: [], nextCursor: null, fetchedAt: "2026-11-06T10:00:00Z" };
     if (path === "/api/teams/conversations") return { available: true, items: [], nextCursor: null, fetchedAt: "2026-11-06T10:00:00Z" };
     if (path === "/api/personal") return { memory: [], skills: [], knowledge: { enabled: false, allow: [] } };
@@ -34,6 +35,7 @@ async function harness(t: TestContext, desktop = false) {
   t.after(() => { if (descriptor) Object.defineProperty(globalThis, "requestAnimationFrame", descriptor); else Reflect.deleteProperty(globalThis, "requestAnimationFrame"); });
   const doc = mounted.dom.window.document;
   return { ...mounted, doc, calls, subscriptions,
+    setLifecycle: async (next: typeof lifecycle) => { lifecycle = next; await act(async () => receive({ conversationId: 12, ...next, readOnly: !!(next.archivedAt || next.archivingAt), entries: [{ id: 1, kind: "user", text: "讨论 12" }], live: {}, busy: false, inbox: 0, notes: { todos: [], memos: [] }, usage: null, tasks: [], reminders: [], subagents: [], parentId: null })); },
     flushFrames: async () => { await act(async () => { for (const callback of frames.splice(0)) callback(0); }); },
     restore: async (hash: string) => { await act(async () => { mounted.dom.window.history.replaceState(null, "", hash); mounted.dom.window.dispatchEvent(new mounted.dom.window.PopStateEvent("popstate")); }); },
   };
@@ -155,4 +157,20 @@ test("反复切换来源保留各自会话，Teams 列表是非模态导航", as
   assert.equal(view.dom.window.location.hash, teamsHash);
   assert.equal(view.doc.querySelector<HTMLSelectElement>(".teams-conversation-sidebar select")?.value, "teams");
   assert.deepEqual(view.subscriptions, [12]);
+});
+
+
+test("归档和停止待确认隐藏输入，另一客户端恢复后重新显示输入和会话标题", async t => {
+  const view = await harness(t);
+  view.dom.window.history.replaceState(null, "", "#chat/12");
+  await view.render(<App />);
+  assert.ok(view.doc.querySelector("#chat-textarea"));
+  await view.setLifecycle({ archivedAt: null, archivingAt: "2026-11-13" });
+  assert.equal(view.doc.querySelector("#chat-textarea"), null);
+  assert.match(view.doc.querySelector(".input-container")!.textContent!, /Archive pending/);
+  await view.setLifecycle({ archivedAt: "2026-11-13", archivingAt: null });
+  assert.match(view.doc.querySelector(".input-container")!.textContent!, /Archived/);
+  assert.equal(view.doc.querySelector(".conversation-title")?.textContent, "产品方案跟进");
+  await view.setLifecycle({ archivedAt: null, archivingAt: null });
+  assert.ok(view.doc.querySelector("#chat-textarea"));
 });

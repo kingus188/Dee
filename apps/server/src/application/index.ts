@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModelCatalog, createPeerService, openRuntime, Index, type Runtime } from "@assistant/runtime";
-import { createAssistant, createDailyReportTools, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway, createMailInbox } from "@assistant/features";
+import { createConversationTools, createAssistant, createDailyReportTools, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway, createMailInbox } from "@assistant/features";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { WechatChannel } from "@assistant/channel-wechat";
@@ -22,6 +22,7 @@ import { createDaylight, migrateLegacyTodos } from "@assistant/features";
 import { openNotificationOutbox } from "../notification-outbox.js";
 import { openBusinessDatabase } from "../postgres.js";
 import { createNotesStore } from "../notes-store.js";
+import { createConversationReader } from "../conversation-reader.js";
 import { migratePersonalNotes } from "./notes-migration.js";
 import { createDailyReports } from "../daily-reports.js";
 import { existsSync } from "node:fs";
@@ -72,6 +73,8 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     const { models, agentModel, label: modelLabel, configured: modelConfigured } = await createModelCatalog(config.model, config.model.api === "faux" ? (await import("./faux.js")).fauxScript : undefined);
     if (config.wechat.enabled && !modelConfigured) throw new Error("启用微信通道前请在服务器配置模型，然后重启后端");
     let peerRuntime: Runtime | undefined;
+    let conversationReader: ReturnType<typeof createConversationReader> | undefined;
+    const readConversations = () => { if (!conversationReader) throw new Error("对话查询尚未就绪"); return conversationReader; };
     const peers = createPeerService({ nodeId: "server", configured: () => modelConfigured,
       devices: async () => (config.password || config.peerToken) && peerRuntime ? (await peerDevices(peerRuntime, ctx)).filter(item => item.online).map(item => item.deviceId) : [],
       remoteSessions: async (node, session) => {
@@ -86,11 +89,12 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
       // durable work resumes, retaining the runtime's existing model rebinding.
       beforeResume: async runtime => {
         peers.bind(runtime, ctx); peerRuntime = runtime;
+        conversationReader = createConversationReader(runtime, ctx, episodeStore!);
         await repairConversationTitles(runtime, ctx);
         await migratePersonalNotes(runtime, personalNotes, ctx);
         episodeStore!.reconcileConversations((await runtime.harness.snapshot(Index, ctx))?.items.map(item => item.id) ?? []);
       },
-      extensions: [peers.extension, createDailyReportTools(dailyReports), createDaylight(daylight), createMailInbox(mail), createAssistant(notify, daylight), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query), records: rows => teamsStore!.records(rows),
+      extensions: [createConversationTools({ list: (caller, query) => readConversations().list(caller, query), read: (caller, query) => readConversations().read(caller, query) }), peers.extension, createDailyReportTools(dailyReports), createDaylight(daylight), createMailInbox(mail), createAssistant(notify, daylight), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query), records: rows => teamsStore!.records(rows),
         refresh: () => teamsSender.refresh?.() ?? Promise.resolve({ ok: false, lastSuccessAt: teamsSender.syncStatus?.().lastSuccessAt ?? null }),
         syncStatus: () => teamsSender.syncStatus?.() ?? { lastSuccessAt: null },
         read: createTeamsReadPort(teamsStore, teamsSender, config.offline) }), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender, config.offline)),
