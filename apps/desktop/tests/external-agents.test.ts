@@ -435,3 +435,36 @@ test("colliding provider message IDs stay inside their own request and peer resu
     assert.equal((await service.runSession({ ...base, id: "a:b", task: "second" }))?.result, "second reply");
   } finally { await service.close(); }
 }));
+
+test("peer cancellation persists before native admission and never replays after restart", async () => temporary(async directory => {
+  const binding: ExternalBinding = { kind: "codex", cwd: directory, config: { executable: "fixture", args: [] } };
+  let sends = 0;
+  const factory: DriverFactory = async () => ({ abort: async () => {}, close: async () => {}, send: async () => { sends++; } });
+  let service = openExternalAgents({ directory, binding: () => binding, factory });
+  await service.newSession();
+  const job = { id: randomUUID(), source: "server", target: "desktop", targetSession: service.sessions()[0]!, task: "must not execute", status: "queued" as const, createdAt: "now", updatedAt: "now" };
+  try {
+    assert.equal(await service.cancelPeer(job), true);
+    assert.equal((await service.runSession(job))?.status, "failed");
+    await service.close();
+    service = openExternalAgents({ directory, binding: () => binding, factory });
+    assert.equal(await service.cancelPeer(job), true);
+    assert.equal((await service.runSession(job))?.status, "failed");
+    assert.equal(sends, 0);
+  } finally { await service.close(); }
+}));
+
+test("native peer receives fixed workspace, constraints and acceptance criteria", async () => temporary(async directory => {
+  const binding: ExternalBinding = { kind: "codex", cwd: directory, config: { executable: "fixture", args: [] } };
+  let prompt = "";
+  const factory: DriverFactory = async () => ({ abort: async () => {}, close: async () => {}, send: async text => { prompt = text; } });
+  const service = openExternalAgents({ directory, binding: () => binding, factory });
+  try {
+    await service.newSession();
+    const job = { id: randomUUID(), source: "server", target: "desktop", targetSession: service.sessions()[0]!, task: "implement", workspace: directory, constraints: "No deployment", acceptanceCriteria: "Tests pass", status: "queued" as const, createdAt: "now", updatedAt: "now" };
+    assert.equal((await service.runSession(job))?.status, "done");
+    assert.match(prompt, /Required workspace:/);
+    assert.match(prompt, /Constraints: No deployment/);
+    assert.match(prompt, /Acceptance criteria: Tests pass/);
+  } finally { await service.close(); }
+}));

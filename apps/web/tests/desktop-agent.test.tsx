@@ -52,17 +52,17 @@ test("明确目标的外部会话可在忙时批准排队，不要求 Pi 配置�
   const { dom, render } = await mount(t);
   Object.defineProperty(dom.window, "desktopAgent", { value: native }); await render(<DesktopAgent />);
   const document = dom.window.document;
-  const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === "批准 Claude Code 执行")!;
+  const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === "Approve Claude Code")!;
   assert.ok(button, document.body.textContent!);
   assert.equal(button.disabled, false);
   assert.ok(!document.body.textContent!.includes("委托任务"));
   await act(async () => button.click());
-  assert.equal(approve.mock.callCount(), 1); assert.match(document.body.textContent!, /等待空闲/);
+  assert.equal(approve.mock.callCount(), 1); assert.match(document.body.textContent!, /Waiting for execution slot/);
   assert.match(document.querySelector("#message-history")!.textContent!, /当前来源对话/);
-  assert.ok(!document.body.textContent!.includes("批准 Pi 执行"));
+  assert.ok(!document.body.textContent!.includes("Approve Pi"));
 });
 
-test("历史协作任务不进入聊天布局，已有消息保持显示", async t => {
+test("历史协作任务折叠显示边界，已有消息保持显示", async t => {
   const state = snapshot(); state.agent = "omp";
   state.messages = [{ id: "history", role: "user", text: "切换前的消息" }];
   state.jobs = [{ id: "old", source: "server", target: state.nodeId, task: "历史委托内容", status: "done", createdAt: "now", updatedAt: "now" }];
@@ -71,7 +71,7 @@ test("历史协作任务不进入聊天布局，已有消息保持显示", async
   await render(<DesktopAgent />);
   assert.match(dom.window.document.querySelector("#message-history")!.textContent!, /切换前的消息/);
   assert.equal(dom.window.document.querySelector(".desktop-agent-jobs"), null);
-  assert.ok(!dom.window.document.body.textContent!.includes("历史委托内容"));
+  assert.equal(dom.window.document.querySelector<HTMLDetailsElement>(".desktop-agent-job details")!.open, false);
 });
 
 test("空闲外部 Agent 与 Pi 一样只在滚动区保留消息，不增加占据间距的空容器", async t => {
@@ -382,10 +382,10 @@ test("发送防重复，未确认重试使用同一 UUID，服务端任务逐项
   assert.equal(send.mock.calls[0]!.arguments[0]!.id, send.mock.calls[1]!.arguments[0]!.id);
   assert.match(send.mock.calls[0]!.arguments[0]!.id, /^[\da-f-]{36}$/i);
   await act(async () => reject(new Error("发送未完成")));
-  assert.match(document.querySelector(".desktop-agent-job")!.textContent!, /等待批准/);
+  assert.match(document.querySelector(".desktop-agent-job")!.textContent!, /Waiting for approval/);
   assert.equal(document.querySelector(".desktop-agent-job .md strong")!.textContent, "请检查工作目录");
   const jobs = [...document.querySelectorAll(".desktop-agent-job")];
-  assert.equal(jobs.length, 1, "其他会话及已结束的协作任务不进入当前聊天");
+  assert.equal(jobs.length, 2, "显示本机参与的入站与出站任务");
   const buttons = [...document.querySelectorAll<HTMLButtonElement>(".desktop-agent-job-actions button")];
   assert.equal(buttons.length, 2);
   await act(async () => buttons[0]!.click()); assert.equal(approve.mock.calls[0]!.arguments[0], "job-1");

@@ -28,5 +28,5 @@ test("attention opens source conversation or task review without retrying extern
 test("local execution boundary does not claim connection proves transcript synchronization", () => {
   const html = renderToStaticMarkup(<AgentContext snapshot={{ nodeId: "desktop-1", serverConnected: true, busy: true } as DesktopAgentSnapshot} />);
   assert.match(html, /Local · desktop-1/); assert.match(html, /Connected/); assert.match(html, /Unknown/);
-  assert.match(html, /不代表当前历史已同步/); assert.match(html, /不受服务端归档控制/);
+  assert.match(html, /Sync status<\/dt><dd>Unknown/); assert.match(html, /不受服务端归档控制/);
 });

@@ -8,14 +8,18 @@ import type { Runtime } from "./runtime.js";
 import { peerContinuation, piPeerSessions, readPiPeerSession, samePeerSession, validPeerSession } from "./peer-sessions.js";
 import type { PeerSession, PeerSessionInfo, PeerTranscript } from "./peer-sessions.js";
 
-export type PeerJob = {
+import { peerRequirements, peerTaskPrompt, samePeerRequirements, validPeerRequirements, type PeerRequirements, type PeerCancellation } from "./peer-boundaries.js";
+export { peerTaskPrompt } from "./peer-boundaries.js";
+
+export type PeerJob = PeerRequirements & {
   id: string; source: string; target: string; task: string;
   status: "queued" | "running" | "done" | "failed";
+  cancellation?: PeerCancellation; executionStartedAt?: string;
   result?: string; conversationId?: number; createdAt: string; updatedAt: string;
   sourceSession?: PeerSession; targetSession?: PeerSession; deliveryError?: string; resultDelivered?: boolean;
 };
-export type PeerSubmission = Pick<PeerJob, "id" | "source" | "target" | "task" | "sourceSession" | "targetSession">;
-export type PeerCompletion = { status: "done" | "failed"; result: string };
+export type PeerSubmission = Pick<PeerJob, "id" | "source" | "target" | "task" | "sourceSession" | "targetSession" | "workspace" | "constraints" | "acceptanceCriteria">;
+export type PeerCompletion = { status: "done" | "failed"; result: string; cancellationConfirmed?: boolean };
 export type PeerService = {
   extension: Extension;
   bind(runtime: Runtime, ctx: Context): void;
@@ -24,6 +28,7 @@ export type PeerService = {
   get(id: string): Promise<PeerJob | undefined>;
   complete(id: string, completion: PeerCompletion): Promise<PeerJob>;
   run(id: string): Promise<PeerJob>;
+  requestCancel(id: string): Promise<PeerJob>;
   sessions(): Promise<PeerSessionInfo[]>;
   readSession(session: PeerSession): Promise<PeerTranscript>;
   close(): Promise<void>;
@@ -31,6 +36,9 @@ export type PeerService = {
 export type PeerOptions = {
   nodeId: string; configured: () => boolean;
   remote?: (job: PeerJob) => Promise<PeerJob>;
+  cancelRemote?: (job: PeerJob) => Promise<PeerJob>;
+  /** Must stop only this request, and return true only after confirmed termination. */
+  cancelExecution?: (job: PeerJob) => Promise<boolean>;
   pollRemote?: (id: string) => Promise<PeerJob>;
   /** Server discovery only; never grants desktop execution authority. */
   devices?: () => Promise<string[]>;
@@ -52,11 +60,12 @@ export const PEER_RESULT_LIMIT = 16_000;
 export const PeerJobs = defineDoc<{ items: PeerJob[] }>({ kind: "app.peer-jobs", version: 1, scope: "session", initial: () => ({ items: [] }) });
 const terminal = (job: PeerJob) => job.status === "done" || job.status === "failed";
 const copyJob = (job: PeerJob): PeerJob => JSON.parse(JSON.stringify(job)) as PeerJob;
-const samePayload = (a: PeerSubmission, b: PeerSubmission) => a.id === b.id && a.source === b.source && a.target === b.target && a.task === b.task && samePeerSession(a.sourceSession, b.sourceSession) && samePeerSession(a.targetSession, b.targetSession);
+const samePayload = (a: PeerSubmission, b: PeerSubmission) => a.id === b.id && a.source === b.source && a.target === b.target && a.task === b.task && samePeerRequirements(a, b) && samePeerSession(a.sourceSession, b.sourceSession) && samePeerSession(a.targetSession, b.targetSession);
 export class PeerError extends Error {
   constructor(public readonly status: number, message: string) { super(message); this.name = "PeerError"; }
 }
 export function validatePeerSubmission(input: PeerSubmission): void {
+  if (!input || !validPeerRequirements(input)) throw new PeerError(400, "委派资源与约束无效");
   if (typeof input.id !== "string" || !PEER_JOB_ID.test(input.id)) throw new PeerError(400, "任务 ID 必须为 UUID");
   for (const node of [input.source, input.target]) if (typeof node !== "string" || (node !== "server" && !PEER_DEVICE_ID.test(node))) throw new PeerError(400, "节点 ID 无效");
   for (const session of [input.sourceSession, input.targetSession]) if (session !== undefined && !validPeerSession(session)) throw new PeerError(400, "Agent 会话地址无效");
@@ -65,6 +74,7 @@ export function validatePeerSubmission(input: PeerSubmission): void {
   if (typeof input.task !== "string" || !input.task.trim() || input.task.length > PEER_TASK_LIMIT) throw new PeerError(400, "委派任务为空或超出长度限制");
 }
 export function validatePeerCompletion(value: PeerCompletion): void {
+  if (value?.cancellationConfirmed !== undefined && (value.cancellationConfirmed !== true || value.status !== "failed")) throw new PeerError(400, "取消确认状态无效");
   if (!value || !["done", "failed"].includes(value.status) || typeof value.result !== "string" || value.result.length > PEER_RESULT_LIMIT) throw new PeerError(400, "任务结果状态或长度无效");
 }
 
@@ -97,24 +107,74 @@ export function createPeerService(options: PeerOptions): PeerService {
         return copyJob(existing);
       }
       const now = new Date().toISOString();
-      const job: PeerJob = { id: input.id, source: input.source, target: input.target, task: input.task, ...(input.sourceSession ? { sourceSession: { agent: input.sourceSession.agent, sessionId: input.sourceSession.sessionId } } : {}), ...(input.targetSession ? { targetSession: { agent: input.targetSession.agent, sessionId: input.targetSession.sessionId } } : {}), status: "queued", createdAt: now, updatedAt: now };
+      const job: PeerJob = { id: input.id, source: input.source, target: input.target, task: input.task, ...peerRequirements(input), ...(input.sourceSession ? { sourceSession: { agent: input.sourceSession.agent, sessionId: input.sourceSession.sessionId } } : {}), ...(input.targetSession ? { targetSession: { agent: input.targetSession.agent, sessionId: input.targetSession.sessionId } } : {}), status: "queued", createdAt: now, updatedAt: now };
       doc.items.push(job);
       return copyJob(job);
     }, ctx);
   }
-  async function complete(id: string, value: PeerCompletion): Promise<PeerJob> {
+  async function complete(id: string, value: PeerCompletion, preserveTerminal = false): Promise<PeerJob> {
     validatePeerCompletion(value);
     const { runtime, ctx } = state();
     const result = await runtime.root.commit(async tx => {
       const job = (await tx.doc(PeerJobs)).items.find(item => item.id === id);
       if (!job) throw new PeerError(404, "委派任务不存在");
       if (terminal(job)) {
+        if (preserveTerminal && (job.status !== value.status || job.result !== value.result)) {
+          if (job.status === "failed" && value.cancellationConfirmed && job.cancellation) job.cancellation.confirmedAt ??= new Date().toISOString();
+          return copyJob(job);
+        }
         if (job.status !== value.status || job.result !== value.result) throw new PeerError(409, "已完成任务的结果冲突");
       } else { job.status = value.status; job.result = value.result; job.updatedAt = new Date().toISOString(); }
+      if (value.cancellationConfirmed) {
+        if (!job.cancellation) throw new PeerError(409, "任务没有取消请求");
+        job.cancellation.confirmedAt ??= new Date().toISOString();
+      }
       return copyJob(job);
     }, ctx);
     await deliverResult(result);
     return (await get(id))!;
+  }
+  // Internal execution and cancellation may settle concurrently; the first terminal result wins.
+  const settle = (id: string, value: PeerCompletion) => complete(id, value, true);
+  async function requestCancel(id: string): Promise<PeerJob> {
+    const { runtime, ctx } = state();
+    const job = await runtime.root.commit(async tx => {
+      const item = (await tx.doc(PeerJobs)).items.find(value => value.id === id);
+      if (!item) throw new PeerError(404, "委派任务不存在");
+      if (!terminal(item)) { item.cancellation ??= { requestedAt: new Date().toISOString() }; item.updatedAt = new Date().toISOString(); }
+      return copyJob(item);
+    }, ctx);
+    return terminal(job) ? job : stopRequested(job);
+  }
+  async function stopRequested(job: PeerJob): Promise<PeerJob> {
+    if (!job.cancellation || terminal(job)) return job;
+    if (job.target !== options.nodeId) {
+      const remote = await options.cancelRemote?.(job);
+      if (!remote) return job;
+      if (!samePayload(job, remote)) throw new PeerError(409, "远端任务内容冲突");
+      return terminal(remote) ? settle(job.id, { status: remote.status as "done" | "failed", result: remote.result ?? "", ...(remote.cancellation?.confirmedAt ? { cancellationConfirmed: true } : {}) }) : job;
+    }
+    const { runtime, ctx } = state();
+    let confirmed = false;
+    if (job.targetSession && job.targetSession.agent !== "pi") {
+      // An adapter must address this exact request; never abort the current unrelated session.
+      confirmed = await options.cancelExecution?.(job) ?? false;
+    } else if (!job.conversationId && !job.executionStartedAt) {
+      confirmed = !running.has(job.id);
+    } else if (job.conversationId) {
+      const id = job.conversationId as ConversationId;
+      const record = await runtime.root.commit(tx => tx.submissionByRequest(id, `peer:${job.id}`), ctx);
+      if (record?.status === "queued") confirmed = await runtime.harness.abortSubmission(record.id, ctx, id) === "aborted";
+      else if (record?.status === "placed" && !job.targetSession) {
+        // Only a dedicated child belongs exclusively to this job. Shared sessions are left pending.
+        const child = await runtime.harness.conversation(id, ctx);
+        if (child) { await child.abort(ctx); confirmed = true; }
+      } else if (record?.status === "unanswered") confirmed = true;
+    }
+    const current = (await get(job.id))!;
+    if (current.status === "done") return current; // Work won the cancellation race; do not relabel success.
+    if (!confirmed) return current;
+    return settle(job.id, { status: "failed", result: current.status === "failed" ? current.result ?? "" : "Execution cancelled; inspect any effects already produced.", cancellationConfirmed: true });
   }
   async function sessions() {
     const { runtime, ctx } = state();
@@ -161,12 +221,24 @@ export function createPeerService(options: PeerOptions): PeerService {
     const job = await get(id);
     if (!job) throw new PeerError(404, "委派任务不存在");
     if (terminal(job)) { await deliverResult(job); return job; }
+    if (job.cancellation) {
+      if (job.target === options.nodeId && !job.conversationId && !job.executionStartedAt && (!job.targetSession || job.targetSession.agent === "pi")) return settle(id, { status: "failed", result: "Execution cancelled before admission.", cancellationConfirmed: true });
+      return stopRequested(job);
+    }
     if (job.target !== options.nodeId) {
       // ponytail: one fixed target, no leases or fallback execution after a disconnect.
       const remote = job.status === "running" && options.pollRemote ? await options.pollRemote(id) : await options.remote?.(job);
       if (!remote) return job;
       if (!samePayload(job, remote)) throw new PeerError(409, "远端任务内容冲突");
-      if (terminal(remote)) return complete(id, remote as PeerJob & PeerCompletion);
+      if (remote.cancellation) {
+        // A target may receive cancellation through its own UI. Mirror its request before confirmation.
+        const { runtime, ctx } = state();
+        await runtime.root.commit(async tx => {
+          const current = (await tx.doc(PeerJobs)).items.find(item => item.id === id)!;
+          if (!terminal(current)) current.cancellation ??= { requestedAt: remote.cancellation!.requestedAt };
+        }, ctx);
+      }
+      if (terminal(remote)) return settle(id, { status: remote.status as "done" | "failed", result: remote.result ?? "", ...(remote.cancellation?.confirmedAt ? { cancellationConfirmed: true } : {}) });
       if (!["queued", "running"].includes(remote.status)) throw new PeerError(400, "远端任务状态无效");
       const { runtime, ctx } = state();
       return runtime.root.commit(async tx => {
@@ -177,18 +249,22 @@ export function createPeerService(options: PeerOptions): PeerService {
     }
     if (options.authorized && !await options.authorized(job)) return job;
     if (job.targetSession?.agent !== undefined && job.targetSession.agent !== "pi") {
-      if (!options.executeSession) return complete(id, { status: "failed", result: "目标 Agent 不支持在本节点执行" });
+      if (!options.executeSession) return settle(id, { status: "failed", result: "目标 Agent 不支持在本节点执行" });
       const completion = await options.executeSession(job, async () => {
         const { runtime, ctx } = state();
-        await runtime.root.commit(async tx => { const current = (await tx.doc(PeerJobs)).items.find(item => item.id === id)!; if (!terminal(current)) { current.status = "running"; current.updatedAt = new Date().toISOString(); } }, ctx);
+        await runtime.root.commit(async tx => { const current = (await tx.doc(PeerJobs)).items.find(item => item.id === id)!; if (!terminal(current)) { current.status = "running"; current.executionStartedAt ??= new Date().toISOString(); current.updatedAt = new Date().toISOString(); } }, ctx);
+        const current = (await get(id))!;
+        if (current.cancellation) await stopRequested(current);
       });
-      return completion ? complete(id, completion) : job;
+      const current = (await get(id))!;
+      return terminal(current) ? current : completion ? settle(id, completion) : current;
     }
     if (!options.configured()) throw new PeerError(409, "请先配置本节点模型");
     const { runtime, ctx } = state();
     if (job.targetSession) await readSession(job.targetSession);
     const conversationId = await runtime.root.commit(async tx => {
       const current = (await tx.doc(PeerJobs)).items.find(item => item.id === id)!;
+      if (terminal(current) || current.cancellation) return undefined;
       if (!current.conversationId) {
         // Child identity and job linkage commit together; resubmission has a stable requestId.
         if (job.targetSession) current.conversationId = Number(job.targetSession.sessionId.slice(3));
@@ -198,17 +274,28 @@ export function createPeerService(options: PeerOptions): PeerService {
           current.conversationId = child.id;
         }
       }
-      current.status = "running"; current.updatedAt = new Date().toISOString();
+      current.status = "running"; current.executionStartedAt ??= new Date().toISOString(); current.updatedAt = new Date().toISOString();
       return current.conversationId as ConversationId;
     }, ctx);
+    if (conversationId === undefined) { const current = (await get(id))!; return terminal(current) ? current : settle(id, { status: "failed", result: "Execution cancelled before admission.", cancellationConfirmed: true }); }
     const child = await runtime.harness.conversation(conversationId, ctx);
     if (!child) throw new PeerError(500, "委派子会话不存在");
-    const submission = await child.submit({ type: "input", content: job.task, requestId: `peer:${id}`, whenBusy: "followUp" }, ctx);
+    const beforeSubmit = (await get(id))!;
+    if (beforeSubmit.cancellation) {
+      const previous = await runtime.root.commit(tx => tx.submissionByRequest(conversationId, `peer:${id}`), ctx);
+      if (!previous) return settle(id, { status: "failed", result: "Execution cancelled before admission.", cancellationConfirmed: true });
+      return stopRequested(beforeSubmit);
+    }
+    const submission = await child.submit({ type: "input", content: peerTaskPrompt(job), requestId: `peer:${id}`, whenBusy: "followUp" }, ctx);
+    const afterSubmit = (await get(id))!;
+    if (afterSubmit.cancellation) await stopRequested(afterSubmit);
     const settled = await submission.wait(ctx);
-    if (settled.status !== "done" || settled.type !== "input") return complete(id, { status: "failed", result: "委派执行未完成：" + settled.status });
+    const afterWait = (await get(id))!;
+    if (terminal(afterWait)) return afterWait;
+    if (settled.status !== "done" || settled.type !== "input") return settle(id, { status: "failed", result: "委派执行未完成：" + settled.status });
     const answer = await runtime.root.commit(async tx => (await tx.entry(AssistantEntry, settled.answer))?.model?.[0]?.content ?? [], ctx);
     const result = typeof answer === "string" ? answer : answer.filter(part => part.type === "text").map(part => part.text).join("");
-    return complete(id, { status: "done", result: (result || "任务已完成，无文字结果").slice(0, PEER_RESULT_LIMIT) });
+    return settle(id, { status: "done", result: (result || "任务已完成，无文字结果").slice(0, PEER_RESULT_LIMIT) });
   }
   function run(id: string): Promise<PeerJob> {
     state();
@@ -220,7 +307,7 @@ export function createPeerService(options: PeerOptions): PeerService {
       return (await get(job.id))!;
     }).catch(async error => {
       const job = !closed ? await get(id) : undefined;
-      if (job && !terminal(job) && error instanceof PeerError && [400, 404].includes(error.status)) return complete(id, { status: "failed", result: error.message });
+      if (job && !terminal(job) && !job.cancellation && error instanceof PeerError && [400, 404].includes(error.status)) return complete(id, { status: "failed", result: error.message });
       if (!closed) { const { runtime, ctx } = state(); await runtime.root.commit(async tx => { const job = (await tx.doc(PeerJobs)).items.find(item => item.id === id); if (job && !job.resultDelivered) job.deliveryError = "协作执行或送达未确认，将使用原请求重试"; }, ctx); }
       throw error;
     }).finally(() => { running.delete(id); });
@@ -251,17 +338,17 @@ export function createPeerService(options: PeerOptions): PeerService {
         return { output: [{ type: "text", text: JSON.stringify(item) }] };
       },
     }), defineTool({
-      name: "send_to_peer_session", description: "向明确节点的已有 Agent/会话异步发送任务，在原上下文排队执行；不打断当前任务、不切换界面。桌面入站仍须用户批准，完成后自动回到本来源会话继续执行；peer_task_status 可查询进度。", parameters: Type.Object({ target: Type.String(), agent: Type.Union([Type.Literal("pi"), Type.Literal("codex"), Type.Literal("claude"), Type.Literal("acp")]), sessionId: Type.String(), task: Type.String({ minLength: 1, maxLength: PEER_TASK_LIMIT }) }), replay: "safe",
+      name: "send_to_peer_session", description: "向明确节点的已有 Agent/会话异步发送任务，在原上下文排队执行；不打断当前任务、不切换界面。桌面入站仍须用户批准，完成后自动回到本来源会话继续执行；peer_task_status 可查询进度。", parameters: Type.Object({ target: Type.String(), agent: Type.Union([Type.Literal("pi"), Type.Literal("codex"), Type.Literal("claude"), Type.Literal("acp")]), sessionId: Type.String(), task: Type.String({ minLength: 1, maxLength: PEER_TASK_LIMIT }), workspace: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })), constraints: Type.Optional(Type.String({ minLength: 1, maxLength: 8000 })), acceptanceCriteria: Type.Optional(Type.String({ minLength: 1, maxLength: 8000 })) }), replay: "safe",
       execute: async (args, api, callContext) => {
         const id = await api.memo<string>("peer-session-job", randomUUID(), callContext);
-        const job = await submit({ id, source: options.nodeId, sourceSession: { agent: "pi", sessionId: `pi-${api.conversationId}` }, target: args.target, targetSession: { agent: args.agent, sessionId: args.sessionId }, task: args.task });
+        const job = await submit({ id, source: options.nodeId, sourceSession: { agent: "pi", sessionId: `pi-${api.conversationId}` }, target: args.target, targetSession: { agent: args.agent, sessionId: args.sessionId }, task: args.task, ...peerRequirements(args) });
         // Do not wait on the destination: a relay back to this busy source must be able to queue.
         void run(id).catch(error => { if (options.report) options.report(error); else console.error("协作任务尚未确认，请检查持久化队列状态"); });
         return { output: [{ type: "text", text: JSON.stringify(job) }] };
       },
     }), defineTool({
       name: "delegate_to_peer", description: options.nodeId === "server" ? "委派必须使用桌面资源的任务；target 选择在线 desktop-UUID。省略 target 查询当前可选设备，不自动选择。" : "仅将需要服务器资源的任务交给服务器；本机任务不要转发。异步提交后用 peer_task_status 查询。",
-      parameters: Type.Object({ target: Type.Optional(Type.String({ maxLength: 44 })), task: Type.String({ minLength: 1, maxLength: PEER_TASK_LIMIT }) }), replay: "safe",
+      parameters: Type.Object({ target: Type.Optional(Type.String({ maxLength: 44 })), task: Type.String({ minLength: 1, maxLength: PEER_TASK_LIMIT }), workspace: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })), constraints: Type.Optional(Type.String({ minLength: 1, maxLength: 8000 })), acceptanceCriteria: Type.Optional(Type.String({ minLength: 1, maxLength: 8000 })) }), replay: "safe",
       execute: async (args, api, callContext) => {
         const id = await api.memo<string>("peer-job", randomUUID(), callContext);
         const existing = await get(id);
@@ -274,10 +361,16 @@ export function createPeerService(options: PeerOptions): PeerService {
         }
         target ??= existing?.target;
         if (!target || (options.nodeId !== "server" && target !== "server")) throw new PeerError(400, "委派目标无效");
-        const job = await submit({ id, source: options.nodeId, target, task: args.task, sourceSession: existing ? existing.sourceSession : { agent: "pi", sessionId: `pi-${api.conversationId}` } });
+        const job = await submit({ id, source: options.nodeId, target, task: args.task, ...peerRequirements(args), sourceSession: existing ? existing.sourceSession : { agent: "pi", sessionId: `pi-${api.conversationId}` } });
         // Remote IO may fail after admission; status/retry retains this same job ID.
         if (options.remote) await run(job.id);
         return { output: [{ type: "text", text: JSON.stringify(await get(job.id)) }] };
+      },
+    }), defineTool({ name: "cancel_peer_task", description: "请求停止本来源会话的委派任务。取消请求不代表已停止；离线或不支持精确取消时保留待确认，不换节点执行。", parameters: Type.Object({ id: Type.String({ pattern: PEER_JOB_ID.source }) }), replay: "safe",
+      execute: async (args, api) => {
+        const job = await get(args.id);
+        if (!job || job.source !== options.nodeId || job.sourceSession?.agent !== "pi" || job.sourceSession.sessionId !== `pi-${api.conversationId}`) throw new PeerError(404, "本来源会话没有该协作任务");
+        return { output: [{ type: "text", text: JSON.stringify(await requestCancel(args.id)) }] };
       },
     }), defineTool({ name: "peer_task_status", description: "查询委派任务的持久化状态与结果，不执行本机入站任务。", parameters: Type.Object({ id: Type.String({ pattern: PEER_JOB_ID.source }) }), replay: "safe",
       execute: async args => {
@@ -289,7 +382,7 @@ export function createPeerService(options: PeerOptions): PeerService {
       },
     })],
   });
-  return { extension, submit, list, get, complete, run, sessions, readSession,
+  return { extension, submit, list, get, complete, run, requestCancel, sessions, readSession,
     bind(runtime, ctx) {
       if (bound || closed) throw new PeerError(409, "双端委派已绑定或已关闭");
       const cancellable = withCancel(ctx); cancel = cancellable.cancel;

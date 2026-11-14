@@ -1,7 +1,8 @@
+import { ConversationSync } from "./ConversationSync.js";
 import { AgentRuns } from "./AgentRuns.js";
 import { AgentContext } from "./AgentContext.js";
 import { useState } from "react";
-import { MarkdownContent } from "../chat/MarkdownContent.js";
+import { PeerJobs } from "./PeerJobs.js";
 import { Icon } from "../ui/Icon.js";
 import { ExternalAgentSettings } from "./ExternalAgentSettings.js";
 import { AgentRequests } from "./AgentRequests.js";
@@ -29,14 +30,14 @@ export function DesktopAgent({ local }: { local: LocalConversation }) {
   const { bridge, snapshot, action, pending } = local;
   if (!bridge) return null;
   return <>
-    {snapshot && <AgentContext snapshot={snapshot} />}
+    {snapshot && <AgentContext snapshot={snapshot}>
+      {snapshot.conversationSync && bridge.setConversationSync && <ConversationSync key={snapshot.conversationSync.sessionId} sync={snapshot.conversationSync} disabled={pending.length > 0 || !!local.pollError} save={async input => {
+        if (!await action("conversation-sync", () => bridge.setConversationSync!(input))) throw new Error("Sync preference was not saved. Check the current conversation and try again.");
+      }} />}
+    </AgentContext>}
     {snapshot && <AgentRuns snapshot={snapshot} />}
     {snapshot?.external?.status === "waiting" && <p className="turn-loading" role="status">等待你处理</p>}
     {snapshot?.external && <AgentRequests activities={snapshot.external.activities} approvals={snapshot.external.approvals} answer={async input => { if (!await action("approval", () => bridge.answerApproval(input))) throw new Error("审批未完成，请重试。"); }} />}
-    {snapshot?.jobs.filter(job => job.status === "queued" && job.target === snapshot.nodeId && (job.source === "server" || job.source === snapshot.nodeId)).map(job => <article className="desktop-agent-job" key={job.id}>
-      <p role="status">{job.approved ? "等待空闲" : "等待批准"}</p>
-      <div className="md"><MarkdownContent text={job.task} /></div>
-      <div className="desktop-agent-job-actions">{!job.approved && <button type="button" className="header-button" disabled={pending.includes(job.id) || ((!job.targetSession || job.targetSession.agent === "pi") && !(snapshot.piConfigured ?? snapshot.configured)) || !!local.pollError} onClick={() => void action(job.id, () => bridge.approve(job.id))}>批准 {agentNames[job.targetSession?.agent ?? "pi"]} 执行</button>}<button type="button" className="header-button" disabled={pending.includes(job.id) || !!local.pollError} onClick={() => void action(job.id, () => bridge.reject(job.id))}>拒绝</button></div>
-    </article>)}
+    <PeerJobs local={local} />
   </>;
 }

@@ -128,3 +128,26 @@ test("local Agent owns model, protects tools, persists approvals and returns one
     assert.deepEqual((await agent.snapshot()).messages, [], "stopping an old source continuation keeps the new conversation selected");
   } finally { await agent.close(); await new Promise<void>((resolve, reject) => model.close(error => error ? reject(error) : resolve())); await rm(directory, { recursive: true, force: true }); }
 });
+
+test("sync scope rejects stale sessions and preserves original server binding", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dee-sync-boundary-")), settings = openAgentSettings(directory);
+  const config = { api: "openai-completions", baseUrl: "", model: "", apiKey: "", contextWindow: 128000, maxTokens: 8192 };
+  let server = "server-one";
+  const request: AgentRequest = async (path, body) => path === "/api/info" ? {} : path === "/api/peers/conversations" ? { revision: (body as { revision: number }).revision } : { items: [] };
+  const agent = await openDesktopAgent({ directory, settings, request, serverId: () => server, confirm: async () => false,
+    loadModels: async () => ({ ...await createModelCatalog(config), model: { ...config, hasApiKey: false } }) });
+  try {
+    const original = (await agent.snapshot()).conversationSync!;
+    assert.equal(original.mode, "local");
+    await agent.setConversationSync({ sessionId: original.sessionId, mode: "summary", summary: "Explicitly shared result" });
+    await until(() => agent.snapshot(), value => value.conversationSync?.status === "synced");
+    server = "server-two";
+    const moved = (await agent.snapshot()).conversationSync!;
+    assert.equal(moved.serverId, "server-one");
+    assert.equal(moved.serverMismatch, true);
+    assert.equal(moved.status, "pending");
+    await agent.newSession();
+    await assert.rejects(agent.setConversationSync({ sessionId: original.sessionId, mode: "full" }), /Conversation changed/);
+    assert.equal((await agent.snapshot()).conversationSync!.mode, "local");
+  } finally { await agent.close(); await rm(directory, { recursive: true, force: true }); }
+});

@@ -66,7 +66,7 @@ test("native MCP stdio adapter carries list/read/send/status to the same source-
     assert.equal((await fetch(server.config.env.DEE_PEER_MCP_URL, { method: "POST", body: "{}" })).status, 403);
     for (const message of [{ id: 1, method: "initialize", params: { protocolVersion: "2024-11-05" } }, { id: 2, method: "tools/list" }, { id: 3, method: "tools/call", params: { name: "peer_sessions", arguments: {} } }]) child.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n");
     await until(() => responses.length === 3);
-    assert.deepEqual(responses.find(item => item.id === 2)!.result.tools!.map(tool => tool.name), ["peer_sessions", "read_peer_session", "send_to_peer_session", "peer_task_status"]);
+    assert.deepEqual(responses.find(item => item.id === 2)!.result.tools!.map(tool => tool.name), ["cancel_peer_task", "peer_sessions", "read_peer_session", "send_to_peer_session", "peer_task_status"]);
     assert.deepEqual(calls, [{ name: "peer_sessions", args: {} }]);
     assert.match(responses.find(item => item.id === 3)!.result.content![0]!.text, /accepted/);
   } finally { lines.close(); child.kill(); await new Promise<void>(resolve => child.once("close", () => resolve())); await server.close(); }

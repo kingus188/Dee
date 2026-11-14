@@ -30,6 +30,9 @@ test("HTTP peer routes retain authentication and same-origin checks", async () =
   try {
     const path = `/api/peers/tasks?deviceId=${device}`;
     assert.equal((await fetch(origin + path)).status, 401);
+    const cancelPath = origin + `/api/peers/tasks/${randomUUID()}/cancel`;
+    assert.equal((await fetch(cancelPath, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ deviceId: device }) })).status, 401);
+
     assert.equal((await fetch(origin + path, { headers })).status, 200);
     const input = { id: randomUUID(), source: device, target: "server", task: "服务器查询" };
     assert.equal((await fetch(origin + "/api/peers/tasks", { method: "POST", headers: { ...headers, origin: "https://outside.invalid" }, body: JSON.stringify(input) })).status, 403);
@@ -83,13 +86,26 @@ test("peer API validates routing, persists desktop waiting, and only accepts tar
     const unrelated = await call("GET", `tasks?deviceId=${other}`);
     assert.ok(unrelated && "items" in unrelated.data && Array.isArray(unrelated.data.items));
     assert.equal(unrelated.data.items.length, 0);
+    const cancelJob = await peers.submit({ id: randomUUID(), source: "server", target: device, task: "cancel offline" });
+    await assert.rejects(call("POST", `tasks/${cancelJob.id}/cancel`, { deviceId: other }), { status: 404 });
+    await call("POST", `tasks/${cancelJob.id}/cancel`, { deviceId: device });
+    const pending = (await peers.get(cancelJob.id))!;
+    assert.equal(pending.status, "queued");
+    assert.ok(pending.cancellation?.requestedAt);
+    assert.equal(pending.cancellation?.confirmedAt, undefined);
+    await assert.rejects(call("POST", `tasks/${cancelJob.id}/complete`, { deviceId: device, status: "done", result: "bad", cancellationConfirmed: true }), { status: 400 });
+    await call("POST", `tasks/${cancelJob.id}/complete`, { deviceId: device, status: "failed", result: "Stopped", cancellationConfirmed: true });
+    assert.ok((await peers.get(cancelJob.id))?.cancellation?.confirmedAt);
     const result = { deviceId: device, status: "done", result: "本机结果" };
     const done = await call("POST", `tasks/${outbound.id}/complete`, result);
     assert.equal(done?.status, 200);
     assert.deepEqual(await call("POST", `tasks/${outbound.id}/complete`, result), done);
     await assert.rejects(call("POST", `tasks/${outbound.id}/complete`, { ...result, result: "不同" }), { status: 409 });
-    const id = randomUUID(), input = { id, source: device, target: "server", task: "服务器业务" };
+    const id = randomUUID(), input = { id, source: device, target: "server", task: "服务器业务", workspace: "/work/project", constraints: "Read only", acceptanceCriteria: "Report findings" };
     assert.equal((await call("POST", "tasks", input))?.status, 202);
+    assert.equal((await peers.get(id))?.workspace, input.workspace);
+    assert.equal((await peers.get(id))?.constraints, input.constraints);
+    assert.equal((await peers.get(id))?.acceptanceCriteria, input.acceptanceCriteria);
     await peers.run(id);
     assert.equal((await peers.get(id))?.status, "done");
     await call("POST", "tasks", input);

@@ -7,7 +7,7 @@ import { openAcp } from "./acp.js";
 import { openOmp } from "./omp.js";
 import { openAgentSessionStore, type StoredAgentSession } from "./store.js";
 import type { AgentDriver, DriverOptions, AgentEvent } from "./types.js";
-import { PeerError, peerContinuation, peerTranscript, validPeerSession } from "@assistant/runtime";
+import { PeerError, peerContinuation, peerTaskPrompt, peerTranscript, validPeerSession } from "@assistant/runtime";
 import type { PeerSession, PeerJob, PeerCompletion } from "@assistant/runtime";
 import { openPeerTools, type PeerToolHandler } from "./peer-tools.js";
 
@@ -99,6 +99,19 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
     return session;
   }
   const service = {
+    async cancelPeer(job: PeerJob): Promise<boolean> {
+      if (!job.targetSession || job.targetSession.agent === "pi") return false;
+      const session = addressed(job.targetSession);
+      const id = `peer:${job.id}`;
+      if (session.requests?.[id]?.status === "cancelled") return true;
+      if (!session.requests?.[id] && !session.messages.some(message => message.id === id)) {
+        session.requests = { ...session.requests, [id]: { status: "cancelled" } }; persist(session); return true;
+      }
+      if (!active || requestId !== id || session.requests?.[id]?.status !== "running") return false;
+      controller?.abort();
+      await active;
+      return store.byId(session.id)?.requests?.[id]?.status === "cancelled";
+    },
     get busy() { return Boolean(active); },
     history: store.history,
     sessions() { return store.list().map(session => ({ agent: session.agent, sessionId: session.id, status: session.status })); },
@@ -115,7 +128,7 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
     },
     snapshot() {
       const session = current();
-      return { runs: nativeRuns(session, options.binding()?.kind ?? "codex"), capabilities: agentCapabilities(options.binding()?.kind ?? "codex", resumeCapability), messages: session?.messages ?? [], error: store.error ?? session?.error,
+      return { sessionId: session?.id, runs: nativeRuns(session, options.binding()?.kind ?? "codex"), capabilities: agentCapabilities(options.binding()?.kind ?? "codex", resumeCapability), messages: session?.messages ?? [], error: store.error ?? session?.error,
         external: { status: session?.status ?? "idle", sessionId: session?.nativeId, activities: session?.activities ?? [], approvals: [...approvals.values()].map(item => item.request) } };
     },
     async send(input: { id: string; text: string }, address?: PeerSession) {
@@ -126,6 +139,7 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
       const binding: ExternalBinding | undefined = target ? JSON.parse(target.binding) as ExternalBinding : options.binding(); if (!binding) throw new Error("请先选择外部 Agent 和工作目录");
       const session = target ?? store.get(key(binding)) ?? store.create(key(binding));
       const bindingKey = `${key(binding)}:${session.id}`;
+      if (session.requests?.[input.id]?.status === "cancelled") throw new Error("请求已取消");
       const existing = session.messages.find(message => message.role === "user" && message.id === input.id);
       if (existing) { if (existing.text !== input.text) throw new Error("消息 ID 与已有内容冲突"); return; }
       if (active) throw new Error("Agent 正在执行，请先停止");
@@ -182,10 +196,10 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
     },
     async runSession(job: PeerJob, started: () => Promise<void> = async () => {}): Promise<PeerCompletion | undefined> {
       const session = addressed(job.targetSession!);
-      const input = { id: `peer:${job.id}`, text: job.task };
+      const input = { id: `peer:${job.id}`, text: peerTaskPrompt(job) };
       const existing = session.messages.find(message => message.role === "user" && message.id === input.id);
       if (existing && existing.text !== input.text) throw new PeerError(409, "请求 ID 与已有内容冲突");
-      if (!existing) {
+      if (!existing && session.requests?.[input.id]?.status !== "cancelled") {
         if (active || transition) return;
         await service.send(input, job.targetSession);
       }

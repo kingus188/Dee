@@ -19,7 +19,7 @@ import { resolveAgentExecutable } from "./agents/process.js";
 import type { AgentApprovalAnswer } from "@assistant/contracts";
 import { loadPiModels, type PiModels } from "./pi-models.js";
 import { PeerConnectionError } from "./peer-connection.js";
-import { peerSessionsForServer, piConversation, syncConversations } from "./conversation-sync.js";
+import { getConversationSync, setConversationSync, peerSessionsForServer, piConversation, syncConversations } from "./conversation-sync.js";
 import type { PeerChange } from "./peer-socket.js";
 const ActiveConversation = defineDoc<{ id: Runtime["root"]["id"] | null }>({ kind: "app.desktop-active-conversation", version: 1, scope: "session", initial: () => ({ id: null }) });
 const Approvals = defineDoc<{ ids: string[] }>({ kind: "app.desktop-peer-approvals", version: 1, scope: "session", initial: () => ({ ids: [] }) });
@@ -54,11 +54,11 @@ export async function openDesktopAgent(options: {
     peerTools: sourceSession => async (name, args) => {
       if (name === "peer_sessions") { const node = args.node === undefined ? nodeId : String(args.node); return { node, items: await listSessions(node) }; }
       if (name === "read_peer_session") return readSession({ node: String(args.node), session: { agent: args.agent, sessionId: args.sessionId } as PeerSession });
-      if (name === "send_to_peer_session") return sendPeer({ id: args.requestId, source: nodeId, sourceSession, target: args.target, targetSession: { agent: args.agent, sessionId: args.sessionId }, task: args.task } as PeerSubmission);
-      if (name === "peer_task_status") {
+      if (name === "send_to_peer_session") return sendPeer({ id: args.requestId, source: nodeId, sourceSession, target: args.target, targetSession: { agent: args.agent, sessionId: args.sessionId }, task: args.task, workspace: args.workspace, constraints: args.constraints, acceptanceCriteria: args.acceptanceCriteria } as PeerSubmission);
+      if (name === "peer_task_status" || name === "cancel_peer_task") {
         const job = await peers.get(String(args.id));
         if (!job || job.source !== nodeId || job.sourceSession?.agent !== sourceSession.agent || job.sourceSession.sessionId !== sourceSession.sessionId) throw new Error("本来源会话没有该协作任务");
-        return job;
+        return name === "cancel_peer_task" ? peers.requestCancel(job.id) : job;
       }
       throw new Error("协作工具无效");
     }, binding: () => {
@@ -102,7 +102,9 @@ export async function openDesktopAgent(options: {
   function makePeers() {
     return createPeerService({ nodeId, configured,
       report,
-      remote: job => requestJob(job.id, job.targetSession && job.sourceSession ? "/api/peers/messages" : "/api/peers/tasks", { id: job.id, source: nodeId, target: "server", task: job.task, sourceSession: job.sourceSession, targetSession: job.targetSession }),
+      remote: job => requestJob(job.id, job.targetSession && job.sourceSession ? "/api/peers/messages" : "/api/peers/tasks", { id: job.id, source: nodeId, target: "server", task: job.task, sourceSession: job.sourceSession, targetSession: job.targetSession, workspace: job.workspace, constraints: job.constraints, acceptanceCriteria: job.acceptanceCriteria }),
+      cancelRemote: job => requestJob(job.id, `/api/peers/tasks/${job.id}/cancel`, { deviceId: nodeId }),
+      cancelExecution: job => external.cancelPeer(job),
       pollRemote: id => requestJob(id, `/api/peers/tasks/${id}?deviceId=${nodeId}`),
       sessions: async () => external.sessions(), readSession: async session => external.readSession(session),
       executeSession: (job, started) => external.runSession(job, started), deliverResult: job => external.deliverResult(job),
@@ -200,8 +202,9 @@ export async function openDesktopAgent(options: {
       if (job.target === nodeId && job.source === "server") {
         await peers.submit(job);
         if (await jobServer(job.id) !== currentServer) throw new Error("委派任务属于另一台服务器，不能跨服务器传送结果");
-        const localJob = await peers.get(job.id);
-        if (localJob && ["done", "failed"].includes(localJob.status)) await options.request(`/api/peers/tasks/${job.id}/complete`, { deviceId: nodeId, status: localJob.status, result: localJob.result ?? "" }, currentServer);
+        let localJob = await peers.get(job.id);
+        if (job.cancellation && localJob && !["done", "failed"].includes(localJob.status)) localJob = await peers.requestCancel(job.id);
+        if (localJob && ["done", "failed"].includes(localJob.status)) await options.request(`/api/peers/tasks/${job.id}/complete`, { deviceId: nodeId, status: localJob.status, result: localJob.result ?? "", ...(localJob.cancellation?.confirmedAt ? { cancellationConfirmed: true } : {}) }, currentServer);
       }
     }
     const approvals = (await runtime!.harness.snapshot(Approvals, ctx))?.ids ?? [];
@@ -267,9 +270,26 @@ export async function openDesktopAgent(options: {
       }
       const continuity = await runtime!.harness.snapshot(ChatContinuity, ctx);
       if (includeContinuity && continuity) messages = [...continuity.messages, ...messages.slice(continuity.offset).map(message => ({ ...message, text: message.role === "user" ? continuity.inputs[message.text] ?? message.text : message.text }))];
-      return { runs: externalState?.runs.map(run => ({ ...run, request: continuity?.inputs[run.request] ?? run.request })), capabilities: externalState?.capabilities ?? agentCapabilities("pi"), handoff: continuity?.handoff, configured: agentConfigured, piConfigured: configured(), agent: settings.agent, agentConfig: settings.agent === "pi" ? undefined : settings.agents[settings.agent], external: externalState?.external,
+      const sessionId = settings.agent === "pi" ? `pi-${conversation.id}` : externalState?.sessionId;
+      let conversationSync: DesktopAgentSnapshot["conversationSync"] = sessionId ? { sessionId, ...await getConversationSync(runtime!, sessionId) } : undefined;
+      if (conversationSync?.mode === "full") {
+        const current = settings.agent === "pi" ? await piConversation(runtime!, conversation.id) : external.history().find(item => item.sessionId === sessionId);
+        conversationSync = { sessionId: sessionId!, ...await getConversationSync(runtime!, sessionId!, current) };
+      }
+      if (conversationSync?.serverId && conversationSync.serverId !== (options.serverId?.() ?? "server")) {
+        conversationSync.serverMismatch = true;
+        if (conversationSync.mode !== "local") conversationSync.status = "pending";
+      }
+      return { conversationSync, runs: externalState?.runs.map(run => ({ ...run, request: continuity?.inputs[run.request] ?? run.request })), capabilities: externalState?.capabilities ?? agentCapabilities("pi"), handoff: continuity?.handoff, configured: agentConfigured, piConfigured: configured(), agent: settings.agent, agentConfig: settings.agent === "pi" ? undefined : settings.agents[settings.agent], external: externalState?.external,
         model: catalog.model, piModel: catalog.agentModel, piEffort: settings.piEffort, piAccess: settings.piAccess, workspace: settings.workspace, nodeId,
         busy: busy || peerRuns.size > 0 || external.busy || inspection.tasks.length > 0, messages, jobs: (await peers.list()).map(job => ({ ...job, approved: approved.includes(job.id) })), serverConnected, collaboration, error: externalState?.error ?? agentError ?? error ?? (settings.agent === "pi" ? catalog.error : undefined) ?? connectionError ?? historyError };
+    },
+    async setConversationSync(input: { sessionId: string; mode: "local" | "summary" | "full"; summary?: string }) {
+      return changeSettings(async () => {
+        const sessionId = options.settings.get().agent === "pi" ? `pi-${conversation.id}` : external.snapshot().sessionId;
+        if (!input || input.sessionId !== sessionId) throw new Error("Conversation changed; refresh before changing sync scope");
+        await setConversationSync(runtime!, input.sessionId, input);
+      }).then(() => { sync(false); });
     },
     async send(input: { id: string; text: string }) {
       if (closed || reconfiguring) throw new Error("本机 Agent 正在重新加载");
@@ -305,6 +325,7 @@ export async function openDesktopAgent(options: {
         void runPeer(id).then(syncCompleted).catch(report);
     },
     sessions: listSessions, readSession, sendPeer,
+    async cancelPeer(id: string) { await peers.requestCancel(id); sync(); },
     async peerStatus(id: string) { const job = await peers.get(id); if (!job) throw new Error("协作任务不存在"); return job; },
     async reject(id: string) {
       const job = await peers.get(id);

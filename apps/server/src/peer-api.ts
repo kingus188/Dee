@@ -65,7 +65,7 @@ export async function peerApi(context: Runtime & { ctx: Context; peers: PeerServ
       if (method === "POST") {
         const source = deviceId(body.source);
         if (body.target !== "server" || typeof body.id !== "string" || typeof body.task !== "string") throw new HttpError(400, "仅接受 desktop-UUID 委派至 server 的任务");
-        const item = await peers.submit({ id: body.id, source, target: "server", task: body.task, ...(body.sourceSession ? { sourceSession: body.sourceSession as PeerSubmission["sourceSession"] } : {}), ...(body.targetSession ? { targetSession: body.targetSession as PeerSubmission["targetSession"] } : {}) });
+        const item = await peers.submit({ id: body.id, source, target: "server", task: body.task, ...(body.workspace !== undefined ? { workspace: body.workspace as string } : {}), ...(body.constraints !== undefined ? { constraints: body.constraints as string } : {}), ...(body.acceptanceCriteria !== undefined ? { acceptanceCriteria: body.acceptanceCriteria as string } : {}), ...(body.sourceSession ? { sourceSession: body.sourceSession as PeerSubmission["sourceSession"] } : {}), ...(body.targetSession ? { targetSession: body.targetSession as PeerSubmission["targetSession"] } : {}) });
         // Admission commits before scheduling; a retry or restart finds the same job.
         schedulePeer(peers, item.id, error => {
           context.exitIfFatal(error);
@@ -74,14 +74,18 @@ export async function peerApi(context: Runtime & { ctx: Context; peers: PeerServ
         return { status: 202, data: { item } };
       }
     }
-    const match = url.pathname.match(/^\/api\/peers\/tasks\/([^/]+)(\/complete)?$/);
+    const match = url.pathname.match(/^\/api\/peers\/tasks\/([^/]+)(\/(?:complete|cancel))?$/);
     if (match) {
       if (!PEER_JOB_ID.test(match[1])) throw new HttpError(400, "任务 ID 必须为 UUID");
       if (method === "GET" && !match[2]) return { status: 200, data: { item: participant(await peers.get(match[1]), deviceId(url.searchParams.get("deviceId"))) } };
-      if (method === "POST" && match[2]) {
+      if (method === "POST" && match[2] === "/cancel") {
+        const job = participant(await peers.get(match[1]), deviceId(body.deviceId));
+        return { status: 200, data: { item: await peers.requestCancel(job.id) } };
+      }
+      if (method === "POST" && match[2] === "/complete") {
         const device = deviceId(body.deviceId), job = participant(await peers.get(match[1]), device);
         if (job.target !== device) throw new HttpError(403, "只能提交发给当前设备的任务结果");
-        const completion = { status: body.status, result: body.result } as PeerCompletion;
+        const completion = { status: body.status, result: body.result, ...(body.cancellationConfirmed !== undefined ? { cancellationConfirmed: body.cancellationConfirmed } : {}) } as PeerCompletion;
         return { status: 200, data: { item: await peers.complete(job.id, completion) } };
       }
     }

@@ -122,3 +122,69 @@ test("remote transport retries use the same job and reject a mismatched response
     assert.equal((await peers.list()).length, 1);
   } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
 });
+
+test("peer requirements are durable immutable payload and cancellation is confirmed only at target", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "pi-peer-boundaries-"));
+  const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, () => fauxAssistantMessage("ok"));
+  const peers = createPeerService({ nodeId: "server", configured: () => true });
+  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], resume: false, onReport: (error: unknown) => { throw error; } }, ctx); peers.bind(runtime, ctx);
+  try {
+    const input = { id: randomUUID(), source: desktop, target: "server", task: "inspect", workspace: "/project", constraints: "read only", acceptanceCriteria: "report findings" };
+    assert.equal((await peers.submit(input)).workspace, "/project");
+    await assert.rejects(peers.submit({ ...input, constraints: "write files" }), /冲突/);
+    await assert.rejects(peers.submit({ ...input, id: randomUUID(), workspace: "" }), /资源/);
+    const cancelled = await peers.requestCancel(input.id);
+    assert.equal(cancelled.status, "failed"); assert.ok(cancelled.cancellation?.confirmedAt);
+    assert.equal((await peers.run(input.id)).conversationId, undefined);
+    const remote = await peers.submit({ id: randomUUID(), source: "server", target: desktop, task: "offline target" });
+    const pending = await peers.requestCancel(remote.id);
+    assert.equal(pending.status, "queued"); assert.ok(pending.cancellation?.requestedAt); assert.equal(pending.cancellation?.confirmedAt, undefined);
+    assert.equal((await peers.run(remote.id)).target, desktop);
+    assert.equal((await peers.get(remote.id))?.conversationId, undefined);
+    await peers.complete(remote.id, { status: "failed", result: "stopped on device", cancellationConfirmed: true });
+    assert.ok((await peers.get(remote.id))?.cancellation?.confirmedAt);
+    const other = await peers.submit({ id: randomUUID(), source: desktop, target: "server", task: "uncancelled" });
+    await assert.rejects(peers.complete(other.id, { status: "failed", result: "x", cancellationConfirmed: true }), /取消请求/);
+    assert.equal((await peers.get(other.id))?.status, "queued");
+  } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
+});
+
+test("cancel a dedicated Pi execution waits for stop while preserving one job and submission", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "pi-peer-cancel-"));
+  let entered!: () => void;
+  const generating = new Promise<void>(resolve => { entered = resolve; });
+  const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, async (_transcript, options) => {
+    entered();
+    await new Promise<void>(resolve => options?.signal?.addEventListener("abort", () => resolve(), { once: true }));
+    return fauxAssistantMessage("", { stopReason: "aborted" });
+  });
+  const peers = createPeerService({ nodeId: "server", configured: () => true });
+  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], resume: false, onReport: (error: unknown) => { throw error; } }, ctx); peers.bind(runtime, ctx);
+  try {
+    const job = await peers.submit({ id: randomUUID(), source: desktop, target: "server", task: "slow" });
+    const run = peers.run(job.id);
+    await generating;
+    const stopped = await peers.requestCancel(job.id);
+    await run;
+    assert.equal(stopped.status, "failed"); assert.ok(stopped.cancellation?.confirmedAt);
+    assert.equal((await runtime.harness.inspect(ctx)).tasks.length, 0);
+    const again = await peers.run(job.id);
+    assert.equal(again.conversationId, stopped.conversationId);
+    assert.equal(again.cancellation?.confirmedAt, stopped.cancellation.confirmedAt);
+  } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
+});
+
+test("unsupported shared/native cancellation stays pending and cannot stop another request", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "pi-peer-native-cancel-"));
+  const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, () => fauxAssistantMessage("ok"));
+  let calls = 0;
+  const peers = createPeerService({ nodeId: desktop, configured: () => true, executeSession: async () => { calls++; return { status: "done", result: "unexpected" }; } });
+  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], resume: false, onReport: (error: unknown) => { throw error; } }, ctx); peers.bind(runtime, ctx);
+  try {
+    const job = await peers.submit({ id: randomUUID(), source: "server", target: desktop, task: "native", targetSession: { agent: "codex", sessionId: randomUUID() } });
+    const pending = await peers.requestCancel(job.id);
+    assert.equal(pending.status, "queued"); assert.equal(pending.cancellation?.confirmedAt, undefined);
+    await peers.run(job.id);
+    assert.equal(calls, 0);
+  } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
+});

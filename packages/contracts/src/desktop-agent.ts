@@ -48,8 +48,16 @@ export type DesktopPeerJob = {
   deliveryError?: string;
   resultDelivered?: boolean;
   approved?: boolean;
+  workspace?: string; constraints?: string; acceptanceCriteria?: string;
+  cancellation?: { requestedAt: string; confirmedAt?: string };
+};
+export type ConversationSyncMode = "local" | "summary" | "full";
+export type ConversationSyncState = {
+  sessionId: string; mode: ConversationSyncMode; summary: string; serverId?: string; serverMismatch?: boolean;
+  revision: number; sentRevision: number; previouslyShared: boolean; status: "local" | "pending" | "synced";
 };
 export type DesktopAgentSnapshot = {
+  conversationSync?: ConversationSyncState;
   runs?: DesktopAgentRun[];
   capabilities?: AgentCapabilities;
   handoff?: DesktopHandoff;
@@ -74,11 +82,13 @@ export type DesktopAgentBridge = {
   agentPermissions?(): Promise<AgentPermissionParameter[]>;
   selectAgent(input: DesktopAgentSelection): Promise<void>;
   newSession(): Promise<void>;
+  setConversationSync?(input: {sessionId: string; mode: ConversationSyncMode; summary?: string}): Promise<void>;
+  cancelPeer?(id: string): Promise<void>;
   answerApproval(input: AgentApprovalAnswer): Promise<void>;
   send(input: { id: string; text: string }): Promise<void>;
   peerSessions?(node?: string): Promise<Array<{ agent: DesktopAgentKind; sessionId: string; status?: string }>>;
   readPeerSession?(input: { node: string; session: { agent: DesktopAgentKind; sessionId: string } }): Promise<DesktopConversation>;
-  sendPeer?(input: Pick<DesktopPeerJob, "id" | "source" | "target" | "task" | "sourceSession" | "targetSession">): Promise<DesktopPeerJob>;
+  sendPeer?(input: Pick<DesktopPeerJob, "id" | "source" | "target" | "task" | "sourceSession" | "targetSession" | "workspace" | "constraints" | "acceptanceCriteria">): Promise<DesktopPeerJob>;
   peerStatus?(id: string): Promise<DesktopPeerJob>;
   chooseWorkspace(): Promise<void>;
   approve(id: string): Promise<void>;

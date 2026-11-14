@@ -91,6 +91,9 @@ createInterface({input:process.stdin}).on('line',line=>{
     await (await runtime.root.submit({ type: "input", content: "server original context" }, ctx)).wait(ctx);
     await agent.send({ id: randomUUID(), text: "target original context" }); await until(() => agent.snapshot(), value => !value.busy);
     const target = (await agent.sessions()).find(item => item.agent === "codex")!;
+    const privateCatalog = await request(`/api/peers/sessions?nodeId=${settings.get().nodeId}`) as { items: Array<{ sessionId: string }> };
+    assert.ok(!privateCatalog.items.some(item => item.sessionId === target.sessionId), "new local history is private until opt-in");
+    await agent.setConversationSync({ sessionId: target.sessionId, mode: "full" });
     await agent.newSession();
     await agent.send({ id: randomUUID(), text: "source original context" }); await until(() => agent.snapshot(), value => !value.busy);
     const source = (await agent.sessions()).filter(item => item.agent === "codex").at(-1)!;
