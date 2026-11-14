@@ -1,3 +1,4 @@
+import { SearchMessage } from "./SearchMessage.js";
 import { lazy, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ConversationItem } from "@assistant/contracts";
 import type { CardGroup } from "../chat/cards.js";
@@ -173,6 +174,7 @@ export function App() {
   const [, tick] = useState(0);
   const historyToggle = useRef<HTMLButtonElement>(null);
   const scroll = useRef<HTMLElement>(null), autoScroll = useRef(true), help = useRef<HTMLDialogElement>(null), service = useRef<HTMLDetailsElement>(null);
+  useLayoutEffect(() => { if (route.entryId && scroll.current) scroll.current.scrollTop = 0; }, [route.conversationId, route.entryId]);
   const draftValue = useRef(draft); draftValue.current = draft;
   const drafts = useRef(new Map<number | null, string>()), draftOwner = useRef<number | null>(route.conversationId ?? null);
   const lastTeamsChat = useRef(route.page === "teams" ? route.chatId : undefined);
@@ -215,7 +217,7 @@ export function App() {
     if (page === "chat" && !route.conversationId && !localChat) navigate({ page: "chat", group: null, conversationId: view.conversationId }, true);
   }, [view?.conversationId, page, localChat]);
   useEffect(() => { const timer = setInterval(() => tick(value => value + 1), 1000); return () => clearInterval(timer); }, []);
-  useLayoutEffect(() => { if (page === "chat" && autoScroll.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; }, [view, page, pendingMessages]);
+  useLayoutEffect(() => { if (page === "chat" && !route.entryId && autoScroll.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; }, [view, page, pendingMessages, route.entryId]);
   useEffect(() => {
     const closeOutside = (event: Event) => { if (service.current?.open && !service.current.contains(event.target as Node)) service.current.open = false; };
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && service.current?.open) { service.current.open = false; service.current.querySelector("summary")?.focus(); } };
@@ -309,7 +311,7 @@ export function App() {
         {page === "chat" && !emptyChat && <header className="conversation-header"><div className="conversation-heading"><WorkspaceBrand /><div className="conversation-heading-copy"><h1 className="conversation-title" title={conversationTitle}>{conversationTitle}</h1>{wechatConversation && <span className="conversation-channel-label"><Icon name="message-circle" />微信里的 Dee</span>}</div></div><div className="conversation-header-actions">{relatedAction}{!historyOpen && <button className="icon-button conversation-header-new" type="button" aria-label="新对话" title="新对话" disabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} onClick={() => { void startChat().catch(error => showToast(error.message, "error")); }}><Icon name="plus" /></button>}{headerActions}</div></header>}
         {page === "chat" && emptyChat && <div className="conversation-toolbar"><WorkspaceBrand />{!historyOpen && <button className="icon-button conversation-new-button" type="button" aria-label="新对话" title="新对话" disabled={!!view?.busy || !!view?.inbox || !!Object.keys(view?.live ?? {}).length} onClick={() => { void startChat().catch(error => showToast(error.message, "error")); }}><Icon name="plus" /><span>新对话</span></button>}{relatedAction}{headerActions}</div>}
         <section ref={scroll} hidden={page !== "chat" && page !== "data"} className={page === "data" ? group === "notes" ? "data-panel data-panel-notes" : "data-panel" : "messages-container"} id="messages-container" aria-label={page === "data" && group ? dataLabel : "与小 D 的对话"} onScroll={() => { if (page !== "chat") return; const el = scroll.current!; autoScroll.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
-          {page === "data" ? <header className="data-panel-heading"><div><h1>{dataLabel}</h1><p>{dataDescription}</p></div>{group === "tasks" && <button className="text-button" type="button" onClick={() => navigate({ page: "activity", group: null })}>全部动态<Icon name="arrow-up-right" /></button>}</header> : <div id="message-history" aria-live="polite"><ChatThread view={view} pendingMessages={pendingMessages} onRetry={draft.trim() ? undefined : prompt} onSettings={settings} onQuote={conversationPending ? undefined : quoteRecord} /></div>}
+          {page === "data" ? <header className="data-panel-heading"><div><h1>{dataLabel}</h1><p>{dataDescription}</p></div>{group === "tasks" && <button className="text-button" type="button" onClick={() => navigate({ page: "activity", group: null })}>全部动态<Icon name="arrow-up-right" /></button>}</header> : <div id="message-history" aria-live="polite">{route.conversationId && route.entryId && <SearchMessage conversationId={route.conversationId} entryId={route.entryId} />}<ChatThread view={view} pendingMessages={pendingMessages} onRetry={draft.trim() ? undefined : prompt} onSettings={settings} onQuote={conversationPending ? undefined : quoteRecord} /></div>}
           {localChat && <DesktopAgent local={local} />}
           <div hidden={page !== "chat" || localChat}><CardPanel view={conversationPending || localChat ? null : view} onPrompt={prompt} compactTasks={!wechatConversation} detailsHost={relatedHost} onRelatedCount={reportRelatedCount} onOpenDetails={openRelatedDetails} /></div>
           <WorkspaceData skillSource={route.skillSource} onSkillSourceChange={remote => navigate({ page: "data", group: "skills", ...(remote ? { skillSource: "remote" as const } : {}) })} group={page === "data" ? group : null} owner={route.conversationId ?? server.view?.conversationId ?? null} connect={connectDirectChat} headerActions={page === "data" && group === "notes" ? headerActions : null} />

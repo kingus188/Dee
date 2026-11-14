@@ -59,7 +59,7 @@ test("通知刷新后状态变更重新未读，另一来源的相同id保持独
   values = { ...values, items: [{ ...original, status: "failed", result: "需要重新处理" }, values.items[1]] };
   await act(async () => { document.querySelector<HTMLButtonElement>(".activity-refresh-button")!.click(); });
   assert.equal(document.querySelectorAll('[data-read="false"]').length, 2);
-  assert.match(document.querySelector(".inbox-section h2")!.textContent!, /需要关注/);
+  assert.match(document.querySelector(".activity-record-list .inbox-section h2")!.textContent!, /需要关注/);
 });
 
 test("存储写入失败保留当前页已读并明确显示持久化限制", async t => {
@@ -145,7 +145,7 @@ test("通知从真实个人数据展示待批准候选，只导航不批准，�
   assert.match(document.querySelector(".inbox-approvals")!.textContent!, /先说结论.*代码审查/);
   await act(async () => { document.querySelectorAll<HTMLButtonElement>(".inbox-approval-link").forEach(button => button.click()); });
   assert.deepEqual(groups, ["memory", "skills"]);
-  assert.ok(paths.every(path => ["/api/personal", "/api/workspace/activities", "/api/notifications/reads"].includes(path)));
+  assert.ok(paths.every(path => ["/api/personal", "/api/workspace/activities", "/api/workspace/attention", "/api/notifications/reads"].includes(path)));
   broken = true;
   await act(async () => { document.querySelector<HTMLButtonElement>(".activity-refresh-button")!.click(); });
   assert.match(document.querySelector('[role="alert"]')!.textContent!, /审批数据暂不可用/);

@@ -30,3 +30,11 @@ The caller ID comes from the runtime, never from tool arguments. Only active, in
 ## Validation
 
 Regression coverage includes legacy defaults, status validation, restart persistence, archive/restore and failed stop recovery, concurrent writes/archive, archived input rejection, paired session exclusion while stopping, pagination, source revocation and channel boundaries, and UI repeated actions/error/navigation handling. See the task's acceptance result for the exact run; real model behavior and browser/Electron visual acceptance are separate from automated tests.
+
+## Message body search
+
+History has separate **Title** and **Messages** modes. Messages searches sanitized user/assistant text in registered private web and synchronized desktop conversations. It does not search tool arguments/results, reasoning, attachments, external channels, or unsynchronized local history. The original title-only `list_conversations` and paged `read_conversation` tools retain their behavior.
+
+`search_conversations` accepts `query`, `status`, `archived`, `after`, `before`, `cursor`, and `limit`. Dates are Unix milliseconds: `after` inclusive, `before` exclusive; entries with unknown timestamps do not match a date filter. The UI date fields use local midnight. Results are ordered by descending conversation ID then descending entry ID, not globally by message date. Up to 1000 underlying entries are scanned per response; an empty page can still contain `nextCursor`. Continue until it is null. The cursor belongs to the current query and filters.
+
+Each result includes a privacy-filtered snippet, original identifiers, available message time and `#chat/{conversationId}/{entryId}`. Opening this link displays the full sanitized source message in a focused panel above the conversation, independently of the runtime's currently projected history. Archived sources can be inspected without restoring or restarting them. Both search and source reads recheck access before responding. Search uses the existing storage, not a new vector database or persistent index.

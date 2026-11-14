@@ -1,7 +1,7 @@
 import type { CardGroup } from "../chat/cards.js";
 
 export type WorkspacePage = "home" | "chat" | "teams" | "daylight" | "activity" | "data" | "reports" | "settings";
-export type WorkspaceRoute = { page: WorkspacePage; group: CardGroup | null; conversationId?: number; chatId?: string; taskId?: string; skillSource?: "remote"; execution?: "local" | "server" };
+export type WorkspaceRoute = { page: WorkspacePage; group: CardGroup | null; conversationId?: number; entryId?: number; chatId?: string; taskId?: string; skillSource?: "remote"; execution?: "local" | "server" };
 const groups: Record<string, CardGroup> = { memory: "memory", skills: "skills", notes: "notes", schedules: "tasks" };
 
 export function readWorkspaceRoute(hash: string): WorkspaceRoute {
@@ -30,7 +30,7 @@ export function readWorkspaceRoute(hash: string): WorkspaceRoute {
   if (Object.hasOwn(groups, name)) return { page: "data", group: groups[name], conversationId };
   const pages: Record<string, WorkspacePage> = { today: "home", chat: "chat", tasks: "daylight", activity: "activity", reports: "reports", settings: "settings" };
   const page = Object.hasOwn(pages, name) ? pages[name] : undefined;
-  return page ? { page, group: null, ...(page === "chat" ? { conversationId } : {}) } : { page: "home", group: null };
+  return page ? { page, group: null, ...(page === "chat" ? { conversationId, ...(extra && /^\d+$/.test(extra) && Number.isSafeInteger(Number(extra)) && Number(extra) > 0 ? { entryId: Number(extra) } : {}) } : {}) } : { page: "home", group: null };
 }
 
 export function workspaceHash(route: WorkspaceRoute): string {
@@ -39,5 +39,5 @@ export function workspaceHash(route: WorkspaceRoute): string {
   const name = route.page === "data" ? route.group === "tasks" ? "schedules" : route.group ?? "memory" : route.page === "home" ? "today" : route.page === "daylight" ? "tasks" : route.page;
   if (route.page === "teams" && route.chatId) return `#teams/${encodeURIComponent(route.chatId)}`;
   if (route.page === "daylight" && route.taskId) return `#tasks/${encodeURIComponent(route.taskId)}`;
-  return `#${name}${route.conversationId && (route.page === "chat" || (route.page === "data" && route.group === "tasks")) ? `/${route.conversationId}` : ""}`;
+  return `#${name}${route.conversationId && (route.page === "chat" || (route.page === "data" && route.group === "tasks")) ? `/${route.conversationId}${route.page === "chat" && route.entryId ? `/${route.entryId}` : ""}` : ""}`;
 }

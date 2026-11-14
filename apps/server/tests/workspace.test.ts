@@ -11,6 +11,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import type { WorkspaceActivities, WorkspaceMail } from "@assistant/contracts";
 import type { AppContext } from "../dist/application/context.js";
 import { createMailService } from "../dist/mail-service.js";
+import { createWorkspace } from "../dist/application/workspace.js";
 import { createApi } from "../dist/application/api.js";
 import { readConfig } from "../dist/config.js";
 import { openMailStore } from "../dist/mail-store.js";
@@ -181,4 +182,49 @@ test("归档保留历史摘要，删除先撤回来源且恢复列表不会复�
   // An accidental/replayed index insertion cannot clear a privacy tombstone.
   await app.root.commit(async tx => { (await tx.doc(Index)).items.push({ id, title: "Restored index", createdAt: new Date().toISOString() }); }, app.ctx);
   assert.equal(app.episodeStore.sourceAllowed(source), false);
+});
+
+test("attention aggregates only visible private records and never retries delivery", async t => {
+  const { app, api, call } = await fixture(t);
+  const ids = await app.root.commit(async tx => {
+    const ids: ConversationId[] = [];
+    for (let n = 0; n < 5; n++) ids.push((await tx.createConversation({ ownership: { kind: "ownerless" } })).id);
+    const index = await tx.doc(Index);
+    ids.forEach((id, n) => index.items.push({ id, title: `owner ${n}`, createdAt: "2026-01-01", status: "waiting", ...(n === 1 ? { channel: "teams" } : {}), ...(n === 2 ? { archivedAt: "2026-01-02" } : {}), ...(n === 4 ? { archivingAt: "2026-01-02" } : {}) }));
+    return ids;
+  }, app.ctx);
+  app.episodeStore.revokeSource(`conv:${ids[3]}`);
+  const result = (await call("/api/workspace/attention")).data as import("@assistant/contracts").WorkspaceAttention;
+  assert.equal(result.total, 2);
+  assert.deepEqual(new Set(result.items.map(item => item.conversationId)), new Set([ids[0], ids[4]]));
+  assert.equal(result.items[0].reasons[0], "Archive pending");
+  await api.dispatch("POST", new URL(`/api/conversations/${ids[0]}/status`, "http://localhost"), { status: "completed" });
+  assert.equal(((await call("/api/workspace/attention")).data as import("@assistant/contracts").WorkspaceAttention).total, 1);
+});
+
+
+test("attention rechecks visibility after asynchronous management reads", async t => {
+  const { app, api } = await fixture(t);
+  for (const change of ["remove", "archive", "external", "revoke"] as const) {
+    const id = await app.root.commit(async tx => {
+      const conversation = await tx.createConversation({ ownership: { kind: "ownerless" } });
+      (await tx.doc(Index)).items.push({ id: conversation.id, title: change, createdAt: "2026-01-01", status: "waiting" });
+      return conversation.id;
+    }, app.ctx);
+    const workspace = createWorkspace(app as unknown as AppContext, api.conversations, { get: async conversation => {
+      if (conversation.id === id) {
+        if (change === "revoke") app.episodeStore.revokeSource(`conv:${id}`);
+        else await app.root.commit(async tx => {
+          const index = await tx.doc(Index);
+          const item = index.items.find(item => item.id === id)!;
+          if (change === "remove") index.items = index.items.filter(item => item.id !== id);
+          if (change === "archive") item.archivedAt = "2026-01-02";
+          if (change === "external") item.channel = "teams";
+        }, app.ctx);
+      }
+      return { schedules: [], reminders: [], background: [] };
+    } });
+    const result = await workspace.attention();
+    assert.ok(!result.items.some(item => item.conversationId === id), change);
+  }
 });

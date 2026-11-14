@@ -16,6 +16,7 @@ export function RunDetails({ run, pending, onAction }: { run: UnifiedRun; pendin
   return <details className="execution-detail"><summary>{states[run.status]} · {run.startedAt ? fmt(run.startedAt) : "开始时间未记录"}</summary>
     <dl className="related-task-fields">
       <div><dt>来源</dt><dd>{sources[run.source]} · 会话 #{run.conversationId}</dd></div>
+      <div><dt>运行管理</dt><dd>Server · 服务端编排与持久记录；工具可能在其他环境执行，不代表外部消息送达</dd></div>
       <div><dt>任务</dt><dd>{run.taskId}</dd></div><div><dt>本次执行</dt><dd>{run.id}</dd></div>
       {run.workerConversationId !== undefined && <div><dt>执行会话</dt><dd>#{run.workerConversationId}</dd></div>}
       {run.finishedAt !== null && <div><dt>结束</dt><dd>{fmt(run.finishedAt)}</dd></div>}

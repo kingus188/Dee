@@ -114,3 +114,48 @@ test("reader queries actual SQLite conversation entries and survives reopening",
     assert.ok(second.messages.length || second.nextBeforeEntryId, "bounded entry pagination must advance across internal entries");
   } finally { await runtime.harness.close(BACKGROUND_CONTEXT); await rm(dataDir, { recursive: true, force: true }); }
 });
+
+test("body search finds full sanitized text beyond read truncation and paginates", async () => {
+  const f = fixture();
+  f.desktop({ messages: [{ id: "one", role: "user", text: "x".repeat(2500) + "needle first" }, { id: "two", role: "assistant", text: "needle second" }] });
+  const first = await f.reader.search(2, { query: "needle", limit: 1 });
+  assert.equal(first.items[0].messageId, "two");
+  assert.equal(first.items[0].href, "#chat/7/2");
+  const second = await f.reader.search(2, { query: "needle", limit: 1, cursor: first.nextCursor! });
+  assert.equal(second.items[0].messageId, "one");
+  assert.match(second.items[0].snippet, /needle first/);
+  assert.ok(second.items[0].snippet.length < 600);
+  assert.equal((await f.reader.search(2, { query: "needle", after: 1 })).items.length, 0, "unknown message times are not invented");
+});
+
+test("body search enforces caller, archive, status, time, tombstones and secret redaction", async () => {
+  const f = fixture();
+  await assert.rejects(f.reader.search(3, { query: "answer" }), /不能查询/);
+  const archived = await f.reader.search(2, { query: "answer", archived: true, status: "completed", after: 10, before: 11 });
+  assert.deepEqual(archived.items.map(hit => hit.conversation.id), [5]);
+  assert.equal((await f.reader.search(2, { query: "answer", before: 10 })).items.length, 0);
+  assert.equal((await f.reader.search(2, { query: "synthetic-test" })).items.length, 0);
+  assert.equal((await f.reader.search(2, { query: "tool secret" })).items.length, 0);
+  f.revoked.add("conv:7:5");
+  assert.deepEqual((await f.reader.search(2, { query: "answer" })).items.map(hit => hit.conversation.id), [2]);
+  await assert.rejects(f.reader.search(2, { query: " " }), /无效/);
+  await assert.rejects(f.reader.search(2, { query: "answer", cursor: "wrong" }), /无效/);
+  await assert.rejects(f.reader.search(2, { query: "answer", after: 12, before: 1 }), /无效/);
+});
+
+test("body search rechecks source access while scanning", async () => {
+  const f = fixture();
+  f.onRead(() => f.bound.add(7));
+  await assert.rejects(f.reader.search(2, { query: "answer" }), /访问范围已变化/);
+});
+
+test("search continuation advances after an empty scan budget and owner reads original long text", async () => {
+  const f = fixture();
+  f.desktop({ messages: Array.from({ length: 1002 }, (_, index) => ({ id: String(index), role: "user", text: index === 0 ? "x".repeat(2500) + "needle" : "ordinary" })) });
+  const first = await f.reader.search(2, { query: "needle" });
+  assert.equal(first.items.length, 0); assert.ok(first.nextCursor);
+  const second = await f.reader.search(2, { query: "needle", cursor: first.nextCursor!, limit: 1 });
+  assert.equal(second.items[0].entryId, 1);
+  const original = await f.reader.readOwner({ conversationId: 7, beforeEntryId: 2, limit: 1 });
+  assert.match(original.messages[0].text, /needle$/); assert.equal(original.messages[0].truncated, false);
+});

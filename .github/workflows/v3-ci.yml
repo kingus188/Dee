@@ -1,5 +1,6 @@
 name: workspace checks
 on:
+  workflow_dispatch:
   push:
     branches: [main, dev, "feat/v3-task-center"]
   pull_request:
@@ -7,7 +8,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -34,3 +35,8 @@ jobs:
       - run: pnpm run check
       - run: pnpm --recursive --workspace-concurrency=1 run build
       - run: pnpm test
+
+      - name: Build server container
+        run: docker build --target server -t dee-server:ci .
+      - name: Build web container
+        run: docker build --target web -t dee-web:ci .

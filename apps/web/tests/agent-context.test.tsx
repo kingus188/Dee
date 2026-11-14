@@ -17,3 +17,13 @@ test("handoff details show omitted history and unresolved provider capability wi
   assert.match(html, /等待 Agent 协议确认/);
   assert.doesNotMatch(html, /已提交执行/);
 });
+
+test("idle snapshots without capabilities, handoff or runs do not occupy chat space", () => {
+  assert.equal(renderToStaticMarkup(<AgentContext snapshot={{ nodeId: "local", busy: false } as DesktopAgentSnapshot} />), "");
+});
+
+test("recorded local execution keeps scope details available after execution ends", () => {
+  const html = renderToStaticMarkup(<AgentContext snapshot={{ nodeId: "local", busy: false, runs: [{ id: "run" }] } as DesktopAgentSnapshot} />);
+  assert.match(html, /Local · local/);
+  assert.match(html, /历史同步/);
+});

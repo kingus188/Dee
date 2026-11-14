@@ -50,3 +50,7 @@ export type ConversationView = {
 export type MessageRequest = { text?: string; requestId?: string; mode?: "steer" | "followUp"; attachments?: import("./attachments.js").AttachmentInput[] };
 export type MessageResponse = { submissionId: number };
 export type MessageStatus = MessageResponse & { status: "queued" | "placed" | "done" | "unanswered"; entryId?: number };
+
+export type ConversationSearchQuery = { query: string; status?: ConversationStatus; archived?: boolean; after?: number; before?: number; cursor?: string; limit?: number };
+export type ConversationSearchHit = { conversation: Pick<ConversationItem, "id" | "title" | "createdAt">; entryId: number; messageId: string; role: "user" | "assistant"; snippet: string; timestamp?: number; href: string };
+export type ConversationSearchResult = { items: ConversationSearchHit[]; nextCursor: string | null; scanned: number; warning: string };

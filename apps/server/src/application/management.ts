@@ -10,7 +10,7 @@ import type { createViews } from "./views.js";
 
 export function createManagement(context: AppContext, { simplifyView }: ReturnType<typeof createViews>) {
  const { harness, ctx, tasks } = context;
- async function get(conversation: Conversation): Promise<Management> {
+ async function get(conversation: Conversation, options: { retryDelivery?: boolean } = {}): Promise<Management> {
 			const [schedules, background, reminders, executions, delegations, allGoals, reviews] = await Promise.all([
 				harness.snapshot(Schedules, conversation.id, ctx),
 				harness.snapshot(BackgroundJobs, conversation.id, ctx),
@@ -43,7 +43,7 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
 			}));
 			const executionItems = (executions?.items ?? []).map(run => ({ ...run }));
             for (const run of executionItems) {
-              if (!run.deliveryError || run.status !== "done" || !run.daylightTaskId) continue;
+              if (options.retryDelivery === false || !run.deliveryError || run.status !== "done" || !run.daylightTaskId) continue;
               try {
                 const deliveryStatus = await applyExecutionResult(context.daylight, run);
                 await conversation.commit(async tx => { const stored = (await tx.doc(Executions, conversation.id)).items.find(item => item.id === run.id); if (stored) { delete stored.deliveryError; stored.deliveryStatus = deliveryStatus; } }, ctx);

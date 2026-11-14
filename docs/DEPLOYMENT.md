@@ -1,6 +1,6 @@
 # Docker / VPS 部署与数据保护
 
-面向已经完成 [本机配置与运行](GETTING_STARTED.md)、准备在自己的 VPS 上长期运行的用户。当前是单用户 Agent，部署默认以 **Docker Compose + PostgreSQL/pgvector 业务数据卷 + SQLite 会话数据卷 + HTTPS 反向代理** 为基础。待办与日报使用 PostgreSQL；Durable 会话、设置和消息等继续使用 SQLite。请勿把一次模拟进程恢复测试等同于灾难恢复。
+面向已经完成 [本机配置与运行](GETTING_STARTED.md)、准备在自己的 VPS 上长期运行的用户。当前是单用户 Agent，部署默认以 **Docker Compose + PostgreSQL/pgvector 业务数据卷 + SQLite 会话数据卷 + HTTPS 反向代理** 为基础。个人笔记、待办与日报使用 PostgreSQL；Durable 会话、设置和消息等继续使用 SQLite。请勿把一次模拟进程恢复测试等同于灾难恢复。
 
 ## 1. 前置检查
 
@@ -89,7 +89,7 @@ docker compose --profile wechat up -d
 
 **禁止以 `docker compose down -v` 升级。** `-v` 会删除项目命名卷，可能永久丢失 PostgreSQL 业务数据、SQLite 会话与微信登录状态。
 
-项目现阶段没有内置自动化、已演练的 SQLite 在线备份任务。建议：
+项目提供手动停写双存储备份工具（见下方），不是在线自动备份。以下 Compose 运营流程仍适用于容器卷：
 
 1. 停止写入后再备份（最简单的一致性策略）。执行 `docker compose --profile wechat stop`；若没启用微信，仅停止主服务即可。
 2. 备份前检查 `docker volume ls` 和 `docker compose ps -a`，识别本项目数据卷，并保证外部备份介质有剩余空间。
@@ -128,7 +128,35 @@ docker compose up -d --build
 docker compose ps
 ```
 
-涉及功能分支合并、数据库格式或外部通道变化时，必须核对本次版本说明与 GitHub CI，再升级。**F6 自动备份与灾难恢复尚未在主分支实现**，当前只能采取上述运营流程。
+涉及功能分支合并、数据库格式或外部通道变化时，必须核对本次版本说明与 GitHub CI，再升级。自动定时备份仍未实现；当前使用上述运营流程或下方手动工具，并独立验证恢复。
+
+### 手动双存储备份与隔离恢复
+
+在能访问 `DATA_DIR` 的维护环境使用 `scripts/data-backup.mjs`（Node ≥22.19，以及与数据库兼容的 `pg_dump` / `pg_restore`）。先停止所有写入者，包括 API、桌面同步和已启用的外部消息桥，数据库本身保持运行。工具不会擅自停止服务，`--writers-stopped` 是操作者的明确确认，不是自动探测。
+
+从安全环境注入 `DATABASE_URL`，不要放入命令行、日志或 Git。工具不读取 `.env`，不导出角色密码哈希。备份包含整个 runtime 目录的私人数据，存储位置应在仓库和 `DATA_DIR` 之外；目录已存在时拒绝覆盖。
+
+```bash
+node scripts/data-backup.mjs backup /data /secure-backups/dee-RELEASE \
+  --writers-stopped --revision DEPLOYED_GIT_SHA
+node scripts/data-backup.mjs verify /secure-backups/dee-RELEASE
+```
+
+将 `DEPLOYED_GIT_SHA` 替换为正在运行版本的十六进制提交号（不是准备发布的新版本）。产物包含 runtime 快照、PostgreSQL 自定义格式备份和 SHA-256 manifest。工具检查 SQLite 完整性、归档可读性和文件校验和；失败时不写成功 manifest，应检查原因后选择新目录重试。不要把 `verify` 成功视作完整应用恢复成功。
+
+先在全新的隔离目录、空数据库中演练，绝不覆盖生产目录或在生产库执行恢复。只恢复 SQLite 不会恢复 PostgreSQL 的笔记和待办：
+
+```bash
+node scripts/data-backup.mjs restore-runtime /secure-backups/dee-RELEASE /isolated/new-data
+# 使用维护环境的 PGHOST/PGPORT/PGUSER/PGPASSFILE，目标为新建空库。
+createdb dee_restore_check
+pg_restore --exit-on-error --single-transaction --no-owner --no-privileges \
+  --dbname dee_restore_check /secure-backups/dee-RELEASE/business.dump
+```
+
+恢复前在隔离实例准备兼容扩展（如 `vector`）及应用角色，恢复后按部署要求重新授予业务账号所需权限。工具不保存/恢复原角色密码与 ACL。用相同应用版本连接两份恢复数据，禁用真实模型和外部发送，核对笔记、对话、状态、待办和幂等标记，之后才进行升级演练。微信独立状态/媒体卷和其他 `DATA_DIR` 外部资源仍需按上面的步骤另行备份。
+
+备份文件校验不能防御有意篡改 manifest 的攻击；应放在受控、离机存储中。一次性的隔离 fixture 演练不证明生产数据或全部外部资源已经可恢复。
 
 ## 5. 运行验收
 

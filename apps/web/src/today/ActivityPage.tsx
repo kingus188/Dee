@@ -1,3 +1,4 @@
+import { AttentionSection } from "./AttentionSection.js";
 import { useState } from "react";
 import type { PersonalData, WorkspaceActivities, WorkspaceActivity } from "@assistant/contracts";
 import type { CardGroup } from "../chat/cards.js";
@@ -50,6 +51,7 @@ export function ActivityPage({ active, onConversation, onManage, onSettings, onG
       <div><h1>通知{resource.data && unread > 0 && <span className="inbox-title-count">{unread}<span className="sr-only"> 条未读</span></span>}</h1></div>
       <div className="inbox-header-actions">{onSettings && <button type="button" className="icon-button" aria-label="通知投递设置" title="通知投递设置" onClick={onSettings}><Icon name="settings-2" /></button>}<button type="button" className="activity-refresh-button" disabled={loading} onClick={refreshAll}><Icon name="rotate-ccw" />{loading ? "正在更新" : "刷新"}</button></div>
     </header>
+    <AttentionSection active={active} onConversation={onConversation} onManage={onManage} />
     {onGroup && <>
       <ResourceFeedback resource={personal} label="待批准的记忆与技能" scope="activity" />
       {pendingMemory.length + pendingSkills.length > 0 && <section className="inbox-section inbox-approvals" aria-labelledby="inbox-approvals-title">

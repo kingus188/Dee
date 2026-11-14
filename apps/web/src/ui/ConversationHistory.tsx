@@ -1,3 +1,4 @@
+import { ConversationSearch } from "./ConversationSearch.js";
 import { useEffect, useRef, useState } from "react";
 import type { ConversationItem } from "@assistant/contracts";
 import { request } from "../api/request.js";
@@ -17,6 +18,7 @@ export function ConversationHistory({ active, currentId, workingId, onOpen, onCl
 }) {
   const panel = useRef<HTMLElement>(null);
   const [items, setItems] = useState<ConversationItem[]>([]), [query, setQuery] = useState("");
+  const [bodySearch, setBodySearch] = useState(false);
   const [older, setOlder] = useState(false), [archived, setArchived] = useState(false);
   const generation = useRef(0);
   const [error, setError] = useState(""), [ready, setReady] = useState(false), [revision, refresh] = useState(0);
@@ -74,10 +76,12 @@ export function ConversationHistory({ active, currentId, workingId, onOpen, onCl
       {working && <details className="history-working" open><summary>运行中<span>1</span><Icon name="chevron-right" /></summary>{row(working)}</details>}
       {!needle && history.length > 6 && <button className="history-older" type="button" aria-expanded={older} onClick={() => setOlder(value => !value)}><span>{older ? "收起更早的对话" : "显示更早的对话"}</span><span>{history.length - 6}</span><Icon name={older ? "chevron-down" : "chevron-right"} /></button>}
     </>}>
+      <div className="history-archive-filter" role="group" aria-label="Search scope"><button type="button" aria-pressed={!bodySearch} onClick={() => setBodySearch(false)}>Title</button><button type="button" aria-pressed={bodySearch} onClick={() => setBodySearch(true)}>Messages</button></div>
       <div className="history-archive-filter" role="group" aria-label="对话列表范围">
         <button type="button" aria-pressed={!archived} onClick={() => { setArchived(false); setOlder(false); }}>当前对话</button>
         <button type="button" aria-pressed={archived} onClick={() => { setArchived(true); setOlder(false); }}>Archived</button>
       </div>
+      {bodySearch ? <ConversationSearch query={query} archived={archived} /> : <>
       {localFound && !local?.busy && <section aria-label="本机对话"><h2 className="history-heading">本机</h2>{localRow}</section>}
       {!ready && !error && <p role="status">正在读取历史…</p>}
       {error && <p role="alert">{error}<button className="text-button" type="button" onClick={() => refresh(value => value + 1)}>重新读取</button></p>}
@@ -86,6 +90,7 @@ export function ConversationHistory({ active, currentId, workingId, onOpen, onCl
         <h2 className="history-heading">{group.label}</h2>
         {group.items.map(row)}
       </section>)}
+      </>}
     </ConversationHistoryContent>
   </aside>;
 }

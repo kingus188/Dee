@@ -1,3 +1,4 @@
+import { searchConversations, readSearchMessage } from "../conversation-search-api.js";
 import { Index, Meta, conversationStatus } from "@assistant/runtime";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { personalError, EditConflictError, Notes, editNotesInTx, Goals, createGoalInTx, controlGoalInTx } from "@assistant/features";
@@ -36,6 +37,8 @@ export function createApi(context: AppContext) {
   }
   async function dispatchInner(method: string, url: URL, body: Record<string, unknown>, peerAuthorized: boolean) {
     const path = url.pathname;
+    if (method === "GET" && path === "/api/conversations/search/message") return { status: 200, data: await readSearchMessage(context, url) };
+    if (method === "GET" && path === "/api/conversations/search") return { status: 200, data: await searchConversations(context, url) };
     if (path === "/api/notes") {
       if (method === "GET") return { status: 200, data: await context.personalNotes.get() };
       if (method === "POST") return { status: 200, data: await context.personalNotes.edit(body.index, body.text, body.base) };
@@ -66,6 +69,7 @@ export function createApi(context: AppContext) {
         throw error;
       }
     }
+    if (method === "GET" && path === "/api/workspace/attention") return { status: 200, data: await workspace.attention() };
     if (method === "GET" && path === "/api/workspace/activities") return { status: 200, data: await workspace.activities() };
     if (method === "GET" && path === "/api/workspace/mail") return { status: 200, data: workspace.mail() };
     const executionPath = path.match(/^\/api\/daylight\/tasks\/([0-9a-f-]+)\/(execute|executions)$/i);

@@ -1,5 +1,7 @@
-import type { ExecutionRun, WorkspaceActivities, WorkspaceActivity, WorkspaceMail } from "@assistant/contracts";
+import type { AttentionItem, WorkspaceAttention, ExecutionRun, WorkspaceActivities, WorkspaceActivity, WorkspaceMail } from "@assistant/contracts";
 import { Executions } from "@assistant/features";
+import { WechatState } from "@assistant/channel-wechat";
+import { attentionItems } from "./attention.js";
 import { Index } from "@assistant/runtime";
 import type { AppContext } from "./context.js";
 import type { createConversations } from "./conversations.js";
@@ -26,7 +28,7 @@ function compareActivities(a: WorkspaceActivity, b: WorkspaceActivity): number {
 }
 
 export function createWorkspace(
-  { harness, ctx, mail }: Pick<AppContext, "harness" | "ctx" | "mail">,
+  { harness, ctx, mail, root, episodeStore }: Pick<AppContext, "harness" | "ctx" | "mail" | "root" | "episodeStore">,
   conversations: Pick<ReturnType<typeof createConversations>, "getConversation">,
   management: Pick<ReturnType<typeof createManagement>, "get">,
 ) {
@@ -60,9 +62,36 @@ export function createWorkspace(
     items.sort(compareActivities);
     return { items: items.slice(0, 200), total: items.length, truncated: items.length > 200 };
   }
+  async function attention(): Promise<WorkspaceAttention> {
+    async function visible() {
+      const index = await harness.snapshot(Index, ctx);
+      const bindings = (await harness.snapshot(WechatState, ctx))?.bindings ?? {};
+      const bound = new Set(Object.values(bindings).map(binding => Number(binding.conversationId)));
+      return (index?.items ?? []).filter(owner => owner.id !== root.id && !owner.archivedAt && !bound.has(owner.id)
+        && episodeStore.sourceAllowed(`conv:${owner.id}`) && (!owner.channel || ["web", "desktop"].includes(owner.channel)));
+    }
+    const observations = new Map<number, { revision: number; data: Awaited<ReturnType<typeof management.get>> }>();
+    for (const owner of await visible()) {
+      const revision = episodeStore.sourceRevision(`conv:${owner.id}`);
+      const conversation = await conversations.getConversation(owner.id);
+      observations.set(owner.id, { revision, data: await management.get(conversation, { retryDelivery: false }) });
+    }
+    const items: AttentionItem[] = [];
+    // Async reads must not return a source removed, revoked, archived or rebound in the meantime.
+    // Use the fresh owner's title/state rather than a pre-await snapshot.
+    for (const owner of await visible()) {
+      const observation = observations.get(owner.id);
+      if (!observation || observation.revision !== episodeStore.sourceRevision(`conv:${owner.id}`)
+        || !episodeStore.sourceAllowed(`conv:${owner.id}`, observation.revision)) continue;
+      items.push(...attentionItems(owner, observation.data));
+    }
+    items.sort((a, b) => Number(b.reasons.includes("Archive pending")) - Number(a.reasons.includes("Archive pending"))
+      || (b.at ?? 0) - (a.at ?? 0) || a.id.localeCompare(b.id));
+    return { items: items.slice(0, 200), total: items.length, truncated: items.length > 200 };
+  }
   function recentMail(): WorkspaceMail {
     const { enabled, connected, offline, syncing, lastSuccessAt, error } = mail.status();
     return { status: { enabled, connected, offline, syncing, lastSuccessAt, error }, messages: mail.list({ limit: 6 }) };
   }
-  return { activities, mail: recentMail };
+  return { activities, attention, mail: recentMail };
 }

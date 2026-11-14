@@ -3,9 +3,15 @@ import { agentNames } from "./AgentPicker.js";
 
 export function AgentContext({ snapshot }: { snapshot: DesktopAgentSnapshot }) {
   const capabilities = snapshot.capabilities, handoff = snapshot.handoff;
-  if (!capabilities && !handoff) return null;
+  if (!capabilities && !handoff && !snapshot.busy && !snapshot.runs?.length) return null;
   return <details className="desktop-agent-context">
-    <summary>{handoff ? `${agentNames[handoff.source]} → ${agentNames[handoff.target]} · 上下文交接` : "Agent 能力"}</summary>
+    <summary>{handoff ? `${agentNames[handoff.source]} → ${agentNames[handoff.target]} · 上下文交接` : "执行位置与 Agent 能力"}</summary>
+    <dl className="related-task-fields">
+      <div><dt>执行位置</dt><dd>Local · {snapshot.nodeId}</dd></div>
+      <div><dt>服务端连接</dt><dd>{snapshot.serverConnected ? "Connected" : "Disconnected"}</dd></div>
+      <div><dt>历史同步</dt><dd>Unknown · 连接状态不代表当前历史已同步</dd></div>
+      <div><dt>控制范围</dt><dd>本机执行在此客户端控制；未同步历史不受服务端归档控制。本机结果暂不支持持久人工验收。</dd></div>
+    </dl>
     {handoff && <>
       <p>{handoff.status === "pending" ? "下次发送时携带" : "已提交执行（不代表执行成功）"}：最近 {handoff.includedMessages} / {handoff.totalMessages} 条文字消息{handoff.omittedMessages > 0 ? `，${handoff.omittedMessages} 条未携带` : ""}。</p>
       <p>不携带附件、工具执行状态或隐藏推理；当前用户消息完整保留。</p>

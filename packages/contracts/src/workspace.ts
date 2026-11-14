@@ -21,3 +21,15 @@ export type WorkspaceMail = {
   status: Pick<MailStatus, "enabled" | "connected" | "offline" | "syncing" | "lastSuccessAt" | "error">;
   messages: MailMessage[];
 };
+
+export type AttentionItem = {
+  id: string;
+  conversationId: number;
+  conversationTitle: string;
+  text: string;
+  reasons: Array<"Waiting" | "Archive pending" | "Failed" | "Interrupted" | "Review pending" | "Delivery unknown" | "Delivery failed" | "Stop pending">;
+  target: "conversation" | "tasks";
+  runId?: string;
+  at: number | null;
+};
+export type WorkspaceAttention = { items: AttentionItem[]; total: number; truncated: boolean };
