@@ -1,14 +1,11 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import type { AgentActivity, DesktopAgentSnapshot, ExternalAgentState } from "@assistant/contracts";
+import type { StoredAgentSession } from "./session-record.js";
+export type { StoredAgentSession } from "./session-record.js";
+import { validReviewHistory } from "./reviews.js";
 import { object } from "./types.js";
 
-export type StoredAgentSession = {
-  id: string; binding: string; nativeId?: string; status: ExternalAgentState["status"];
-  messages: DesktopAgentSnapshot["messages"]; activities: AgentActivity[]; error?: string;
-  requests?: Record<string, { status: "running" | "done" | "failed" | "cancelled" | "interrupted" }>;
-};
 export function openAgentSessionStore(directory: string) {
   const path = join(directory, "external-agent-sessions.json");
   const records = join(directory, "external-agent-sessions");
@@ -34,6 +31,7 @@ export function openAgentSessionStore(directory: string) {
         if (typeof item.id !== "string" || typeof item.binding !== "string" || (item.nativeId !== undefined && typeof item.nativeId !== "string") || !["idle", "running", "waiting", "done", "failed", "cancelled", "interrupted"].includes(String(item.status)) || !Array.isArray(item.messages) || !Array.isArray(item.activities) || (item.error !== undefined && typeof item.error !== "string")) throw new Error("会话格式无效");
         for (const message of item.messages) if (!message || typeof message.id !== "string" || !["user", "assistant"].includes(message.role) || typeof message.text !== "string") throw new Error("消息格式无效");
         for (const activity of item.activities) if (!activity || typeof activity.id !== "string" || typeof activity.title !== "string" || !["running", "done", "failed"].includes(activity.status) || (activity.detail !== undefined && typeof activity.detail !== "string")) throw new Error("活动格式无效");
+        if (item.reviews !== undefined && !validReviewHistory(item.reviews)) throw new Error("验收记录无效");
         if (item.requests !== undefined && (!item.requests || typeof item.requests !== "object" || Array.isArray(item.requests) || Object.values(item.requests).some(request => !request || typeof request !== "object" || !["running", "done", "failed", "cancelled", "interrupted"].includes(String((request as { status?: unknown }).status))))) throw new Error("请求记录无效");
       }
       if (new Set((saved.sessions as StoredAgentSession[]).map(session => session.id)).size !== (saved.sessions as StoredAgentSession[]).length) throw new Error("会话 ID 重复");

@@ -1,3 +1,4 @@
+import { resultVersion } from "./reviews.js";
 import type { DesktopAgentRun, DesktopAgentKind } from "@assistant/contracts";
 import type { StoredAgentSession } from "./store.js";
 
@@ -19,11 +20,15 @@ export function nativeRuns(session: StoredAgentSession | undefined, agent: Exclu
     const recorded = session.requests?.[message.id]?.status;
     const status = recorded === "done" ? "succeeded" : recorded ?? "unknown";
     const result = results.get(message.id) ?? "";
+    const version = recorded === "done" ? resultVersion(session, message.id, result) : undefined;
+    const reviews = session.reviews?.[message.id] ?? [];
+    const latest = reviews.findLast(review => review.resultVersion === version);
     return {
       id: message.id, sessionId: session.id, nativeSessionId: session.nativeId, agent, status,
       request: message.text, result: result || null,
       cancellation: recorded === "cancelled" ? "confirmed" : recorded === "interrupted" ? "unknown" : "not_requested",
-      review: "unsupported",
+      resultVersion: version, review: version ? latest?.decision ?? "pending" : "unsupported",
+      reviewRevision: reviews.length, reviews: structuredClone(reviews),
     };
   });
 }

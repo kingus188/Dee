@@ -68,7 +68,8 @@ createInterface({input:process.stdin}).on('line',line=>{
 });`);
   await chmod(executable, 0o700);
   const settings = openAgentSettings(desktop); settings.selectAgent({ kind: "codex", config: { executable, args: [], permission: "default" } });
-  const transport = createAgentRequest({ origin: () => origin, serverId: () => origin, username: () => undefined, password: () => undefined, token: () => token, fetch, socket: url => new WebSocket(url) });
+  let connectedSocket: WebSocket | undefined;
+  const transport = createAgentRequest({ origin: () => origin, serverId: () => origin, username: () => undefined, password: () => undefined, token: () => token, fetch, socket: url => (connectedSocket = new WebSocket(url)) });
   let dropAdmissionResponse = false, dropped = 0;
   const request: AgentRequest = Object.assign(async (path: string, body?: unknown, serverId?: string) => {
     const response = await transport(path, body, serverId);
@@ -132,6 +133,21 @@ createInterface({input:process.stdin}).on('line',line=>{
     assert.ok(catalogResponse.items.some(item => item.sessionId === target.sessionId));
     await assert.rejects(request("/api/peers/messages", { ...outbound, task: "changed" }));
     assert.equal((await peers.list()).filter((job: PeerJob) => job.id === outbound.id).length, 1);
+    const cancelled = await peers.submit({ id: randomUUID(), source: "server", target: settings.get().nodeId, task: "never execute this cancelled fixture" });
+    await until(() => agent.snapshot(), value => value.jobs.some(job => job.id === cancelled.id));
+    await agent.close();
+    const pendingStop = await peers.requestCancel(cancelled.id);
+    assert.ok(pendingStop.cancellation?.requestedAt);
+    assert.equal(pendingStop.cancellation?.confirmedAt, undefined, "server cannot confirm an offline desktop stop");
+    assert.equal(pendingStop.status, "queued");
+    connectedSocket!.close(); // Exercise a real client disconnect without shutting down the server.
+    agent = await openDesktopAgent(options);
+    const confirmedStop = await until(() => peers.get(cancelled.id), value => Boolean(value?.cancellation?.confirmedAt));
+    assert.equal(confirmedStop!.status, "failed");
+    assert.equal(nativeCalls, nativeBefore, "reconnection and cancellation never start an unapproved task");
+    assert.equal(serverCalls, 3, "reconnection does not replay completed execution");
+    assert.equal((await peers.list()).filter(job => job.id === cancelled.id).length, 1);
+
   } finally {
     release?.(); await agent.close(); transport.close(); http.closeSockets(); http.closeAllConnections(); await new Promise<void>(resolve => http.close(() => resolve()));
     await peers.close(); await runtime.harness.close(ctx); await rm(directory, { recursive: true, force: true });

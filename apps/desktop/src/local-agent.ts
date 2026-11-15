@@ -1,3 +1,6 @@
+import { readSelectedArtifact } from "./selected-artifact.js";
+import type { PeerArtifact } from "@assistant/contracts";
+import { completeSummary, createSummaryDrafts, summaryRevision } from "./conversation-summary.js";
 import { agentCapabilities } from "./agents/capabilities.js";
 import { handoffPrompt, prepareHandoff } from "./agent-handoff.js";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
@@ -65,6 +68,15 @@ export async function openDesktopAgent(options: {
     const settings = options.settings.get();
     return settings.agent === "pi" || !settings.workspace ? undefined : { kind: settings.agent, cwd: settings.workspace, config: settings.agents[settings.agent] };
   } });
+  async function readSummarySource(sessionId: string) {
+    const settings = options.settings.get();
+    const currentId = settings.agent === "pi" ? `pi-${conversation.id}` : external.snapshot().sessionId;
+    if (closed || currentId !== sessionId) throw new Error("Conversation changed; refresh before generating a draft");
+    const snapshot = await service.snapshot();
+    if (snapshot.conversationSync?.sessionId !== sessionId) throw new Error("Conversation changed; refresh before generating a draft");
+    return { sessionId, agent: settings.agent, messages: snapshot.messages.map(({ id, role, text }) => ({ id, role, text })) };
+  }
+  const drafts = createSummaryDrafts(readSummarySource, (source, signal) => completeSummary(catalog, source, signal));
   const nodeId = options.settings.get().nodeId;
   async function jobServer(id: string): Promise<string> {
     return runtime!.root.commit(async tx => { const doc = await tx.doc(PeerServers); return doc.origins[id] ??= options.serverId?.() ?? "server"; }, ctx);
@@ -284,10 +296,13 @@ export async function openDesktopAgent(options: {
         model: catalog.model, piModel: catalog.agentModel, piEffort: settings.piEffort, piAccess: settings.piAccess, workspace: settings.workspace, nodeId,
         busy: busy || peerRuns.size > 0 || external.busy || inspection.tasks.length > 0, messages, jobs: (await peers.list()).map(job => ({ ...job, approved: approved.includes(job.id) })), serverConnected, collaboration, error: externalState?.error ?? agentError ?? error ?? (settings.agent === "pi" ? catalog.error : undefined) ?? connectionError ?? historyError };
     },
-    async setConversationSync(input: { sessionId: string; mode: "local" | "summary" | "full"; summary?: string }) {
+    generateSummaryDraft(input: { sessionId: string }) { if (reconfiguring) throw new Error("Agent settings are changing"); return drafts.generate(input?.sessionId); },
+    async cancelSummaryDraft(input: { sessionId: string }) { drafts.cancel(input?.sessionId); },
+    async setConversationSync(input: { sessionId: string; mode: "local" | "summary" | "full"; summary?: string; sourceRevision?: string }) {
       return changeSettings(async () => {
         const sessionId = options.settings.get().agent === "pi" ? `pi-${conversation.id}` : external.snapshot().sessionId;
         if (!input || input.sessionId !== sessionId) throw new Error("Conversation changed; refresh before changing sync scope");
+        if (input.sourceRevision && summaryRevision(await readSummarySource(input.sessionId)) !== input.sourceRevision) throw new Error("Conversation changed; generate a new draft before publishing");
         await setConversationSync(runtime!, input.sessionId, input);
       }).then(() => { sync(false); });
     },
@@ -323,6 +338,23 @@ export async function openDesktopAgent(options: {
         else if (!configured() || !options.settings.get().workspace) throw new Error("请先在 Pi 中配置模型并选择工作目录");
         await runtime!.root.commit(async tx => { const approvals = await tx.doc(Approvals); if (!approvals.ids.includes(id)) approvals.ids.push(id); }, ctx);
         void runPeer(id).then(syncCompleted).catch(report);
+    },
+    reviewRun: external.reviewRun,
+    async shareArtifact(id: string, path: string) {
+      const job = await peers.get(id);
+      if (!job || job.target !== nodeId || job.source !== "server" || !["done", "failed"].includes(job.status)) throw new Error("Only completed server-delegated local tasks can share files");
+      const server = await jobServer(id);
+      if (server !== (options.serverId?.() ?? "server")) throw new Error("Switch back to the task server before sharing files");
+      const input = await readSelectedArtifact(path, id, nodeId);
+      const result = await options.request(`/api/peers/tasks/${id}/artifacts`, input, server) as { item: PeerArtifact };
+      return result.item;
+    },
+    async artifacts(id: string) {
+      const job = await peers.get(id);
+      if (!job || (job.target !== nodeId && job.source !== nodeId)) throw new Error("Task not found");
+      const server = await jobServer(id);
+      if (server !== (options.serverId?.() ?? "server")) throw new Error("Switch back to the task server before retrieving files");
+      return (await options.request(`/api/peers/tasks/${id}/artifacts?deviceId=${nodeId}`, undefined, server) as { items: PeerArtifact[] }).items;
     },
     sessions: listSessions, readSession, sendPeer,
     async cancelPeer(id: string) { await peers.requestCancel(id); sync(); },
@@ -382,7 +414,7 @@ export async function openDesktopAgent(options: {
         for (const id of ids) await (await runtime!.harness.conversation(id, ctx))?.abort(ctx);
       }
     },
-    async close() { closed = true; clearInterval(timer); unsubscribeConnection?.(); await external.close(); await syncing; if (serverConnected) await syncHistory(options.serverId?.() ?? "server"); options.request.close?.(); await peers.close(); await runtime!.harness.close(ctx); },
+    async close() { drafts.cancel(); closed = true; clearInterval(timer); unsubscribeConnection?.(); await external.close(); await syncing; if (serverConnected) await syncHistory(options.serverId?.() ?? "server"); options.request.close?.(); await peers.close(); await runtime!.harness.close(ctx); },
   };
   return service;
 }

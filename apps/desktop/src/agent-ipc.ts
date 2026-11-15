@@ -36,6 +36,9 @@ export async function registerDesktopAgent(options: { ipc: IpcMain; directory: s
       }
       return readAgentModels(current.agent, current.agents[current.agent], current.workspace, options.searchPath, options.env);
     },
+    "generate-summary-draft": input => agent.generateSummaryDraft(input),
+    "cancel-summary-draft": input => agent.cancelSummaryDraft(input),
+    "review-run": input => agent.reviewRun(input),
     "set-conversation-sync": input => agent.setConversationSync(input),
     snapshot: () => agent.snapshot(), "select-agent": async input => {
       const selection = validateAgentSelection(input);
@@ -53,6 +56,18 @@ export async function registerDesktopAgent(options: { ipc: IpcMain; directory: s
       return agent.selectAgent(selection);
     }, "new-session": () => agent.newSession(), "answer-approval": input => agent.answerApproval(input), send: input => agent.send(input), approve: input => agent.approve(input), reject: input => agent.reject(input), abort: () => agent.abort(),
     "peer-sessions": input => agent.sessions(input), "read-peer-session": input => agent.readSession(input), "send-peer": input => agent.sendPeer(input), "peer-status": input => agent.peerStatus(input), "cancel-peer": input => agent.cancelPeer(input),
+    "list-artifacts": async (id: string) => {
+      const origin = options.getOrigin();
+      const items = await agent.artifacts(id);
+      if (origin !== options.getOrigin()) throw new Error("Server changed; reload result files");
+      return items.map(item => ({ ...item, downloadUrl: new URL(`/api/peers/tasks/${item.taskId}/artifacts/${item.id}?deviceId=${item.deviceId}&download=1`, origin).href }));
+    },
+    "share-artifact": async (id: string) => {
+      const window = options.getWindow(); if (!window) throw new Error("Desktop window closed");
+      const selected = await dialog.showOpenDialog(window, { title: "Share result file to paired server (up to 1 MiB)", properties: ["openFile"] });
+      if (selected.canceled || !selected.filePaths[0]) return;
+      await agent.shareArtifact(id, selected.filePaths[0]);
+    },
     "choose-workspace": async () => {
       const window = options.getWindow(); if (!window) throw new Error("桌面窗口已关闭");
       const selected = await dialog.showOpenDialog(window, { title: "选择小 D 的工作目录", properties: ["openDirectory"] });

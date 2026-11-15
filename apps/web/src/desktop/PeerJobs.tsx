@@ -1,3 +1,5 @@
+import { PeerProgress } from "./PeerProgress.js";
+import { PeerArtifacts } from "./PeerArtifacts.js";
 import type { DesktopPeerJob } from "@assistant/contracts";
 import type { useDesktopConversation } from "./useDesktopConversation.js";
 import { MarkdownContent } from "../chat/MarkdownContent.js";
@@ -33,8 +35,10 @@ export function PeerJobs({ local }: { local: ReturnType<typeof useDesktopConvers
         </dl>
         <div className="md"><MarkdownContent text={job.task} /></div>
         {job.result && <div className="md"><MarkdownContent text={job.result} /></div>}
+        {terminal && <PeerArtifacts id={job.id} canShare={job.target === snapshot.nodeId && job.source === "server"} bridge={bridge} />}
         {job.deliveryError && <p role="status">{job.deliveryError}</p>}
         {approval && <p role="status">{job.approved ? "Waiting for execution slot" : "Waiting for approval"}</p>}
+        <PeerProgress job={job} />
         <div className="desktop-agent-job-actions">
           {approval && <>
             {!job.approved && <button type="button" className="header-button" disabled={disabled || ((!job.targetSession || job.targetSession.agent === "pi") && !(snapshot.piConfigured ?? snapshot.configured))} onClick={() => void action(job.id, () => bridge.approve(job.id))}>Approve {agentNames[job.targetSession?.agent ?? "pi"]}</button>}

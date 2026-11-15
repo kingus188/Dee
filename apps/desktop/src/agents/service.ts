@@ -1,7 +1,9 @@
+import { reviewResult } from "./reviews.js";
+import type { DesktopRunReviewInput } from "@assistant/contracts";
 import { nativeRuns, nativeRequestResults } from "./runs.js";
 import { agentCapabilities } from "./capabilities.js";
 import { randomUUID } from "node:crypto";
-import type { AgentApproval, AgentApprovalAnswer, DesktopAgentKind, ExternalAgentConfig } from "@assistant/contracts";
+import type { AgentApproval, AgentApprovalAnswer, AgentProgress, DesktopAgentKind, ExternalAgentConfig } from "@assistant/contracts";
 import { openCodex } from "./codex.js";
 import { openAcp } from "./acp.js";
 import { openOmp } from "./omp.js";
@@ -18,6 +20,7 @@ const factories: Record<ExternalKind, (options: DriverOptions) => Promise<AgentD
 
 export function openExternalAgents(options: { directory: string; binding(): ExternalBinding | undefined; factory?: DriverFactory; searchPath?: string; env?: NodeJS.ProcessEnv; peerTools?: (session: PeerSession) => PeerToolHandler }) {
   const store = openAgentSessionStore(options.directory);
+  let progress: (AgentProgress & { sessionId: string }) | undefined;
   let resumeCapability: boolean | undefined;
   let pendingWrite: ReturnType<typeof setTimeout> | undefined;
   function persist(session: StoredAgentSession) {
@@ -46,6 +49,7 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
   function current() { const binding = options.binding(); return binding ? store.get(key(binding)) : undefined; }
   function emit(session: StoredAgentSession, requestId: string, event: AgentEvent) {
     if (event.type === "capabilities") { resumeCapability = event.nativeResume; return; }
+    if (progress?.requestId === requestId && progress.sessionId === session.id && (event.type === "text" || event.type === "activity")) progress.lastEventAt = new Date().toISOString();
     if (event.type === "session") session.nativeId = event.id;
     if (event.type === "text") {
       const id = `${requestId}:${event.id}`;
@@ -71,6 +75,7 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
   async function ask(session: StoredAgentSession, request: Omit<AgentApproval, "id">, signal?: AbortSignal): Promise<AgentApprovalAnswer> {
     if (!controller || controller.signal.aborted || signal?.aborted) return { id: "", allow: false };
     const id = randomUUID();
+    if (progress?.sessionId === session.id) progress.lastEventAt = new Date().toISOString();
     session.status = "waiting"; persist(session);
     return new Promise(resolve => {
       const deny = () => finish({ id, allow: false });
@@ -112,6 +117,12 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
       await active;
       return store.byId(session.id)?.requests?.[id]?.status === "cancelled";
     },
+    reviewRun(input: DesktopRunReviewInput) {
+      if (closed || !input || typeof input.sessionId !== "string") throw new Error("Invalid review");
+      const session = store.byId(input.sessionId);
+      if (!session) throw new Error("Session not found");
+      reviewResult(session, input, nativeRequestResults(session).get(input.requestId) ?? "", persist);
+    },
     get busy() { return Boolean(active); },
     history: store.history,
     sessions() { return store.list().map(session => ({ agent: session.agent, sessionId: session.id, status: session.status })); },
@@ -129,7 +140,7 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
     snapshot() {
       const session = current();
       return { sessionId: session?.id, runs: nativeRuns(session, options.binding()?.kind ?? "codex"), capabilities: agentCapabilities(options.binding()?.kind ?? "codex", resumeCapability), messages: session?.messages ?? [], error: store.error ?? session?.error,
-        external: { status: session?.status ?? "idle", sessionId: session?.nativeId, activities: session?.activities ?? [], approvals: [...approvals.values()].map(item => item.request) } };
+        external: { ...(progress && progress.sessionId === session?.id ? { progress: { requestId: progress.requestId, startedAt: progress.startedAt, lastEventAt: progress.lastEventAt } } : {}), status: session?.status ?? "idle", sessionId: session?.nativeId, activities: session?.activities ?? [], approvals: [...approvals.values()].map(item => item.request) } };
     },
     async send(input: { id: string; text: string }, address?: PeerSession) {
       if (closed) throw new Error("外部 Agent 已关闭");
@@ -149,6 +160,7 @@ export function openExternalAgents(options: { directory: string; binding(): Exte
       session.status = "running"; session.error = undefined; session.activities = [];
       session.requests = { ...session.requests, [input.id]: { status: "running" } };
       try { persist(session); } catch (error) { Object.assign(session, previous); throw error; }
+      progress = { sessionId: session.id, requestId: input.id, startedAt: new Date().toISOString() };
       controller = new AbortController();
       const signal = controller.signal;
       let fail!: (error: Error) => void;

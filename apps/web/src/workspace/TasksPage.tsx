@@ -1,3 +1,4 @@
+import { ResultFiles } from "../tasks/ResultFiles.js";
 import { useEffect, useRef, useState } from "react";
 import type { Management, Reminder, Schedule } from "@assistant/contracts";
 import { request } from "../api/request.js";
@@ -73,6 +74,7 @@ export function TasksPage({ owner, active }: { owner: number; active: boolean })
   const invalidCalendar = !timing.time || !timing.timeZone.trim() || (timing.mode === "weekly" && !timing.weekdays.length) || (timing.mode === "monthly" && (!Number.isInteger(timing.monthDay) || timing.monthDay < 1 || timing.monthDay > 31));
   return <div className="workspace-content-page">
     <header className="workspace-library-toolbar"><div><h2>任务与提醒</h2><p className="workspace-muted">当前会话 #{owner}</p></div><button className="text-button" type="button" disabled={pending} onClick={() => select(null)}>新增安排</button></header>
+    <ResultFiles />
     <section className="workspace-records" aria-label="任务列表">
       {!ready && !error && <p role="status">正在读取…</p>}
       {ready && !cards.length && !editing && <div className="workspace-content-empty"><h2>还没有安排</h2><p>点击「新增安排」，创建提醒、计划或后台任务。</p></div>}

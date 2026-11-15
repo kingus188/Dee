@@ -13,14 +13,17 @@ export type DesktopHandoff = {
   omitted: Array<"attachments" | "tool-state" | "hidden-reasoning">;
   status: "pending" | "submitted";
 };
-/** Projection of persisted native request records, not user acceptance or external delivery. */
+export type DesktopRunReview = { revision: number; resultVersion: string; decision: "accepted" | "rejected"; reason?: string; reviewedAt: string };
+export type DesktopRunReviewInput = { sessionId: string; requestId: string; resultVersion: string; expectedRevision: number; decision: "accepted" | "rejected"; reason?: string };
+/** Execution outcome and human review are independent. */
 export type DesktopAgentRun = {
   id: string; sessionId: string; nativeSessionId?: string;
   agent: Exclude<DesktopAgentKind, "pi">;
   status: "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "unknown";
   request: string; result: string | null;
   cancellation: "not_requested" | "confirmed" | "unknown";
-  review: "unsupported";
+  resultVersion?: string; review: "unsupported" | "pending" | "accepted" | "rejected";
+  reviewRevision?: number; reviews?: DesktopRunReview[];
 };
 export type DesktopConversation = {
   sessionId: string; agent: DesktopAgentKind;
@@ -35,7 +38,10 @@ export type AgentQuestion = { id: string; text: string; options?: string[]; secr
 export type AgentApproval = { id: string; title: string; detail: string; questions?: AgentQuestion[] };
 export type AgentApprovalAnswer = { id: string; allow: boolean; answers?: Record<string, string> };
 export type AgentActivity = { id: string; title: string; status: "running" | "done" | "failed"; detail?: string };
+export type AgentProgress = { requestId: string; startedAt: string; lastEventAt?: string };
 export type ExternalAgentState = {
+  /** Observed provider events, not a heartbeat or proof of liveness. */
+  progress?: AgentProgress;
   status: "idle" | "running" | "waiting" | "done" | "failed" | "cancelled" | "interrupted";
   sessionId?: string; activities: AgentActivity[]; approvals: AgentApproval[];
 };
@@ -77,12 +83,15 @@ export type DesktopAgentSnapshot = {
 };
 export type DesktopAgentBridge = {
   platform?: string;
+  reviewRun?(input: DesktopRunReviewInput): Promise<void>;
   snapshot(): Promise<DesktopAgentSnapshot>;
   agentModels?(): Promise<Array<{ id: string; name: string; efforts: string[] }>>;
   agentPermissions?(): Promise<AgentPermissionParameter[]>;
   selectAgent(input: DesktopAgentSelection): Promise<void>;
   newSession(): Promise<void>;
-  setConversationSync?(input: {sessionId: string; mode: ConversationSyncMode; summary?: string}): Promise<void>;
+  generateSummaryDraft?(input: { sessionId: string }): Promise<{ summary: string; sourceRevision: string }>;
+  cancelSummaryDraft?(input: { sessionId: string }): Promise<void>;
+  setConversationSync?(input: {sessionId: string; mode: ConversationSyncMode; summary?: string; sourceRevision?: string}): Promise<void>;
   cancelPeer?(id: string): Promise<void>;
   answerApproval(input: AgentApprovalAnswer): Promise<void>;
   send(input: { id: string; text: string }): Promise<void>;
@@ -90,6 +99,8 @@ export type DesktopAgentBridge = {
   readPeerSession?(input: { node: string; session: { agent: DesktopAgentKind; sessionId: string } }): Promise<DesktopConversation>;
   sendPeer?(input: Pick<DesktopPeerJob, "id" | "source" | "target" | "task" | "sourceSession" | "targetSession" | "workspace" | "constraints" | "acceptanceCriteria">): Promise<DesktopPeerJob>;
   peerStatus?(id: string): Promise<DesktopPeerJob>;
+  shareArtifact?(id: string): Promise<void>;
+  listArtifacts?(id: string): Promise<Array<import("./peer-artifacts.js").PeerArtifact & { downloadUrl: string }>>;
   chooseWorkspace(): Promise<void>;
   approve(id: string): Promise<void>;
   reject(id: string): Promise<void>;

@@ -21,7 +21,7 @@ test("native run projection keeps outcomes separate and never treats a final ses
   assert.equal(runs[2]!.result, "partial");
   assert.equal(runs[3]!.cancellation, "confirmed");
   assert.equal(runs[4]!.cancellation, "unknown");
-  assert.ok(runs.every(run => run.review === "unsupported" && run.sessionId === "local" && run.nativeSessionId === "native"));
+  assert.ok(runs.every(run => run.sessionId === "local" && run.nativeSessionId === "native"));
 });
 
 test("empty and old native sessions never fabricate executions", () => {

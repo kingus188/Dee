@@ -1,3 +1,5 @@
+import { peerArtifacts } from "./peer-artifacts.js";
+import type { PeerArtifactUpload } from "@assistant/contracts";
 import type { Context } from "@earendil-works/chord";
 import { defineDoc } from "@earendil-works/pi-durable";
 import { PEER_DEVICE_ID, PEER_JOB_ID, PeerError, validPeerSession, type PeerSubmission, type PeerCompletion, type PeerJob, type PeerService, type Runtime } from "@assistant/runtime";
@@ -73,6 +75,18 @@ export async function peerApi(context: Runtime & { ctx: Context; peers: PeerServ
         });
         return { status: 202, data: { item } };
       }
+    }
+    if (method === "GET" && url.pathname === "/api/peers/artifacts") return { status: 200, data: await peerArtifacts(context, ctx, undefined) };
+    const artifact = url.pathname.match(/^\/api\/peers\/tasks\/([a-f0-9-]+)\/artifacts(?:\/([a-f0-9-]+))?$/);
+    if (artifact) {
+      if (!PEER_JOB_ID.test(artifact[1])) throw new HttpError(400, "Invalid task ID");
+      const device = deviceId(method === "POST" ? body.deviceId : url.searchParams.get("deviceId"));
+      const job = participant(await peers.get(artifact[1]), device);
+      if (method === "POST" && !artifact[2]) {
+        if (job.target !== device || !["done", "failed"].includes(job.status)) throw new HttpError(409, "Only completed task results can be shared by their execution device");
+        return { status: 200, data: await peerArtifacts(context, ctx, job.id, { ...body, taskId: job.id, deviceId: device } as PeerArtifactUpload) };
+      }
+      if (method === "GET") return { status: 200, data: await peerArtifacts(context, ctx, job.id, undefined, artifact[2]) };
     }
     const match = url.pathname.match(/^\/api\/peers\/tasks\/([^/]+)(\/(?:complete|cancel))?$/);
     if (match) {

@@ -31,11 +31,11 @@ export function DesktopAgent({ local }: { local: LocalConversation }) {
   if (!bridge) return null;
   return <>
     {snapshot && <AgentContext snapshot={snapshot}>
-      {snapshot.conversationSync && bridge.setConversationSync && <ConversationSync key={snapshot.conversationSync.sessionId} sync={snapshot.conversationSync} disabled={pending.length > 0 || !!local.pollError} save={async input => {
+      {snapshot.conversationSync && bridge.setConversationSync && <ConversationSync key={snapshot.conversationSync.sessionId} sync={snapshot.conversationSync} generate={bridge.generateSummaryDraft} cancel={bridge.cancelSummaryDraft} disabled={pending.length > 0 || !!local.pollError} save={async input => {
         if (!await action("conversation-sync", () => bridge.setConversationSync!(input))) throw new Error("Sync preference was not saved. Check the current conversation and try again.");
       }} />}
     </AgentContext>}
-    {snapshot && <AgentRuns snapshot={snapshot} />}
+    {snapshot && <AgentRuns snapshot={snapshot} disabled={pending.length > 0 || !!local.pollError} review={bridge.reviewRun ? async input => { if (!await action("run-review", () => bridge.reviewRun!(input))) throw new Error("Review was not saved; refresh before trying again"); } : undefined} />}
     {snapshot?.external?.status === "waiting" && <p className="turn-loading" role="status">等待你处理</p>}
     {snapshot?.external && <AgentRequests activities={snapshot.external.activities} approvals={snapshot.external.approvals} answer={async input => { if (!await action("approval", () => bridge.answerApproval(input))) throw new Error("审批未完成，请重试。"); }} />}
     <PeerJobs local={local} />

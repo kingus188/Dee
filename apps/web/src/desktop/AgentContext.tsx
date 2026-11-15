@@ -1,7 +1,9 @@
 import type { DesktopAgentSnapshot } from "@assistant/contracts";
+import { executionProgress } from "./progress.js";
 import { agentNames } from "./AgentPicker.js";
 
 export function AgentContext({ snapshot, children }: { snapshot: DesktopAgentSnapshot; children?: import("react").ReactNode }) {
+  const progress = executionProgress(snapshot);
   const capabilities = snapshot.capabilities, handoff = snapshot.handoff;
   if (!capabilities && !handoff && !snapshot.busy && !snapshot.runs?.length && !snapshot.conversationSync) return null;
   return <details className="desktop-agent-context">
@@ -11,9 +13,14 @@ export function AgentContext({ snapshot, children }: { snapshot: DesktopAgentSna
       <div><dt>Workspace</dt><dd>{snapshot.workspace ?? "Not selected"}</dd></div>
       <div><dt>服务端连接</dt><dd>{snapshot.serverConnected ? "Connected" : "Disconnected"}</dd></div>
       <div><dt>Sync status</dt><dd>{!snapshot.conversationSync ? "Unknown" : snapshot.conversationSync.status === "local" ? "Local only" : snapshot.conversationSync.status === "pending" ? "Pending" : "Synced"}</dd></div>
-      <div><dt>Waiting for</dt><dd>{snapshot.conversationSync?.serverMismatch && snapshot.conversationSync.mode !== "local" ? "Original server" : snapshot.external?.approvals.length ? "Approval" : snapshot.conversationSync && snapshot.conversationSync.mode !== "local" && !snapshot.serverConnected ? "Server connection" : snapshot.busy ? "Execution result" : "Nothing"}</dd></div>
-      <div><dt>控制范围</dt><dd>本机执行在此客户端控制；未同步历史不受服务端归档控制。本机结果暂不支持持久人工验收。</dd></div>
+      <div><dt>Waiting for</dt><dd>{progress.waitingFor !== "Nothing" ? progress.waitingFor : snapshot.conversationSync?.serverMismatch && snapshot.conversationSync.mode !== "local" ? "Original server" : snapshot.conversationSync && snapshot.conversationSync.mode !== "local" && !snapshot.serverConnected ? "Server connection" : "Nothing"}</dd></div>
+      {snapshot.busy && progress.elapsedSeconds !== undefined && <div><dt>Elapsed</dt><dd>{progress.elapsedSeconds}s</dd></div>}
+      {snapshot.busy && progress.quietSeconds !== undefined && <div><dt>Last event</dt><dd>{progress.quietSeconds}s ago</dd></div>}
+      {progress.activity && <div><dt>Current step</dt><dd>{progress.activity}</dd></div>}
+      <div><dt>控制范围</dt><dd>本机执行在此客户端控制；未同步历史不受服务端归档控制。原生 Agent 结果在运行记录中验收；Pi 暂不支持逐请求验收。</dd></div>
     </dl>
+    {progress.quiet && <p role="status">No recent events. Execution may still be running; inspect the current step before stopping. No automatic retry.</p>}
+    {snapshot.busy && !snapshot.external?.progress && <p>Progress timing unavailable. No automatic retry.</p>}
     {children}
     <p>Workspace selection is not a sandbox. Local execution stays available when the server disconnects; cloud models still require a network.</p>
     {handoff && <>

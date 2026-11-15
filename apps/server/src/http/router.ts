@@ -13,6 +13,14 @@ export function createRouter(context: AppContext, api = createApi(context)) {
     const url = new URL(req.url!, "http://localhost"), path = url.pathname, method = req.method!;
     if (method !== "GET" && !sameOrigin(req)) throw new HttpError(403, "只接受同源请求");
     if (method === "GET") {
+      if (/^\/api\/peers\/tasks\/[^/]+\/artifacts\/[^/]+$/.test(path) && url.searchParams.get("download") === "1") {
+        const result = await api.dispatch(method, url, {}, pairedPeer(req, context.config));
+        const response = result.data;
+        if (!response || !("item" in response) || !response.item || typeof response.item !== "object" || !("name" in response.item) || typeof response.item.name !== "string" || !("data" in response.item) || typeof response.item.data !== "string") throw new HttpError(500, "Invalid artifact response");
+        const name = response.item.name, data = response.item.data;
+        res.writeHead(200, { "content-type": "application/octet-stream", "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name).replace(/'/g, "%27")}`, "cache-control": "private, no-store", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'" });
+        return res.end(Buffer.from(data, "base64"));
+      }
       if (path === "/api/notes/export.md") {
         const notes = await context.personalNotes.get();
         res.writeHead(200, { "content-type": "text/markdown; charset=utf-8", "content-disposition": 'attachment; filename="notes.md"', "cache-control": "no-store" });
@@ -43,6 +51,7 @@ export function createRouter(context: AppContext, api = createApi(context)) {
     }
     // notes 同时携带新正文和 base；两份 128000 字正文加 JSON 转义仍有明确上限。
     const bodyLimit = /^\/api\/conversations\/\d+\/messages$/.test(path) || path === "/api/daylight/tasks/save" ? 14_000_000
+      : /^\/api\/peers\/tasks\/[^/]+\/artifacts$/.test(path) ? 1_500_000
       : path === "/api/peers/conversations" ? 24 * 1024 * 1024
       : path === "/api/notes" || /^\/api\/conversations\/\d+\/notes$/.test(path) ? 2_000_000 : 100_000;
     const body = method === "POST" ? await readBody(req, bodyLimit) : {};

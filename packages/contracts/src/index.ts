@@ -16,3 +16,5 @@ export type * from "./local-skills.js";
 export type * from "./teams-triage.js";
 export type * from "./teams-conversations.js";
 export type * from "./runs.js";
+
+export type * from "./peer-artifacts.js";
