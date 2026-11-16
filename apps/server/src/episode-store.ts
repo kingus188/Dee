@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { EpisodeRow, EpisodeRecord } from "@assistant/features";
+import { normalizeSourceBefore, sourceTimeRange, verifiedSourceTimeRange, type EpisodeTimeQuery, type EpisodeRow, type EpisodeRecord } from "@assistant/features";
 import { createSourceLifecycle } from "./source-lifecycle.js";
 import { episodeHasSensitiveData } from "./episode-privacy.js";
 
@@ -10,7 +10,7 @@ const FORGET_DAYS = 90; // 未被回想的摘要保留这么久
 const FORGET_OPEN_DAYS = 180; // 带待跟进事项的摘要保留更久
 const iso = (ms: number) => new Date(ms).toISOString();
 
-export type NewEpisode = Omit<EpisodeRow, "level"> & { source: string; level?: 0 | 1; sourceRevision?: number; messageIds?: string[] };
+export type NewEpisode = Omit<EpisodeRow, "level"> & { source: string; level?: 0 | 1; sourceRevision?: number; messageIds?: string[]; sourceTimeVerified?: boolean };
 export type StoredEpisode = EpisodeRecord;
 export type EpisodeCursor = { score: number; periodEnd: string; id: string };
 export type EpisodePage = { items: StoredEpisode[]; next?: EpisodeCursor; scanned: number };
@@ -40,6 +40,7 @@ export function openEpisodeStore(dataDir: string) {
     const columns = db.prepare("PRAGMA table_info(episodes)").all() as { name: string }[];
     if (!columns.some(column => column.name === "source_revision")) db.exec("ALTER TABLE episodes ADD COLUMN source_revision INTEGER NOT NULL DEFAULT 0");
     if (!columns.some(column => column.name === "message_ids")) db.exec("ALTER TABLE episodes ADD COLUMN message_ids TEXT NOT NULL DEFAULT '[]'");
+    if (!columns.some(column => column.name === "source_time_verified")) db.exec("ALTER TABLE episodes ADD COLUMN source_time_verified INTEGER NOT NULL DEFAULT 0");
     // Preserve legacy search-based retention timestamps without labeling them as explicit reads.
     if (!columns.some(column => column.name === "last_exposed_at")) db.exec("ALTER TABLE episodes ADD COLUMN last_exposed_at TEXT");
     if (!columns.some(column => column.name === "last_read_at")) db.exec("ALTER TABLE episodes ADD COLUMN last_read_at TEXT");
@@ -56,17 +57,19 @@ export function openEpisodeStore(dataDir: string) {
         AND (s.revoked_at IS NOT NULL OR s.revision!=e.source_revision))`);
   } catch (error) { db.close(); throw error; }
 
-  const insert = db.prepare("INSERT INTO episodes (id, source, label, channel, level, period_start, period_end, summary, open_items, created_at, last_used_at, source_revision, message_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+  const insert = db.prepare("INSERT INTO episodes (id, source, label, channel, level, period_start, period_end, summary, open_items, created_at, last_used_at, source_revision, message_ids, source_time_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
   const row = (r: Record<string, unknown>): StoredEpisode => ({
     id: String(r.id), source: String(r.source), label: String(r.label), channel: String(r.channel), level: r.level === 1 ? 1 : 0,
     sourceRevision: Number(r.source_revision), messageIds: JSON.parse(String(r.message_ids)) as string[],
+    sourceTimeVerified: r.source_time_verified === 1, summaryRecordedAt: String(r.created_at),
     periodStart: String(r.period_start), periodEnd: String(r.period_end), summary: String(r.summary), openItems: JSON.parse(String(r.open_items)) as string[],
   });
   const safe = (episode: StoredEpisode) => sources.allowed(episode.source, episode.sourceRevision, episode.messageIds) && !episodeHasSensitiveData([episode.label, episode.summary, ...episode.openItems].join("\n"));
   const add = (episode: NewEpisode) => {
+    if (episode.sourceTimeVerified && !verifiedSourceTimeRange(episode)) return false;
     if (!sources.allowed(episode.source, episode.sourceRevision ?? 0, episode.messageIds)) return false;
     const now = iso(Date.now());
-    insert.run(randomUUID(), episode.source, episode.label, episode.channel, episode.level ?? 0, episode.periodStart, episode.periodEnd, episode.summary, JSON.stringify(episode.openItems), now, now, episode.sourceRevision ?? 0, JSON.stringify(episode.messageIds ?? []));
+    insert.run(randomUUID(), episode.source, episode.label, episode.channel, episode.level ?? 0, episode.periodStart, episode.periodEnd, episode.summary, JSON.stringify(episode.openItems), now, now, episode.sourceRevision ?? 0, JSON.stringify(episode.messageIds ?? []), episode.sourceTimeVerified ? 1 : 0);
     return true;
   };
 
@@ -78,16 +81,18 @@ export function openEpisodeStore(dataDir: string) {
   const setCursor = (source: string, cursor: string) => { db.prepare("INSERT INTO episode_cursors (source, cursor) VALUES (?, ?) ON CONFLICT(source) DO UPDATE SET cursor = excluded.cursor").run(source, cursor); };
   // LIMIT bounds materialized candidates, not SQLite's scoring/sort work.
   // Keyset pagination preserves older matches and has an explicit unique tie-break.
-  function candidates(tokens: string[] | undefined, sinceDays: number | undefined, limit: number, cursor?: EpisodeCursor): EpisodePage {
+  function candidates(tokens: string[] | undefined, sinceDays: number | undefined, limit: number, cursor?: EpisodeCursor, time?: EpisodeTimeQuery): EpisodePage {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 80) throw new Error("候选页大小应为1～80");
     if (tokens && (!tokens.length || tokens.length > 8 || tokens.some(token => token.length > 200))) return { items: [], scanned: 0 };
     const like = tokens?.map(token => `%${token.replace(/[\\%_]/g, "\\$&")}%`) ?? [];
     const score = like.length ? like.map(() => "(CASE WHEN lower(summary || ' ' || open_items || ' ' || label) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)").join(" + ") : "0";
+    const sourceBefore = time?.sourceBefore === undefined ? undefined : normalizeSourceBefore(time.sourceBefore);
+    const temporal = sourceBefore ? "AND source_time_verified = 1 AND julianday(period_start) <= julianday(period_end) AND julianday(period_end) <= julianday(?)" : "";
     const after = cursor ? "AND (score < ? OR (score = ? AND (period_end < ? OR (period_end = ? AND id > ?))))" : "";
     const found = db.prepare(`WITH ranked AS (SELECT *, ${score} AS score FROM episodes)
-      SELECT * FROM ranked WHERE ${tokens ? "score > 0" : "open_items != '[]' AND period_end >= ?"} ${after}
+      SELECT * FROM ranked WHERE ${tokens ? "score > 0" : "open_items != '[]' AND period_end >= ?"} ${temporal} ${after}
       ORDER BY score DESC, period_end DESC, id ASC LIMIT ?`).all(...like, ...(tokens ? [] : [iso(Date.now() - sinceDays! * DAY)]),
-        ...(cursor ? [cursor.score, cursor.score, cursor.periodEnd, cursor.periodEnd, cursor.id] : []), limit + 1);
+        ...(sourceBefore ? [sourceBefore] : []), ...(cursor ? [cursor.score, cursor.score, cursor.periodEnd, cursor.periodEnd, cursor.id] : []), limit + 1);
     const page = found.slice(0, limit), last = page.at(-1);
     return { items: page.map(row).filter(safe), scanned: page.length,
       ...(found.length > limit && last ? { next: { score: Number(last.score), periodEnd: String(last.period_end), id: String(last.id) } } : {}) };
@@ -202,7 +207,7 @@ export function openEpisodeStore(dataDir: string) {
       });
     },
     // Database matches are not exposure. Only authorized returned rows are exposed.
-    searchPage: (tokens: string[], limit: number, cursor?: EpisodeCursor) => candidates(tokens, undefined, limit, cursor),
+    searchPage: (tokens: string[], limit: number, cursor?: EpisodeCursor, time?: EpisodeTimeQuery) => candidates(tokens, undefined, limit, cursor, time),
     openItemsPage: (sinceDays: number, limit: number, cursor?: EpisodeCursor) => candidates(undefined, sinceDays, limit, cursor),
     search(tokens: string[], limit: number): EpisodeRecord[] {
       return safeCandidates(tokens, undefined, limit).slice(0, Math.min(limit, 80));
@@ -226,7 +231,9 @@ export function openEpisodeStore(dataDir: string) {
         if (original.length !== ids.length || original.some(item => item.source !== merged.source)) return false;
         const revision = original[0].sourceRevision;
         const messageIds = [...new Set(original.flatMap(item => item.messageIds))];
-        if (!add({ ...merged, level: 1, sourceRevision: revision, messageIds })) return false;
+        const range = sourceTimeRange(original.flatMap(item => [item.periodStart, item.periodEnd]));
+        const verified = original.every(verifiedSourceTimeRange) && !!range;
+        if (!add({ ...merged, ...(range ?? {}), sourceTimeVerified: verified, level: 1, sourceRevision: revision, messageIds })) return false;
         const remove = db.prepare("DELETE FROM episodes WHERE id = ?");
         for (const id of ids) remove.run(id);
         return true;

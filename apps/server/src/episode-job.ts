@@ -57,7 +57,7 @@ export async function runEpisodePass({ store, collect, summarize, log, allowSour
       const label = sanitizeEpisodeText(batch.label);
       const result = await summarized(summarize, summaryPrompt(label, batch.text));
       if (!await allowed(batch.source, batch.channel, revision, batch.messageIds)) { log("skip result: permission changed"); continue; }
-      const episode = result ? { source: batch.source, label, channel: batch.channel, periodStart: batch.periodStart, periodEnd: batch.periodEnd, sourceRevision: revision, messageIds: batch.messageIds, ...result } : null;
+      const episode = result ? { source: batch.source, label, channel: batch.channel, periodStart: batch.periodStart, periodEnd: batch.periodEnd, sourceTimeVerified: batch.sourceTimeVerified === true, sourceRevision: revision, messageIds: batch.messageIds, ...result } : null;
       store.commitBatch(episode, batch.source, batch.cursor, revision, batch.messageIds, expectedCursor);
       if (!result) log("skip source: empty or contains secret");
     } catch { log("summarize failed: source unavailable or model error; retry later"); }

@@ -1,6 +1,6 @@
 import type { ConversationId, EntryId } from "@earendil-works/pi-durable";
 import { Index } from "@assistant/runtime";
-import { splitUserContent, withQuote } from "@assistant/features";
+import { sourceTimeRange, splitUserContent, withQuote } from "@assistant/features";
 import type { AppContext } from "./application/context.js";
 import type { TeamsStore } from "./teams-store.js";
 import type { EpisodeStore } from "./episode-store.js";
@@ -12,7 +12,7 @@ const FIRST_RUN_DAYS = 14;
 const TEAMS_SCAN = 500;
 
 // 一个来源（一个会话或一个 Teams 聊天）自上次整理以来的新内容。
-export type Batch = { source: string; label: string; channel: string; text: string; chars: number; periodStart: string; periodEnd: string; cursor: string; afterCursor?: string | null; messageIds?: string[]; sourceRevision?: number };
+export type Batch = { source: string; label: string; channel: string; text: string; chars: number; periodStart: string; periodEnd: string; cursor: string; afterCursor?: string | null; messageIds?: string[]; sourceRevision?: number; sourceTimeVerified?: boolean };
 export type Collect = (cursorOf: (source: string) => string | undefined) => Promise<Batch[]>;
 
 const textOf = (content: unknown, role: "user" | "assistant") => {
@@ -33,7 +33,8 @@ export async function conversationBatches({ harness, ctx, episodeStore }: Pick<A
     const page = await conversation.entries({ order: "ascending", ...(after ? { minEntryId: (Number(after) + 1) as EntryId } : {}) }, 200, undefined, ctx);
     const lines: string[] = [];
     const messageIds: string[] = [];
-    let chars = 0, last: string | undefined, first: number | undefined, end: number | undefined;
+    let chars = 0, last: string | undefined;
+    const timestamps: number[] = [];
     for (const entry of page.items) {
       const message = entry.model?.[0];
       const role = entry.kind === "pi.user" ? "user" : entry.kind === "pi.assistant" ? "assistant" : undefined;
@@ -45,14 +46,14 @@ export async function conversationBatches({ harness, ctx, episodeStore }: Pick<A
           lines.push(`${role === "user" ? "用户" : "助手"}：${text}`);
           messageIds.push(String(entry.id));
           chars += text.length;
-          first ??= message.timestamp;
-          end = message.timestamp;
+          timestamps.push(message.timestamp);
         }
       }
       last = String(entry.id);
     }
-    if (lines.length && last && first !== undefined && end !== undefined) {
-      batches.push({ source, label: sanitizeEpisodeText(item.title), channel: item.channel ?? "web", text: lines.join("\n"), chars, periodStart: new Date(first).toISOString(), periodEnd: new Date(end).toISOString(), cursor: last, afterCursor: after ?? null, messageIds, sourceRevision });
+    const range = sourceTimeRange(timestamps);
+    if (lines.length && last && range) {
+      batches.push({ source, label: sanitizeEpisodeText(item.title), channel: item.channel ?? "web", text: lines.join("\n"), chars, ...range, cursor: last, afterCursor: after ?? null, messageIds, sourceRevision });
     }
   }
   return batches;
@@ -75,7 +76,7 @@ export function teamsBatches(store: TeamsStore, cursorOf: (source: string) => st
     if (!episodeStore.sourceAllowed(source, revision, [message.id])) continue;
     if (message.createdAt > (cursors.get(source) ?? floor)) sources.set(source, [...(sources.get(source) ?? []), message]);
   }
-  return [...sources].map(([source, messages]) => {
+  return [...sources].flatMap(([source, messages]) => {
     const lines: string[] = [];
     let chars = 0;
     for (const message of messages) {
@@ -85,9 +86,11 @@ export function teamsBatches(store: TeamsStore, cursorOf: (source: string) => st
       chars += text.length;
     }
     const used = messages.slice(0, lines.length);
+    const range = sourceTimeRange(used.map(message => message.createdAt));
+    if (!range) return [];
     const first = messages[0];
     const label = first.chatType === "oneOnOne" ? `Teams 私聊「${messages.find(m => m.direction === "in")?.senderName ?? first.senderName}」` : `Teams 群聊${first.chatTopic ? `「${first.chatTopic}」` : ""}`;
-    return { source, label: sanitizeEpisodeText(label), channel: "teams", text: lines.join("\n"), chars, periodStart: first.createdAt, periodEnd: used.at(-1)!.createdAt, cursor: used.at(-1)!.createdAt, afterCursor: cursors.get(source)!, messageIds: used.map(message => message.id), sourceRevision: revisions.get(source)! };
+    return [{ source, label: sanitizeEpisodeText(label), channel: "teams", text: lines.join("\n"), chars, ...range, cursor: used.at(-1)!.createdAt, afterCursor: cursors.get(source)!, messageIds: used.map(message => message.id), sourceRevision: revisions.get(source)! }];
   });
 }
 

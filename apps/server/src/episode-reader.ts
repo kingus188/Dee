@@ -1,6 +1,6 @@
 import type { Context } from "@earendil-works/chord";
 import type { Runtime, ConversationItem } from "@assistant/runtime";
-import type { EpisodeReader, OpenItem } from "@assistant/features";
+import { normalizeSourceBefore, verifiedSourceTimeRange, type EpisodeReader, type OpenItem } from "@assistant/features";
 import type { EpisodeStore, StoredEpisode, EpisodePage, EpisodeCursor } from "./episode-store.js";
 import type { TeamsSender } from "./teams-reply-port.js";
 import { verifyEpisodeReadCall } from "./episode-read-evidence.js";
@@ -69,18 +69,21 @@ export function createEpisodeReader(runtime: Runtime, ctx: Context, store: Episo
       scan: { scanned, limited: more || budget.limited } };
   }
   return {
-    async search(caller, tokens, limit) {
-      const result = await scan(caller, limit, cursor => store.searchPage(tokens, 10, cursor), async row => row, () => 1);
+    async search(caller, tokens, limit, time) {
+      const sourceBefore = time?.sourceBefore === undefined ? undefined : normalizeSourceBefore(time.sourceBefore);
+      const result = await scan(caller, limit, cursor => store.searchPage(tokens, 10, cursor, { sourceBefore }), async row => row, () => 1);
       const rows = result.found.slice(0, limit).flatMap(({ row }) => {
         const exposed = store.expose(row.id, row.sourceRevision);
         return exposed ? [exposed] : [];
       });
       return Object.assign(rows, { scan: result.scan });
     },
-    async read(caller, id, call) {
+    async read(caller, id, call, time) {
+      const sourceBefore = time?.sourceBefore === undefined ? undefined : normalizeSourceBefore(time.sourceBefore);
       const evidence = await verifyEpisodeReadCall(runtime, ctx, caller, call);
       const row = store.peek(id);
-      const allowed = await authorized(caller, row ? [row] : [], async row => row);
+      const matchesTime = row && (!sourceBefore || (verifiedSourceTimeRange(row) && normalizeSourceBefore(row.periodEnd) <= sourceBefore));
+      const allowed = await authorized(caller, matchesTime ? [row] : [], async row => row);
       return allowed.length ? store.read(id, allowed[0].row.sourceRevision, evidence) : undefined;
     },
     async openItems(caller, days, limit) {
