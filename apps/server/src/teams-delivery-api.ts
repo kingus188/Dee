@@ -26,7 +26,7 @@ export async function teamsDeliveryApi(context: Context, method: string, url: UR
       if (!message) { sourceCheck = "invalidated"; break; }
       const messageId = id.slice(message.chatId.length + 1);
       try {
-        const result = await sender.read!({ kind: "history", chatId: message.chatId, messageId });
+        const result = await sender.read!({ kind: "history", chatId: message.chatId, messageId, downloadMedia: false });
         const data = result.data;
         if (!data || typeof data !== "object" || !("id" in data) || data.id !== messageId) throw new Error("unverified source");
         if (("deletedDateTime" in data && data.deletedDateTime) || ("chatId" in data && data.chatId !== message.chatId) || messageText(data as GraphMessage) !== message.text) { sourceCheck = "invalidated"; break; }
