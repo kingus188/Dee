@@ -34,7 +34,10 @@ const emptyProvenance = (): MemoryProvenance => ({ conversationId: null, message
 export async function memoryProvenanceInTx(tx: Tx, conversationId: ConversationId): Promise<MemoryProvenance> {
   const { items: entries } = await tx.scanEntries({ conversationId, order: 'descending' }, 100);
   for (const entry of entries) {
-    if (['app.schedule-input', 'app.background-input', 'app.background-report'].includes(entry.kind)) return emptyProvenance();
+    // Derived input is a provenance boundary, not permission to borrow an
+    // older user message. New host entry kinds fail closed as well.
+    if (entry.kind !== 'pi.user' && (['app.schedule-input', 'app.background-input', 'app.background-report'].includes(entry.kind)
+      || entry.model?.some(message => message.role === 'user'))) return emptyProvenance();
     if (entry.kind !== 'pi.user') continue;
     const text = (entry.model ?? []).filter(message => message.role === 'user').map(message => {
       const content = message.content;

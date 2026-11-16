@@ -7,6 +7,8 @@ import { fmt } from "../ui/elements.js";
 const states: Record<UnifiedRun["status"], string> = { queued: "等待执行", running: "正在执行", succeeded: "执行成功", failed: "执行失败", cancelled: "已取消", waiting: "等待继续", review: "待验收", interrupted: "已中断" };
 const sources: Record<UnifiedRun["source"], string> = { delegate: "子 Agent", background: "后台任务", schedule: "计划任务", goal: "个人委托" };
 const delivery: Record<UnifiedRun["delivery"]["status"], string> = { not_applicable: "无独立交付记录", pending: "交付待处理", delivered: "交付已记录", failed: "交付失败", unknown: "交付结果未确认" };
+const resultDelivery: Record<NonNullable<UnifiedRun["resultDelivery"]>["status"], string> = { pending: "等待处理", running: "处理中", completed: "处理完成", failed: "处理失败", unknown: "处理结果未确认" };
+const notification = { queued: "通知已入队，不代表外部送达", skipped: "未入队（无接收通道或已跳过）", unknown: "通知入队结果未确认" };
 const cancellation: Record<UnifiedRun["cancellation"], string> = { not_requested: "未请求停止", requested: "已请求停止", confirmed: "已确认停止", unknown: "停止结果未确认" };
 
 export function RunDetails({ run, pending, onAction }: { run: UnifiedRun; pending: boolean; onAction: (action: CardAction) => void }) {
@@ -21,6 +23,14 @@ export function RunDetails({ run, pending, onAction }: { run: UnifiedRun; pendin
       {run.workerConversationId !== undefined && <div><dt>执行会话</dt><dd>#{run.workerConversationId}</dd></div>}
       {run.finishedAt !== null && <div><dt>结束</dt><dd>{fmt(run.finishedAt)}</dd></div>}
       <div><dt>交付</dt><dd>{delivery[run.delivery.status]}{run.delivery.detail && `：${run.delivery.detail}`}</dd></div>
+      {run.resultDelivery && <div><dt>计划结果处理</dt><dd>
+        {resultDelivery[run.resultDelivery.status]}
+        {run.resultDelivery.phase && ` · ${run.resultDelivery.phase === "deliver" ? "关联待办同步" : "通知入队"}`}
+        {(run.resultDelivery.attempts ?? 0) > 0 && ` · 失败轮次 ${run.resultDelivery.attempts} 次`}
+        {(run.resultDelivery.rebuilds ?? 0) > 0 && ` · 恢复 ${run.resultDelivery.rebuilds} 次`}
+        {run.resultDelivery.notification && ` · ${notification[run.resultDelivery.notification]}`}
+        {run.resultDelivery.error && `：${run.resultDelivery.error}`}
+      </dd></div>}
       {run.cancellation !== "not_requested" && <div><dt>停止</dt><dd>{cancellation[run.cancellation]}</dd></div>}
     </dl>
     {run.result && <article className="md" aria-label="执行成果"><MarkdownContent text={run.result} /></article>}

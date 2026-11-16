@@ -69,15 +69,18 @@ export function createTeamsTriageStore(db: DatabaseSync) {
     return { items, truncated: rows.length > 100 };
   }
   const access = (chatId: string, available: boolean, expectedGeneration?: number) => {
-    const old = db.prepare("SELECT available,generation FROM teams_chat_access WHERE chat_id=?").get(chatId);
-    if (available && expectedGeneration !== undefined && Number(old?.generation ?? 0) !== expectedGeneration) return false;
-    if (!available && old?.available !== 0) sources.invalidate(`teams:${chatId}`);
-    // Every denial fences older in-flight successes, including repeated denials
-    // while the source is already unavailable. Successful reads keep the fence.
-    db.prepare(`INSERT INTO teams_chat_access(chat_id,available,generation) VALUES (?,?,?)
-      ON CONFLICT(chat_id) DO UPDATE SET available=excluded.available,generation=teams_chat_access.generation+?`)
-      .run(chatId, available ? 1 : 0, available ? 0 : 1, available ? 0 : 1);
-    return true;
+    db.exec("SAVEPOINT teams_access");
+    try {
+      const old = db.prepare("SELECT available,generation FROM teams_chat_access WHERE chat_id=?").get(chatId);
+      if (available && expectedGeneration !== undefined && Number(old?.generation ?? 0) !== expectedGeneration) { db.exec("RELEASE teams_access"); return false; }
+      if (!available && old?.available !== 0) sources.invalidate(`teams:${chatId}`);
+      // Every denial fences older in-flight successes, including repeated denials
+      // while the source is already unavailable. Successful reads keep the fence.
+      db.prepare(`INSERT INTO teams_chat_access(chat_id,available,generation) VALUES (?,?,?)
+        ON CONFLICT(chat_id) DO UPDATE SET available=excluded.available,generation=teams_chat_access.generation+?`)
+        .run(chatId, available ? 1 : 0, available ? 0 : 1, available ? 0 : 1);
+      db.exec("RELEASE teams_access"); return true;
+    } catch (error) { db.exec("ROLLBACK TO teams_access; RELEASE teams_access"); throw error; }
   };
   return {
     settings,

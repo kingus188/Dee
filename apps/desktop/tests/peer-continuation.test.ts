@@ -85,7 +85,7 @@ test("offline desktop restart drains a busy source continuation from the origina
   } finally { release?.(); await agent.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test("same-desktop addressed completion resumes its source and leaves the selected target unchanged", async () => {
+test("unsupported same-desktop native peer fails closed and reports to its source without changing selection", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dee-desktop-local-relay-"));
   const settings = openAgentSettings(directory); settings.selectAgent({ kind: "codex", config: { executable: process.execPath, args: [] } });
   let nativeCount = 0;
@@ -105,9 +105,11 @@ test("same-desktop addressed completion resumes its source and leaves the select
     const target = (await agent.sessions()).filter(session => session.agent === "codex").at(-1)!;
     const job = await agent.sendPeer({ id: randomUUID(), source: settings.get().nodeId, target: settings.get().nodeId, sourceSession: source, targetSession: target, task: "local target work" });
     assert.equal(turns.length, 2); await agent.approve(job.id);
-    await until(() => turns.length === 4);
+    await until(() => turns.length === 3);
     await until(async () => !(await agent.snapshot()).busy);
-    assert.equal(turns[2]!.nativeId, "native-2"); assert.equal(turns[3]!.nativeId, "native-1");
+    assert.equal(turns[2]!.nativeId, "native-1");
+    assert.match(turns[2]!.text, /尚不支持逐工具验证/);
+    assert.equal((await agent.peerStatus(job.id)).status, "failed");
     const snapshot = await agent.snapshot();
     assert.ok(snapshot.messages.some(message => message.text === "selected target"));
     assert.ok(!snapshot.messages.some(message => message.id === `peer-result:${job.id}`));

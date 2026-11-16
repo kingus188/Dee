@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { chmodSync } from "node:fs";
@@ -49,6 +49,13 @@ export function openTeamsSelfChat({ dir, username, getToken, sendToken, generate
   if (!db.prepare("PRAGMA table_info(replies)").all().some(column => column.name === "claim_token")) {
     db.exec("ALTER TABLE replies ADD COLUMN claim_token TEXT");
   }
+  if (!db.prepare("PRAGMA table_info(replies)").all().some(column => column.name === "reply_hash")) {
+    db.exec("ALTER TABLE replies ADD COLUMN reply_hash TEXT");
+  }
+  const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+  const verifies = (message: Message, id: string, userId: string, expectedHash: string) =>
+    message.id === id && message.chatId === SELF_CHAT_ID && message.from?.user?.id === userId
+    && !message.deletedDateTime && message.messageType === "message" && hash(messageText(message)) === expectedHash;
   // A previous process stopped before POST or before verifying its result.
   // Neither state is automatically replayed; the operator must resolve it.
   db.exec("UPDATE replies SET state='failed',claim_token=NULL WHERE state='processing'; UPDATE replies SET state='unknown',claim_token=NULL WHERE state='sending'");
@@ -79,6 +86,15 @@ export function openTeamsSelfChat({ dir, username, getToken, sendToken, generate
     if (!account) {
       db.prepare("INSERT OR IGNORE INTO account(id,user_id,since) VALUES(1,?,?)").run(me.id, since);
       return { ok: true };
+    }
+    // Only an exact receipt and the persisted expected payload can resolve uncertainty.
+    // Missing receipts, old rows without evidence and mismatches stay blocked; never POST here.
+    for (const row of db.prepare("SELECT source_id,reply_id,reply_hash FROM replies WHERE state='unknown' AND reply_id IS NOT NULL AND reply_hash IS NOT NULL").all()) {
+      const delivered = await graph<Message>(token, graphPageUrl(`${path}/${encodeURIComponent(String(row.reply_id))}`));
+      if (verifies(delivered, String(row.reply_id), me.id, String(row.reply_hash))) {
+        db.prepare("UPDATE replies SET state='sent' WHERE source_id=? AND state='unknown' AND reply_id=? AND reply_hash=?")
+          .run(row.source_id, row.reply_id, row.reply_hash);
+      }
     }
     if (db.prepare("SELECT 1 FROM replies WHERE state IN ('sending','unknown')").get()) throw new Error("自聊回复发送结果未知，已暂停；请核实回执，不会自动重发");
     // Explicit retries remain reachable even when newer notes fill the first page.
@@ -124,7 +140,7 @@ export function openTeamsSelfChat({ dir, username, getToken, sendToken, generate
         const auth = await sendToken();
         signal.throwIfAborted();
         // Commit before POST: an interrupted request must never become retryable.
-        if (!db.prepare("UPDATE replies SET state='sending' WHERE source_id=? AND state='processing' AND claim_token=?").run(message.id, claimToken).changes) {
+        if (!db.prepare("UPDATE replies SET state='sending',reply_hash=? WHERE source_id=? AND state='processing' AND claim_token=?").run(hash(content), message.id, claimToken).changes) {
           throw new Error("自聊执行已被中断，未发送");
         }
         posting = true;
@@ -132,7 +148,7 @@ export function openTeamsSelfChat({ dir, username, getToken, sendToken, generate
         if (!receipt.id) throw new Error("自聊发送缺少回执");
         db.prepare("UPDATE replies SET reply_id=? WHERE source_id=? AND claim_token=?").run(receipt.id, message.id, claimToken);
         const delivered = await graph<Message>(token, graphPageUrl(`${path}/${encodeURIComponent(receipt.id)}`));
-        if (delivered.chatId !== SELF_CHAT_ID || delivered.from?.user?.id !== me.id || messageText(delivered) !== content) throw new Error("自聊回复回读不一致");
+        if (!verifies(delivered, receipt.id, me.id, hash(content))) throw new Error("自聊回复回读不一致");
         db.prepare("UPDATE replies SET state='sent' WHERE source_id=? AND claim_token=?").run(message.id, claimToken);
       } catch (error) {
         db.prepare("UPDATE replies SET state=? WHERE source_id=? AND claim_token=?").run(posting ? "unknown" : "failed", message.id, claimToken);

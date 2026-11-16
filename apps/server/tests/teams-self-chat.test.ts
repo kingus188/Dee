@@ -12,6 +12,7 @@ async function fixture() {
   const controller = new AbortController();
   let time = 1000, sends = 0, generations = 0, sender = "me", user = "haifeng.zhang@example.com";
   let sendFailure = false, modelFailure = false, edited = false, pages = false, hideInput = false;
+  let receiptFailure: "network" | "deleted" | "identity" | "text" | undefined;
   let sourceFailure: number | "network" | undefined;
   const input = (id: string, at = 1100, text = "帮我整理消息") => ({ id, chatId: "48:notes", messageType: "message", createdDateTime: new Date(at).toISOString(), from: { user: { id: sender } }, body: { contentType: "text", content: text } });
   let messages = [input("old", 900)], receipt = input("none");
@@ -30,7 +31,12 @@ async function fixture() {
         receipt = input(`reply-${sends}`, time + 1, JSON.parse(String(init.body)).body.content);
         return Response.json(receipt);
       }
-      if (target.endsWith(`/${receipt.id}`)) return Response.json(receipt);
+      if (target.endsWith(`/${receipt.id}`)) {
+        if (receiptFailure === "network") throw new Error("receipt read unavailable");
+        return Response.json(receiptFailure === "deleted" ? { ...receipt, deletedDateTime: new Date(time).toISOString() }
+          : receiptFailure === "identity" ? { ...receipt, id: "another-message" }
+          : receiptFailure === "text" ? { ...receipt, body: { contentType: "text", content: "different" } } : receipt);
+      }
       if (target.endsWith("/input") && sourceFailure) {
         if (sourceFailure === "network") throw new Error("network unavailable");
         return Response.json({}, { status: sourceFailure });
@@ -48,6 +54,7 @@ async function fixture() {
     fresh: (id = "input") => { time = 1200; messages = [input(id), ...messages]; },
     echo: () => { messages = [receipt, ...messages]; },
     change: (kind: string) => { if (kind === "sender") sender = "other"; if (kind === "account") user = "other@example.com"; if (kind === "send") sendFailure = true; if (kind === "model") modelFailure = true; if (kind === "edit") edited = true; if (kind === "pages") pages = true; },
+    failReceipt: (failure: typeof receiptFailure) => { receiptFailure = failure; },
     failSource: (failure: number | "network" | undefined) => { sourceFailure = failure; },
     hideInput: () => { hideInput = true; },
     advance: (milliseconds: number) => { time += milliseconds; },
@@ -275,3 +282,31 @@ test("rate limits and network failure preserve explicit retry until recovery", a
     } finally { await f.close(); }
   }
 });
+
+
+test("known receipt reconciles after a failed readback and restart without another POST", async () => {
+  const f = await fixture();
+  try {
+    await f.worker.refresh(); f.fresh(); f.failReceipt("network");
+    await assert.rejects(f.worker.refresh(), /receipt read unavailable/);
+    assert.equal(f.worker.status()[0].state, "unknown");
+    await f.restart(); f.failReceipt(undefined);
+    await f.worker.refresh();
+    assert.equal(f.worker.status()[0].state, "sent");
+    assert.equal(f.sends, 1); assert.equal(f.generations, 1);
+  } finally { await f.close(); }
+});
+
+for (const mismatch of ["deleted", "identity", "text"] as const) {
+  test(`receipt ${mismatch} cannot confirm an unknown send`, async () => {
+    const f = await fixture();
+    try {
+      await f.worker.refresh(); f.fresh(); f.failReceipt(mismatch);
+      await assert.rejects(f.worker.refresh(), /回读不一致/);
+      await f.restart();
+      await assert.rejects(f.worker.refresh(), /结果未知/);
+      assert.equal(f.worker.status()[0].state, "unknown");
+      assert.equal(f.sends, 1); assert.equal(f.generations, 1);
+    } finally { await f.close(); }
+  });
+}

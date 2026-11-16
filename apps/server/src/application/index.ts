@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModelCatalog, createPeerService, openRuntime, Index, type Runtime } from "@assistant/runtime";
-import { createConversationTools, createAssistant, createDailyReportTools, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway, createMailInbox } from "@assistant/features";
+import { GOAL_READ_TOOLS, createConversationTools, createAssistant, createDailyReportTools, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway, createMailInbox } from "@assistant/features";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { WechatChannel } from "@assistant/channel-wechat";
@@ -75,7 +75,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     let peerRuntime: Runtime | undefined;
     let conversationReader: ReturnType<typeof createConversationReader> | undefined;
     const readConversations = () => { if (!conversationReader) throw new Error("对话查询尚未就绪"); return conversationReader; };
-    const peers = createPeerService({ nodeId: "server", configured: () => modelConfigured,
+    const peers = createPeerService({ nodeId: "server", readPolicy: { revision: "server-read-v1", tools: [...GOAL_READ_TOOLS] }, configured: () => modelConfigured,
       devices: async () => (config.password || config.peerToken) && peerRuntime ? (await peerDevices(peerRuntime, ctx)).filter(item => item.online).map(item => item.deviceId) : [],
       remoteSessions: async (node, session) => {
         if (!peerRuntime || !(config.password || config.peerToken)) throw new Error("协作需要设备配对");
@@ -84,7 +84,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
       canAddressSession: async session => Boolean(peerRuntime) && !(await peerRuntime!.harness.snapshot(DesktopTranscript, Number(session.sessionId.slice(3)) as import("@earendil-works/pi-durable").ConversationId, ctx))?.value,
       report: error => { exitIfFatal(error); console.error("协作任务等待恢复：", redact(error instanceof Error ? error.message : error)); },
     });
-    const runtime = await openRuntime({ dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
+    const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, dataDir: config.dataDir, models, agentModel, resume: modelConfigured,
       // Old versions removed Index entries without a tombstone. Reconcile before
       // durable work resumes, retaining the runtime's existing model rebinding.
       beforeResume: async runtime => {
@@ -98,7 +98,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
         refresh: () => teamsSender.refresh?.() ?? Promise.resolve({ ok: false, lastSuccessAt: teamsSender.syncStatus?.().lastSuccessAt ?? null }),
         syncStatus: () => teamsSender.syncStatus?.() ?? { lastSuccessAt: null },
         read: createTeamsReadPort(teamsStore, teamsSender, config.offline) }), createTeamsReply(createTeamsReplyPort(teamsStore, teamsSender, config.offline)),
-        createTeamsAway({ get: () => teamsStore!.away(), set: input => teamsStore!.setAway(input), clear: expected => teamsStore!.clearAway(expected) })],
+        createTeamsAway({ get: () => teamsStore!.away(), set: input => teamsStore!.setAway(input), clear: expected => teamsStore!.clearAway(expected) }), peers.accessExtension],
       onReport: error => console.error("Harness 报告：", redact(error instanceof Error ? error.message : error)),
     }, ctx);
     const wechat = config.wechat.enabled ? new WechatChannel({ ...runtime, indexDoc: Index, context: ctx, ...config.wechat, reviewNotification: source => reviewTeamsNotification(teamsStore!, teamsSender, source) }) : null;

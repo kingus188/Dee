@@ -24,9 +24,10 @@ export async function finishExecution(tx: Tx, conversationId: ConversationId, id
   run.finishedAt = Date.now();
   if (settled.type === "input" && settled.status === "done") {
     const parts = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0]?.content ?? [];
+    // This records model submission completion, not business acceptance or delivery.
     run.status = "done";
     run.answerId = settled.answer;
-    run.result = (typeof parts === "string" ? parts : parts.filter(part => part.type === "text").map(part => part.text).join("")).slice(0, 12000) || "任务已完成，没有文字结果";
+    run.result = (typeof parts === "string" ? parts : parts.filter(part => part.type === "text").map(part => part.text).join("")).slice(0, 12000) || "本轮执行结束，未返回文字结果";
     run.error = null;
   } else {
     run.status = "failed";

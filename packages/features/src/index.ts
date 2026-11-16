@@ -20,3 +20,7 @@ export * from "./daylight/index.js";
 export * from "./daily-reports.js";
 
 export * from "./conversations.js";
+
+export { GOAL_READ_TOOLS } from "./goals/documents.js";
+
+export { ScheduleResults } from "./tasks/schedule-results.js";

@@ -48,6 +48,7 @@ export function openNotificationOutbox(dir: string, config: NotificationConfig, 
             WHEN json_extract(body, '$.failed') = 1 THEN 'urgent' ELSE 'normal' END ELSE 'normal' END`);
       }
       const columns = db.prepare("PRAGMA table_info(notification_outbox)").all() as { name: string }[];
+      if (!columns.some(column => column.name === "claim_epoch")) db.exec("ALTER TABLE notification_outbox ADD COLUMN claim_epoch INTEGER NOT NULL DEFAULT 0");
       if (!columns.some(column => column.name === "digest_id")) db.exec("ALTER TABLE notification_outbox ADD COLUMN digest_id TEXT");
       if (!columns.some(column => column.name === "digest_eligible")) db.exec("ALTER TABLE notification_outbox ADD COLUMN digest_eligible INTEGER NOT NULL DEFAULT 0");
       if (!columns.some(column => column.name === "member_ids")) db.exec("ALTER TABLE notification_outbox ADD COLUMN member_ids TEXT");
@@ -196,7 +197,7 @@ export function openNotificationOutbox(dir: string, config: NotificationConfig, 
       const quiet = notificationDeliveryAt(preferences.get().quietHours, at) > at;
       // An older deferred normal event must not block an urgent or approval event.
       // Always select urgent work before assembling or delivering normal backlog.
-      const select = (urgentOnly: boolean) => db.prepare(`SELECT id, body, attempts, priority, attention_class FROM notification_outbox
+      const select = (urgentOnly: boolean) => db.prepare(`SELECT id, body, attempts, claim_epoch, priority, attention_class FROM notification_outbox
         WHERE target = ? AND status = 'pending' AND digest_id IS NULL AND next_at <= ?
         AND (? = 0 OR priority IN ('urgent', 'approval'))
         AND (? = 0 OR priority != 'normal' OR digest_eligible = 0 OR attempts > 0 OR member_ids IS NOT NULL)
@@ -206,24 +207,25 @@ export function openNotificationOutbox(dir: string, config: NotificationConfig, 
       let row = select(true);
       if (!row && !quiet) { assembleDigest(at); row = select(false); }
       if (!row) return;
-      const id = String(row.id), attempts = Number(row.attempts);
+      const id = String(row.id), attempts = Number(row.attempts), epoch = Number(row.claim_epoch);
       if (attempts >= 5) {
         transaction(() => {
-          db.prepare("UPDATE notification_outbox SET status = 'failed', finished_at = ?, last_error = 'Delivery interrupted at attempt limit' WHERE target = ? AND id = ? AND status = 'pending' AND attempts >= 5")
-            .run(now(), target, id);
+          db.prepare("UPDATE notification_outbox SET status = 'failed', claim_epoch = claim_epoch + 1, finished_at = ?, last_error = 'Delivery interrupted at attempt limit' WHERE target = ? AND id = ? AND status = 'pending' AND attempts = ? AND claim_epoch = ? AND next_at <= ?")
+            .run(now(), target, id, attempts, epoch, now());
           syncMembers(id);
         });
         continue;
       }
       // Reserve before I/O. A crashed attempt counts, and becomes eligible again after its lease.
+      // Epoch never resets with the retry budget: late workers cannot settle a newer retry cycle.
       const claimed = transaction(() => {
         if (!sourceAllowed(id)) { cancelRevoked(id); return { changes: 0 }; }
         const at = now(), normal = row.priority === "normal" && row.attention_class === "normal";
         // Do not overwrite transport deadlines: disabling the policy releases
         // eligible work immediately, without shortening network retry backoff.
         if (normal && attempts === 0 && attention.decision(id, preferences.get().webhookAttention, at).at > at) return { changes: 0, deferred: true };
-        const result = db.prepare("UPDATE notification_outbox SET attempts = attempts + 1, next_at = ? WHERE target = ? AND id = ? AND status = 'pending' AND attempts = ? AND next_at <= ? AND digest_id IS NULL")
-          .run(now() + 30000, target, id, attempts, now());
+        const result = db.prepare("UPDATE notification_outbox SET attempts = attempts + 1, claim_epoch = claim_epoch + 1, next_at = ? WHERE target = ? AND id = ? AND status = 'pending' AND attempts = ? AND claim_epoch = ? AND next_at <= ? AND digest_id IS NULL")
+          .run(now() + 30000, target, id, attempts, epoch, now());
         if (result.changes) { if (normal) attention.reserve(id, at); syncMembers(id); }
         return result;
       });
@@ -253,18 +255,18 @@ export function openNotificationOutbox(dir: string, config: NotificationConfig, 
         // already in flight. Preserve a matching successful acknowledgement
         // even if another connection/list() cancelled this delivery meanwhile.
         if (!sourceAllowed(id)) cancelRevoked(id);
-        const current = db.prepare("SELECT status, attempts, last_error FROM notification_outbox WHERE target=? AND id=?").get(target, id);
-        if (current?.status === "cancelled" && Number(current.attempts) === attempts + 1) {
+        const current = db.prepare("SELECT status, claim_epoch, last_error FROM notification_outbox WHERE target=? AND id=?").get(target, id);
+        if (current?.status === "cancelled" && Number(current.claim_epoch) === epoch + 1) {
           const reason = String(current.last_error).startsWith("Source provenance unavailable") ? "Source provenance unavailable" : "Source revoked or changed";
-          db.prepare("UPDATE notification_outbox SET status=?,finished_at=?,last_error=? WHERE target=? AND id=? AND status='cancelled' AND attempts=?")
+          db.prepare("UPDATE notification_outbox SET status=?,finished_at=?,last_error=? WHERE target=? AND id=? AND status='cancelled' AND claim_epoch=?")
             .run(error ? "cancelled" : "sent", now(), error
               ? `${reason}; ${error}; delivery not confirmed and may already have occurred`
-              : `${reason}; delivery succeeded after cancellation`, target, id, attempts + 1);
+              : `${reason}; delivery succeeded after cancellation`, target, id, epoch + 1);
           syncMembers(id);
           return;
         }
-        db.prepare("UPDATE notification_outbox SET status = ?, next_at = ?, finished_at = ?, last_error = ? WHERE target = ? AND id = ? AND status = 'pending' AND attempts = ?")
-          .run(status, Math.max(now() + (delays[attempts] ?? 0), retryAt), status === "pending" ? null : now(), error, target, id, attempts + 1);
+        db.prepare("UPDATE notification_outbox SET status = ?, next_at = ?, finished_at = ?, last_error = ? WHERE target = ? AND id = ? AND status = 'pending' AND claim_epoch = ?")
+          .run(status, Math.max(now() + (delays[attempts] ?? 0), retryAt), status === "pending" ? null : now(), error, target, id, epoch + 1);
         syncMembers(id);
       });
       if (status === "failed") console.error("Webhook 通知投递失败，已保留记录；事件 ID：", id);
@@ -308,8 +310,9 @@ export function openNotificationOutbox(dir: string, config: NotificationConfig, 
       if (!row) return "missing";
       const deliveryId = row.digest_id ? String(row.digest_id) : id;
       if (!sourceAllowed(deliveryId)) { cancelRevoked(deliveryId); return "conflict"; }
+      // Retry revokes the prior claim immediately, even before another worker claims it.
       // Retry the entire immutable digest even when a caller supplies a member ID.
-      const changed = db.prepare("UPDATE notification_outbox SET status = 'pending', attempts = 0, digest_eligible = 0, next_at = ?, finished_at = NULL, last_error = NULL WHERE target = ? AND id = ? AND status = 'failed'")
+      const changed = db.prepare("UPDATE notification_outbox SET status = 'pending', attempts = 0, claim_epoch = claim_epoch + 1, digest_eligible = 0, next_at = ?, finished_at = NULL, last_error = NULL WHERE target = ? AND id = ? AND status = 'failed'")
         .run(now(), target, deliveryId);
       if (!changed.changes) return "conflict";
       syncMembers(deliveryId);

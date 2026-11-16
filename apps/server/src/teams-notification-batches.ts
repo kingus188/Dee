@@ -24,6 +24,7 @@ export function createTeamsNotificationBatches<T extends TeamsNotice>(db: Databa
     next_at INTEGER NOT NULL, finished_at INTEGER);
     CREATE TABLE IF NOT EXISTS teams_notification_members (message_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL);`);
   if (!(db.prepare("PRAGMA table_info(teams_notification_batches)").all() as { name: string }[]).some(column => column.name === "source_revisions")) db.exec("ALTER TABLE teams_notification_batches ADD COLUMN source_revisions TEXT");
+  if (!(db.prepare("PRAGMA table_info(teams_notification_batches)").all() as { name: string }[]).some(column => column.name === "claim_epoch")) db.exec("ALTER TABLE teams_notification_batches ADD COLUMN claim_epoch INTEGER NOT NULL DEFAULT 0");
   const sources = createSourceLifecycle(db);
   const preferences = createNotificationPreferences(db);
   const unpack = (value: Record<string, unknown>): TeamsNotificationBatch => ({ id: String(value.id), messageIds: JSON.parse(String(value.message_ids)),
@@ -77,17 +78,40 @@ export function createTeamsNotificationBatches<T extends TeamsNotice>(db: Databa
       try {
         const row = db.prepare("SELECT * FROM teams_notification_batches WHERE id=?").get(id);
         if (!row || !current(unpack(row))) { cancel(id); db.exec("COMMIT"); return false; }
-        const claimed = !!db.prepare("UPDATE teams_notification_batches SET next_at = ? WHERE id = ? AND status = 'pending' AND next_at <= ?")
+        const claimed = !!db.prepare("UPDATE teams_notification_batches SET next_at = ?, claim_epoch = claim_epoch + 1 WHERE id = ? AND status = 'pending' AND next_at <= ?")
           .run(Date.now() + 60_000, id, Date.now()).changes;
-        db.exec("COMMIT"); return claimed;
+        db.exec("COMMIT"); return claimed ? Number(row.claim_epoch) + 1 : false;
       } catch (error) { db.exec("ROLLBACK"); throw error; }
     },
-    defer(id: string, at = Date.now() + 45_000) { db.prepare("UPDATE teams_notification_batches SET next_at = ? WHERE id = ? AND status = 'pending'").run(at, id); },
-    finish(id: string, cancelled = false) {
+    validClaim(id: string, epoch: number) {
+      const value = db.prepare("SELECT * FROM teams_notification_batches WHERE id=? AND status='pending' AND claim_epoch=? AND next_at>?").get(id, epoch, Date.now());
+      return !!value && current(unpack(value));
+    },
+    // Raw transports have no proven downstream idempotency contract. Persist the
+    // point of no automatic retry before POST; a crash leaves visible uncertainty.
+    beginExternal(id: string, epoch: number) {
       db.exec("BEGIN IMMEDIATE");
       try {
-        const changed = db.prepare("UPDATE teams_notification_batches SET status = ?, finished_at = ? WHERE id = ? AND status = 'pending'")
-          .run(cancelled ? "cancelled" : "injected", Date.now(), id);
+        const value = db.prepare("SELECT * FROM teams_notification_batches WHERE id=? AND status='pending' AND claim_epoch=? AND next_at>?").get(id, epoch, Date.now());
+        if (!value || !current(unpack(value))) { db.exec("COMMIT"); return false; }
+        db.prepare("UPDATE teams_notification_batches SET status='sending' WHERE id=? AND claim_epoch=?").run(id, epoch);
+        db.exec("COMMIT"); return true;
+      } catch (error) { db.exec("ROLLBACK"); throw error; }
+    },
+    unknown(id: string, epoch: number) {
+      db.prepare("UPDATE teams_notification_batches SET status='unknown' WHERE id=? AND status='sending' AND claim_epoch=?").run(id, epoch);
+    },
+    uncertain() {
+      return db.prepare("SELECT * FROM teams_notification_batches WHERE status IN ('sending','unknown') ORDER BY created_at LIMIT 100").all().map(unpack);
+    },
+    defer(id: string, epoch: number, at = Date.now() + 45_000) {
+      db.prepare("UPDATE teams_notification_batches SET next_at = ? WHERE id = ? AND status = 'pending' AND claim_epoch=?").run(at, id, epoch);
+    },
+    finish(id: string, epoch: number, cancelled = false) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const changed = db.prepare("UPDATE teams_notification_batches SET status = ?, finished_at = ? WHERE id = ? AND status IN ('pending','sending') AND claim_epoch=?")
+          .run(cancelled ? "cancelled" : "injected", Date.now(), id, epoch);
         if (changed.changes) db.prepare("UPDATE teams_messages SET pushed_at = ? WHERE id IN (SELECT message_id FROM teams_notification_members WHERE batch_id = ?)").run(new Date().toISOString(), id);
         db.exec("COMMIT");
       } catch (error) { db.exec("ROLLBACK"); throw error; }

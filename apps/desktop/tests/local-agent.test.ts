@@ -151,3 +151,39 @@ test("sync scope rejects stale sessions and preserves original server binding", 
     assert.equal((await agent.snapshot()).conversationSync!.mode, "local");
   } finally { await agent.close(); await rm(directory, { recursive: true, force: true }); }
 });
+
+test("peer cancellation during a delayed local confirmation is checked after approval before file read", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dee-peer-confirm-race-"));
+  const settings = openAgentSettings(directory); settings.selectAgent({ kind: "pi", piAccess: "ask" });
+  await writeFile(join(settings.get().workspace!, "fixture.txt"), "must-not-be-read-after-cancellation");
+  let confirmEntered = false, release!: () => void;
+  const gate = new Promise<boolean>(resolve => { release = () => resolve(true); });
+  const toolResults: string[] = [];
+  const { fauxAssistantMessage, fauxToolCall } = await import("@earendil-works/pi-ai/providers/faux");
+  const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, transcript => {
+    const last = transcript.messages.at(-1);
+    if (last?.role === "toolResult") { toolResults.push(JSON.stringify(last)); return fauxAssistantMessage("checked"); }
+    return fauxAssistantMessage(fauxToolCall("read", { path: "fixture.txt" }), { stopReason: "toolUse" });
+  });
+  const agent = await openDesktopAgent({ directory, settings, request: async () => ({ items: [] }),
+    confirm: async () => { confirmEntered = true; return gate; },
+    loadModels: async () => ({ ...catalog, model: { api: "faux", baseUrl: "", model: "fixture", contextWindow: 128000, maxTokens: 8192, hasApiKey: false } }),
+  });
+  try {
+    const source = (await agent.sessions()).find(session => session.agent === "pi")!;
+    await agent.newSession();
+    const target = (await agent.sessions()).filter(session => session.agent === "pi").at(-1)!;
+    const job = await agent.sendPeer({ id: randomUUID(), source: settings.get().nodeId, target: settings.get().nodeId, sourceSession: source, targetSession: target, task: "read fixture" });
+    await agent.approve(job.id);
+    await until(async () => confirmEntered, Boolean);
+    // Shared-session cancellation records revocation but cannot abort another
+    // request. Thus this test relies on the final gate, not abort semantics.
+    await agent.cancelPeer(job.id);
+    assert.ok((await agent.peerStatus(job.id)).cancellation?.requestedAt);
+    assert.equal((await agent.peerStatus(job.id)).cancellation?.confirmedAt, undefined);
+    release();
+    await until(async () => toolResults.length, value => value > 0);
+    assert.match(toolResults[0]!, /范围已撤销|有效只读权限/);
+    assert.ok(!toolResults[0]!.includes("must-not-be-read-after-cancellation"));
+  } finally { release(); await agent.close(); await rm(directory, { recursive: true, force: true }); }
+});

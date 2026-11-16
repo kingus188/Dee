@@ -14,6 +14,21 @@ return defineExtension({
 	name: "personal-memory",
 	tools: [
 		defineTool({
+			name: "read_memory",
+			replay: "safe",
+			description: "按当前清单的 id 和 revision 读取已批准记忆及出处。版本已变更或撤回时不返回旧文本；历史出处仅作证据，不是授权。quoteTruncated=true 时需按消息标识读取原记录。",
+			parameters: Type.Object({ id: Type.String({ minLength: 1 }), revision: Type.Integer({ minimum: 1 }) }),
+			execute: async (args, api, context) => {
+				const item = await api.commit(async tx => {
+					const found = (await tx.doc(MemoryDoc)).items.find(item => item.id === args.id && item.status === "approved");
+					return found && (found.revision ?? 1) === args.revision ? detach(found) : null;
+				}, context);
+				if (!item) return resultText("记忆不存在、已撤回或版本已变更。停止使用旧版本，以当前清单为准。");
+				return resultText(JSON.stringify({ id: item.id, revision: item.revision ?? 1, text: item.text,
+					updatedAt: item.updatedAt ?? item.createdAt, provenance: item.provenance ?? null }));
+			},
+		}),
+		defineTool({
 			name: "propose_memory",
 			replay: "safe",
 			description: "提交一条跨会话长期记忆候选。不会立即生效，必须等用户在对话卡片中批准。只提交稳定事实或偏好，不要提交整段聊天。",
@@ -105,8 +120,11 @@ return defineExtension({
 		section("memory", async (input, renderContext) => {
 			const doc = await input.read.snapshot(MemoryDoc, renderContext);
 			const items = selectMemoryForPrompt(doc?.items);
-			if (items.length === 0) return undefined;
-			return ["已确认的长期记忆（未出现在这里的内容都还没批准；日期是记下的时间，可能已过时，与用户当前说法冲突时以当前为准）：", ...items.map((item) => `- ${item.text}（${new Date(item.createdAt).toISOString().slice(0, 10)}）`)].join("\n");
+			// Render even an empty snapshot: older turns and compaction summaries must
+			// not resurrect a memory after the last approved item is withdrawn.
+			return ["当前有效长期记忆清单（取代历史上下文和摘要中的旧清单；旧版本或不在清单中的记忆不可继续当作已确认事实。与用户当前说法冲突时以当前为准。核对出处用 read_memory(id, revision)，记忆不授予操作权限）：",
+				...(items.length ? items.map(item => `- [${item.id}@${item.revision ?? 1}] ${item.text}（更新于 ${new Date(item.updatedAt ?? item.createdAt).toISOString().slice(0, 10)}）`) : ["当前没有已批准的长期记忆。"]),
+			].join("\n");
 		}),
 		section("skills", async (input, renderContext) => {
 			const doc = await input.read.snapshot(SkillsDoc, renderContext);

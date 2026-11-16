@@ -1,3 +1,4 @@
+import { peerReadAllowed, peerWorkspaceRoot } from "./peer-read-access.js";
 import { readSelectedArtifact } from "./selected-artifact.js";
 import type { PeerArtifact } from "@assistant/contracts";
 import { completeSummary, createSummaryDrafts, summaryRevision } from "./conversation-summary.js";
@@ -113,6 +114,8 @@ export async function openDesktopAgent(options: {
   function syncCompleted(job: PeerJob) { if (["done", "failed"].includes(job.status)) sync(); }
   function makePeers() {
     return createPeerService({ nodeId, configured,
+      readPolicy: { revision: "desktop-read-v1", tools: ["read", "list_local_skills", "read_local_skill"], resourceRoot: peerWorkspaceRoot(options.settings.get().workspace) },
+      validateRead: (job, call) => peerReadAllowed(job, call, options.settings.get().workspace),
       report,
       remote: job => requestJob(job.id, job.targetSession && job.sourceSession ? "/api/peers/messages" : "/api/peers/tasks", { id: job.id, source: nodeId, target: "server", task: job.task, sourceSession: job.sourceSession, targetSession: job.targetSession, workspace: job.workspace, constraints: job.constraints, acceptanceCriteria: job.acceptanceCriteria }),
       cancelRemote: job => requestJob(job.id, `/api/peers/tasks/${job.id}/cancel`, { deviceId: nodeId }),
@@ -150,8 +153,8 @@ export async function openDesktopAgent(options: {
   });
   async function start() {
     catalog = await (options.loadModels?.() ?? loadPiModels({ cwd: options.settings.get().workspace ?? options.directory, searchPath: options.searchPath, env: options.env, piModel: options.settings.get().piModel }));
-    runtime = await openRuntime({ dataDir: join(options.directory, "local-agent"), models: catalog.models, agentModel: catalog.agentModel,
-      extensions: [CodingTools, skillTools, local, peers.extension], resume: catalog.configured,
+    runtime = await openRuntime({ beforeToolExecute: peers.guardTool, dataDir: join(options.directory, "local-agent"), models: catalog.models, agentModel: catalog.agentModel,
+      extensions: [CodingTools, skillTools, local, peers.extension, peers.accessExtension], resume: catalog.configured,
       env: () => { const cwd = options.settings.get().workspace; if (!cwd) throw new Error("请先选择工作目录"); return new NodeExecutionEnv({ cwd }); },
       beforeResume: async value => {
         peers.bind(value, ctx);

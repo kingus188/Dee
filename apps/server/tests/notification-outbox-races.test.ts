@@ -76,3 +76,89 @@ test("late successful digest receipt synchronizes every cancelled member without
   assert.equal(f.queue.retry("second"), "conflict");
   await f.queue.flush(); assert.equal(f.calls, 1);
 });
+
+test("manual retry cannot reuse an old delivery claim epoch", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-notification-epoch-"));
+  let at = 0, first!: (response: Response) => void, latest!: (response: Response) => void;
+  let started!: () => void;
+  const waiting = new Promise<void>(resolve => { started = resolve; });
+  const config = { url: "https://unused.example.test/webhook", mode: "all" as const, kind: "generic" };
+  const old = openNotificationOutbox(dir, config, async () => {
+    started(); return new Promise<Response>(resolve => { first = resolve; });
+  }, () => at);
+  let calls = 0;
+  const fresh = openNotificationOutbox(dir, config, async () => {
+    calls++;
+    if (calls === 1) return new Response(null, { status: 400 });
+    return new Promise<Response>(resolve => { latest = resolve; });
+  }, () => at);
+  t.after(async () => {
+    first?.(new Response(null, { status: 400 })); latest?.(new Response(null, { status: 400 }));
+    await Promise.all([old.close(), fresh.close()]); await rm(dir, { recursive: true, force: true });
+  });
+  await old.enqueue({ id: "event", body: "{}" });
+  const stale = old.flush(); await waiting;
+  at = 30_001; await fresh.flush();
+  assert.equal(fresh.list()[0].status, "failed");
+  assert.equal(fresh.retry("event"), "queued");
+  const current = fresh.flush();
+  assert.equal(fresh.list()[0].attempts, 1);
+  first(new Response(null, { status: 200 })); await stale;
+  assert.equal(fresh.list()[0].status, "pending", "old success must not settle the new attempt with the same attempt count");
+  latest(new Response(null, { status: 400 })); await current;
+  assert.equal(fresh.list()[0].status, "failed");
+});
+
+test("legacy outbox migrates claim epoch without changing existing delivery state", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-notification-migration-"));
+  const db = new DatabaseSync(join(dir, "agent.sqlite"));
+  db.exec(`CREATE TABLE notification_outbox (
+    target TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+    finished_at INTEGER, last_error TEXT, PRIMARY KEY(target,id));
+    INSERT INTO notification_outbox(target,id,body,status,attempts,next_at,created_at,last_error)
+      VALUES ('legacy','existing','{}','failed',5,100,0,'HTTP 400')`);
+  const queue = openNotificationOutbox(dir, { url: "https://unused.example.test/webhook", mode: "all", kind: "generic" });
+  t.after(async () => { await queue.close(); db.close(); await rm(dir, { recursive: true, force: true }); });
+  const row = db.prepare("SELECT status, attempts, claim_epoch, last_error FROM notification_outbox WHERE id='existing'").get()!;
+  assert.equal(row.claim_epoch, 0);
+  assert.equal(row.status, "failed"); assert.equal(row.attempts, 5); assert.equal(row.last_error, "HTTP 400");
+});
+
+for (const status of [200, 400, 503]) {
+  test(`expired fifth claim cannot settle manual retry before its next claim (${status})`, async t => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-notification-fifth-epoch-"));
+    let at = 0, respond!: (response: Response) => void;
+    let started!: () => void;
+    const waiting = new Promise<void>(resolve => { started = resolve; });
+    const config = { url: "https://unused.example.test/webhook", mode: "all" as const, kind: "generic" };
+    const old = openNotificationOutbox(dir, config, async () => {
+      started(); return new Promise<Response>(resolve => { respond = resolve; });
+    }, () => at);
+    let newCalls = 0;
+    const fresh = openNotificationOutbox(dir, config, async () => {
+      newCalls++; return new Response(null, { status: 400 });
+    }, () => at);
+    const db = new DatabaseSync(join(dir, "agent.sqlite"));
+    t.after(async () => {
+      respond?.(new Response(null, { status: 400 }));
+      await Promise.all([old.close(), fresh.close()]); db.close(); await rm(dir, { recursive: true, force: true });
+    });
+    await old.enqueue({ id: "event", body: "{}" });
+    db.prepare("UPDATE notification_outbox SET attempts=4 WHERE id='event'").run();
+    const stale = old.flush(); await waiting;
+    const epoch = Number(db.prepare("SELECT claim_epoch FROM notification_outbox WHERE id='event'").get()!.claim_epoch);
+    at = 30_001; await fresh.flush();
+    assert.equal(fresh.list()[0].status, "failed");
+    assert.ok(Number(db.prepare("SELECT claim_epoch FROM notification_outbox WHERE id='event'").get()!.claim_epoch) > epoch);
+    const expiredEpoch = Number(db.prepare("SELECT claim_epoch FROM notification_outbox WHERE id='event'").get()!.claim_epoch);
+    assert.equal(fresh.retry("event"), "queued");
+    assert.ok(Number(db.prepare("SELECT claim_epoch FROM notification_outbox WHERE id='event'").get()!.claim_epoch) > expiredEpoch);
+    const queued = fresh.list()[0];
+    // No new claim: retry itself must revoke the old worker's settlement authority.
+    const stopping = old.close();
+    respond(new Response(null, { status })); await stale; await stopping;
+    assert.equal(newCalls, 0);
+    assert.deepEqual(fresh.list()[0], queued);
+  });
+}

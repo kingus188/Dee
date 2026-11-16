@@ -17,5 +17,5 @@ export const GoalWorker = defineDoc<{
 export const GOAL_TOKEN_LIMIT = 50_000;
 export const GOAL_READ_TOOLS: ReadonlySet<string> = new Set([
   "fetch_page", "current_time", "search_knowledge", "read_knowledge", "search_materials", "read_materials",
-  "recall", "teams_messages", "outlook_messages", "outlook_read", "list_projects", "list_tasks", "get_task", "read_skill",
+  "recall", "read_memory", "teams_messages", "outlook_messages", "outlook_read", "list_projects", "list_tasks", "get_task", "read_skill",
 ]);

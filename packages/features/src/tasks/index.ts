@@ -26,7 +26,7 @@ export function createTaskCenter(notifyEvent: NotifyEvent, onSettled: (run: Exec
  const { BackgroundTask, backgroundInTx } = background;
 const V3: Extension = defineExtension({
   name: "v3-task-center",
-  tasks: [ScheduleTask, BackgroundTask, GoalTask],
+  tasks: [ScheduleTask, schedules.ScheduleResultTask, BackgroundTask, GoalTask],
   hooks: goalHooks,
   sections: [goalSection],
   tools: [

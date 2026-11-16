@@ -1,6 +1,6 @@
 import type { Conversation } from "@earendil-works/pi-durable";
 import type { Management } from "@assistant/contracts";
-import { Goals, Schedules, BackgroundJobs, Executions, Delegations, Reminders, normalizeSchedule, normalizeReminder, cancelExecution } from "@assistant/features";
+import { Goals, ScheduleResults, Schedules, BackgroundJobs, Executions, Delegations, Reminders, normalizeSchedule, normalizeReminder, cancelExecution } from "@assistant/features";
 import { projectUnifiedRuns, type RuntimeObservation } from "./unified-runs.js";
 import { RunReviews, withRunReviews } from "./run-reviews.js";
 import { applyExecutionResult } from "./execution-outcome.js";
@@ -11,7 +11,7 @@ import type { createViews } from "./views.js";
 export function createManagement(context: AppContext, { simplifyView }: ReturnType<typeof createViews>) {
  const { harness, ctx, tasks } = context;
  async function get(conversation: Conversation, options: { retryDelivery?: boolean } = {}): Promise<Management> {
-			const [schedules, background, reminders, executions, delegations, allGoals, reviews] = await Promise.all([
+			const [schedules, background, reminders, executions, delegations, allGoals, reviews, scheduleResults] = await Promise.all([
 				harness.snapshot(Schedules, conversation.id, ctx),
 				harness.snapshot(BackgroundJobs, conversation.id, ctx),
 				harness.snapshot(Reminders, conversation.id, ctx),
@@ -19,6 +19,7 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
                 harness.snapshot(Delegations, conversation.id, ctx),
                 harness.snapshot(Goals, ctx),
                 harness.snapshot(RunReviews, conversation.id, ctx),
+                harness.snapshot(ScheduleResults, conversation.id, ctx),
 			]);
 			// Durable Task 异常终结时，不应继续向用户展示为“运行中”。
 			const backgroundItems = await Promise.all((background?.items ?? []).map(async (item) => {
@@ -52,13 +53,13 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
             }
             const goals = (allGoals?.items ?? []).filter(goal => goal.conversationId === conversation.id);
             const runtime = new Map<number, RuntimeObservation>();
-            const taskIds = [...executionItems.map(item => item.runtimeTaskId), ...backgroundItems.map(item => item.taskId), ...(delegations?.items ?? []).map(item => item.runtimeTaskId), ...goals.map(item => item.taskId)];
+            const taskIds = [...executionItems.map(item => item.runtimeTaskId), ...backgroundItems.map(item => item.taskId), ...(delegations?.items ?? []).map(item => item.runtimeTaskId), ...goals.map(item => item.taskId), ...Object.values(scheduleResults?.jobs ?? {})];
             for (const id of new Set(taskIds)) if (id !== undefined) {
               const task = await harness.getTask(id as import("@earendil-works/pi-durable").TaskId, ctx);
               if (task) runtime.set(id, { terminal: task.state.status === "terminal", aborted: task.state.status === "terminal" && task.state.outcome.status === "aborted" });
             }
             const runs = withRunReviews(projectUnifiedRuns({ conversationId: conversation.id, executions: executionItems,
-              background: backgroundItems, delegations: delegations?.items ?? [], goals, runtime }), reviews?.items ?? {});
+              background: backgroundItems, delegations: delegations?.items ?? [], goals, runtime, resultDelivery: scheduleResults?.progress, resultDeliveryJobs: scheduleResults?.jobs }), reviews?.items ?? {});
             return {
                 runs,
 				schedules: scheduleItems,

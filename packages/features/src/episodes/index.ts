@@ -34,7 +34,7 @@ export function rollupPrompt(label: string, parts: { period: string; summary: st
 	return `你在为个人助理整理记忆。下面是「${label}」同一周内的多段摘要，请合并成一段周摘要。待跟进事项只保留后面的摘要里没有显示已完成的。${RULES}\n${FORMAT}\n\n摘要：\n${body}`;
 }
 
-// 模型没按格式输出时退回原文，不丢内容；空输出视为失败。
+// 模型没按格式输出时使用有上限的模型输出回退，不是原始记录或无损摘要；空输出视为失败。
 export function parseSummary(raw: string): Summary | null {
 	const text = raw.trim();
 	if (!text) return null;

@@ -3,6 +3,7 @@ import test from "node:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { openTeamsStore, type TeamsMessage } from "../dist/teams-store.js";
 import { openNotificationOutbox } from "../dist/notification-outbox.js";
 import { reviewTeamsNotification } from "../dist/teams-notifications.js";
@@ -23,11 +24,11 @@ async function fixture(t: test.TestContext) {
   const sender = { refresh: async () => ({ ok: true, lastSuccessAt: new Date().toISOString() }) };
   return { dir, get store() { return store; }, sender, preferences: outbox.preferences,
     at(ms: number) { t.mock.timers.setTime(ms); }, restart() { store.close(); store = openTeamsStore(dir); },
-    async run(inject: (ids: string[], prompt: string) => Promise<void>) {
+    async run(inject: (ids: string[], prompt: string) => Promise<void>, raw = false) {
       let finish!: () => void;
       const done = new Promise<void>(resolve => { finish = resolve; });
       const stop = startTeamsForward({ dir, store, getToken: async () => { throw Error("must not connect"); }, sendURL: "http://unused.test", sendToken: "test",
-        sync: { ...sender, status: () => ({ lastSuccessAt: null }) }, injectBatch: async (_wxid, prompt, ids) => inject(ids, prompt), undelivered: async () => { finish(); return []; } });
+        sync: { ...sender, status: () => ({ lastSuccessAt: null }) }, injectBatch: raw ? undefined : async (_wxid, prompt, ids) => inject(ids, prompt), undelivered: async () => { finish(); return []; } });
       try { await done; } finally { await stop(); }
     },
   };
@@ -169,4 +170,87 @@ test("frozen prompts bind older chat context and cancel before model injection a
   assert.equal(f.store.notifications.claim(batch.id), false);
   await f.run(async () => { assert.fail("withdrawn context must never be resubmitted to the model"); });
   assert.equal((await reviewTeamsNotification(f.store, f.sender, { kind: "teams", messageIds: batch.messageIds, sourceRevisions: batch.sourceRevisions })).status, "cancel");
+});
+
+test("Teams batch lease epochs fence stale completion and defer after another worker claims", async t => {
+  const f = await fixture(t);
+  f.store.record(item("epoch", "urgent"));
+  const batch = f.store.notifications.create(false, () => ({ prompt: "input", text: "output" }))!;
+  const old = f.store.notifications.claim(batch.id);
+  assert.notEqual(old, false);
+  assert.equal(f.store.notifications.claim(batch.id), false);
+  assert.equal(f.store.notifications.validClaim(batch.id, Number(old)), true);
+  f.at(start + 60_001);
+  assert.equal(f.store.notifications.validClaim(batch.id, Number(old)), false);
+  const fresh = f.store.notifications.claim(batch.id);
+  assert.ok(typeof fresh === "number" && fresh > Number(old));
+  f.store.notifications.defer(batch.id, Number(old), start + 999_000);
+  f.store.notifications.finish(batch.id, Number(old));
+  assert.equal(f.store.message("epoch")?.pushedAt, null);
+  assert.equal(f.store.notifications.validClaim(batch.id, Number(fresh)), true);
+  f.at(start + 120_002);
+  assert.equal(f.store.notifications.ready()[0]?.id, batch.id, "stale defer must not change the new lease deadline");
+  const final = f.store.notifications.claim(batch.id);
+  f.store.notifications.finish(batch.id, Number(final));
+  assert.ok(f.store.message("epoch")?.pushedAt);
+  assert.equal(f.store.notifications.validClaim(batch.id, Number(final)), false);
+});
+
+test("Teams claimed batch loses send authority when its source access is revoked", async t => {
+  const f = await fixture(t);
+  f.store.record(item("revoked", "urgent"));
+  const batch = f.store.notifications.create(false, () => ({ prompt: "input", text: "output" }))!;
+  const epoch = f.store.notifications.claim(batch.id);
+  assert.equal(f.store.notifications.validClaim(batch.id, Number(epoch)), true);
+  f.store.triage.access("revoked", false);
+  assert.equal(f.store.notifications.validClaim(batch.id, Number(epoch)), false);
+  f.at(start + 60_001);
+  assert.deepEqual(f.store.notifications.ready(), []);
+  assert.equal(f.store.message("revoked")?.pushedAt, null);
+});
+
+
+test("raw Teams notification with an unknown POST result is retained and never replayed on restart", async t => {
+  const f = await fixture(t); f.store.record(item("raw", "urgent"));
+  let posts = 0;
+  t.mock.method(globalThis, "fetch", async () => { posts++; throw new Error("receipt lost"); });
+  await f.run(async () => { assert.fail("raw path must not inject"); }, true);
+  assert.equal(posts, 1); assert.equal(f.store.message("raw")?.pushedAt, null);
+  const uncertain = f.store.notifications.uncertain();
+  assert.equal(uncertain.length, 1);
+  f.restart(); f.at(start + 600_000);
+  assert.equal(f.store.notifications.claim(uncertain[0].id), false);
+  await f.run(async () => {}, true);
+  assert.equal(posts, 1); assert.equal(f.store.notifications.uncertain().length, 1);
+});
+
+test("raw send claim survives a crash before its receipt without becoming retryable", async t => {
+  const f = await fixture(t); f.store.record(item("crash", "urgent"));
+  const batch = f.store.notifications.create(false, () => ({ prompt: "input", text: "output" }))!;
+  const epoch = Number(f.store.notifications.claim(batch.id));
+  assert.equal(f.store.notifications.beginExternal(batch.id, epoch), true);
+  f.restart(); f.at(start + 600_000);
+  f.store.notifications.defer(batch.id, epoch);
+  assert.equal(f.store.notifications.claim(batch.id), false);
+  assert.deepEqual(f.store.notifications.ready(), []);
+  assert.equal(f.store.notifications.uncertain()[0].id, batch.id);
+  assert.equal(f.store.message("crash")?.pushedAt, null);
+});
+
+
+test("forward reacquires an expired claim after a slow source review before injection", async t => {
+  const f = await fixture(t); f.store.record(item("slow", "urgent"));
+  let refreshes = 0, injections = 0;
+  f.sender.refresh = async () => {
+    if (++refreshes === 2) f.at(start + 60_001);
+    return { ok: true, lastSuccessAt: new Date().toISOString() };
+  };
+  await f.run(async () => {
+    injections++;
+    const db = new DatabaseSync(join(f.dir, "agent.sqlite"));
+    try { assert.equal(db.prepare("SELECT claim_epoch FROM teams_notification_batches").get()?.claim_epoch, 2); }
+    finally { db.close(); }
+  });
+  assert.equal(injections, 1);
+  assert.ok(f.store.message("slow")?.pushedAt);
 });

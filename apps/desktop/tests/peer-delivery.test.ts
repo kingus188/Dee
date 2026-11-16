@@ -23,7 +23,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
   do { const value = await read(); if (ready(value)) return value; await new Promise(resolve => setTimeout(resolve, 10)); } while (Date.now() < deadline);
   throw new Error("peer integration timed out");
 }
-test("authenticated WS delivers both directions, restores an approved busy queue to the same native thread and retries unknown admission once", async () => {
+test("authenticated WS returns unsupported native failures, preserves busy sources and retries unknown admission once", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dee-peer-e2e-")), token = "p".repeat(43);
   let serverCalls = 0, nativeCalls = 0, resumed: string | undefined, release: (() => void) | undefined;
   const model = { api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 };
@@ -107,12 +107,10 @@ createInterface({input:process.stdin}).on('line',line=>{
     await agent.approve(input.id);
     assert.equal((await agent.peerStatus(input.id)).status, "queued", "busy native process retains approved queue intent");
     await agent.close(); agent = await openDesktopAgent(options);
-    const waiting = await until(() => agent.snapshot(), value => Boolean(value.external?.approvals.length));
-    assert.equal(resumed, "native-1");
-    assert.ok(!waiting.messages.some(message => message.text === "peer work"), "background target never replaces selected source");
-    await agent.answerApproval({ id: waiting.external!.approvals[0]!.id, allow: false });
-    await until(() => peers.get(input.id), value => value?.status === "done");
-    assert.equal((await peers.get(input.id))!.result, "native answer:peer work");
+    await until(() => peers.get(input.id), value => value?.status === "failed");
+    assert.match((await peers.get(input.id))!.result!, /尚不支持逐工具验证/);
+    assert.equal(nativeCalls, 3, "unsupported native peer never starts a target turn");
+    assert.ok(!(await agent.snapshot()).messages.some(message => message.text === "peer work"), "background failure never replaces selected source");
     assert.equal((await runtime.root.context(ctx)).entries.filter(entry => entry.kind === "app.peer-result").length, 1);
     dropAdmissionResponse = true;
     const outbound = { id: randomUUID(), source: settings.get().nodeId, sourceSession: source, target: "server", targetSession: { agent: "pi" as const, sessionId: `pi-${runtime.root.id}` }, task: "continue server context" };
@@ -120,7 +118,7 @@ createInterface({input:process.stdin}).on('line',line=>{
     const result = await until(() => agent.peerStatus(outbound.id), value => value.status === "done");
     assert.equal(result.result, "server relay result"); assert.equal(dropped, 1); assert.equal(serverCalls, 3);
     await until(() => agent.snapshot(), value => !value.busy);
-    assert.equal(nativeCalls, 5, "completion starts exactly one source native turn in addition to the target turn");
+    assert.equal(nativeCalls, 4, "completion starts exactly one source native turn, with no unsupported target turn");
     const sourceRead = await agent.readSession({ node: settings.get().nodeId, session: source });
     assert.equal(sourceRead.messages.filter(message => message.id === `peer-result:${outbound.id}`).length, 1);
     const nativeBefore = nativeCalls;

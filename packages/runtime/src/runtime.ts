@@ -1,5 +1,5 @@
 import type { Context } from "@earendil-works/chord";
-import type { Extension, ModelRef, Conversation, Cursor } from "@earendil-works/pi-durable";
+import type { Extension, ModelRef, Conversation, Cursor, ToolRegistration, ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { Models } from "@earendil-works/pi-ai";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -7,11 +7,24 @@ import { AgentDoc, configure, Harness, createRegistry } from "@earendil-works/pi
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { Meta } from "./documents.js";
 
-export type RuntimeOptions = { dataDir: string; models: Models; agentModel: ModelRef; extensions: readonly Extension[]; onReport: (error: unknown) => void; resume?: boolean; beforeResume?: (runtime: Runtime) => Promise<void>; env?: NonNullable<Parameters<typeof Harness.open>[1]>["env"] };
+export type ToolExecutionGuard = (name: string, args: unknown, api: ToolExecutionApi, context: Context) => Promise<void>;
+
+function protectExtension(extension: Extension, guard: ToolExecutionGuard): Extension {
+  const protect = (tool: ToolRegistration): ToolRegistration => ({ ...tool, execute: async (args, api, context) => {
+    // Safe execute checkpoints bypass beforeTool on recovery in Pi Durable.
+    // Guard the actual entry point, also after any extension wrapper replaces it.
+    await guard(tool.name, args, api, context);
+    return tool.execute(args, api, context);
+  } });
+  return { ...extension, tools: extension.tools?.map(protect), wraps: extension.wraps?.map(wrap => "tool" in wrap
+    ? { tool: wrap.tool, wrap: (tool: ToolRegistration) => protect(wrap.wrap(tool)) } : wrap) };
+}
+
+export type RuntimeOptions = { dataDir: string; models: Models; agentModel: ModelRef; extensions: readonly Extension[]; onReport: (error: unknown) => void; resume?: boolean; beforeToolExecute?: ToolExecutionGuard; beforeResume?: (runtime: Runtime) => Promise<void>; env?: NonNullable<Parameters<typeof Harness.open>[1]>["env"] };
 export async function openRuntime(options: RuntimeOptions, context: Context): Promise<Runtime> {
   await mkdir(options.dataDir, { recursive: true });
   const registry = createRegistry();
-  for (const extension of options.extensions) registry.install(extension);
+  for (const extension of options.extensions) registry.install(options.beforeToolExecute ? protectExtension(extension, options.beforeToolExecute) : extension);
   const storage = await openNodeSqliteStorage(join(options.dataDir, "agent.sqlite"));
   const harness = await Harness.open(storage, { models: options.models, registry, env: options.env, onReport: options.onReport }, context);
   try {

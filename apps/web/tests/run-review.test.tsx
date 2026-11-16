@@ -67,3 +67,18 @@ test("switching task owners ignores an older management response", async t => {
   await act(async () => resolveOld({ schedules: [], reminders: [], background: [{ id: "job", text: "旧会话私有成果", status: "done", conversationId: 8, createdAt: 10, result: "旧结果" }], runs: [run] }));
   assert.doesNotMatch(dom.window.document.body.textContent!, /旧会话私有成果|确认验收/);
 });
+
+test("schedule result processing exposes phase and retry metadata without claiming notification delivery", () => {
+  const html = renderToStaticMarkup(<RunDetails run={{ ...run, source: "schedule", resultDelivery: { status: "completed", phase: "notify", attempts: 1, rebuilds: 2, notification: "queued" } }} pending={false} onAction={() => {}} />);
+  assert.match(html, /计划结果处理/);
+  assert.match(html, /通知已入队，不代表外部送达/);
+  assert.match(html, /失败轮次 1 次/);
+  assert.match(html, /恢复 2 次/);
+  assert.match(html, /确认验收/);
+  assert.doesNotMatch(html, /已人工验收/);
+  for (const [status, text] of [["pending", "等待处理"], ["running", "处理中"], ["failed", "处理失败"], ["unknown", "处理结果未确认"]] as const) {
+    const output = renderToStaticMarkup(<RunDetails run={{ ...run, resultDelivery: { status, error: "<script>bad</script>" } }} pending={false} onAction={() => {}} />);
+    assert.match(output, new RegExp(text));
+    assert.doesNotMatch(output, /<script>/);
+  }
+});

@@ -53,6 +53,7 @@ function fixture() {
 		assert.ok(tool, name);
 		const assistant = { id: authority.anchor, conversationId: 7, kind: "pi.assistant", model: [{ role: "assistant", content: [{ type: "toolCall", id: authority.nested ? "parent-call" : callId, name, arguments: args }] }] };
 		const tx = {
+			doc: async () => ({ items: [] }),
 			conversation: async () => ({ id: 7 }),
 			task: async (id: number) => authority.missingTask ? undefined : ({ kind: "pi.tool", conversationId: authority.taskConversationId,
 				input: authority.nested && id === 10 ? { kind: "nested", parent: 11, parentCallId: "parent-call", call: { id: callId } }
@@ -149,7 +150,7 @@ test("Teams 自动通知不能通过任何 Daylight 写工具创建、修改或�
 		["mark_task", { id: task.id, status: "done" }], ["mark_checklist_item", { id: task.id, itemId: "one", done: true }],
 		["delete_task", { id: task.id }], ["create_project", { name: "注入项目" }],
 		["update_project", { id: project.id, changes: { name: "被覆盖" } }], ["delete_project", { id: project.id }],
-	] as const) await assert.rejects(f.invoke(name, args), /自动提醒和第三方内容不能修改/);
+	] as const) await assert.rejects(f.invoke(name, args), /不能作为新的用户授权/);
 	assert.deepEqual(f.state, before);
 	assert.equal(f.applied.size, applied, "denial must happen before a replay key or business write is recorded");
 	assert.equal(JSON.parse(await f.invoke("list_tasks", {})).tasks.length, 1);

@@ -48,6 +48,7 @@ test("durable goal loop reads real material, continues, asks, resumes after rest
     if (!tools(transcript).has("goal_checkpoint")) { reports.push(text); return fauxAssistantMessage("委托进展已收到。"); }
     assert.ok(!tools(transcript).has("send_teams_reply"), "执行者不能继承主会话的对外写入权限");
     assert.ok(!tools(transcript).has("start_goal"), "执行者不能递归创建委托");
+    assert.ok(tools(transcript).has("read_memory"), "执行者可以核验当前版本的记忆来源");
     const state = JSON.parse(text.split("\n").at(-1)!) as { round: number; updates: string[] };
     const lastUser = transcript.messages.findLastIndex(message => message.role === "user");
     const replies = transcript.messages.slice(lastUser + 1).filter(message => message.role === "assistant").length;
@@ -61,6 +62,7 @@ test("durable goal loop reads real material, continues, asks, resumes after rest
   const model = await createModelCatalog({ api: "faux", baseUrl: "", model: "", apiKey: "", contextWindow: 128000, maxTokens: 8192 }, script);
   const resources = defineExtension({ name: "test-goal-resources", tools: [
     defineTool({ name: "read_materials", replay: "safe", description: "读取测试资料", parameters: Type.Object({}), execute: async () => { reads++; return { output: [{ type: "text", text: await readFile(join(dir, "project.txt"), "utf8") }] }; } }),
+    defineTool({ name: "read_memory", replay: "safe", description: "读取当前记忆", parameters: Type.Object({}), execute: async () => ({ output: [] }) }),
     defineTool({ name: "send_teams_reply", description: "禁止在委托中调用", parameters: Type.Object({}), execute: async () => { externalWrites++; return { output: [] }; } }),
   ] });
   const errors: unknown[] = [];

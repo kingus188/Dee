@@ -151,6 +151,11 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
   }
 
   async function flush(refreshedChatIds?: string[]) {
+    const uncertain = store.notifications.uncertain();
+    if (uncertain.length && !notified) {
+      notified = uncertain.reduce((count, batch) => count + batch.messageIds.length, 0);
+      onStuck?.(notified, "Teams 原文提醒发送结果未知，可能已送达；已停止自动重发，请核实接收端。", "");
+    }
     // Quiet hours govern notifications, not an explicitly authorized away reply.
     for (const item of store.pendingPush()) {
       if (stopped) return;
@@ -161,30 +166,39 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
     for (let count = 0; count < 20 && !stopped; count++) {
       const batch = store.notifications.ready()[0] ?? store.notifications.create(!!injectBatch || !inject, renderBatch);
       if (!batch) return;
-      if (!store.notifications.claim(batch.id)) continue;
+      const epoch = store.notifications.claim(batch.id);
+      if (epoch === false) continue;
+      let external = false;
       try {
         const review = await reviewTeamsNotification(store, { refresh: collector.refresh }, { kind: "teams", messageIds: batch.messageIds, sourceRevisions: batch.sourceRevisions });
         if (stopped) return;
-        if (review.status === "cancel") { store.notifications.finish(batch.id, true); continue; }
-        if (review.status === "defer") { store.notifications.defer(batch.id, Math.min(review.until, Date.now() + 60_000)); continue; }
+        if (review.status === "cancel") { store.notifications.finish(batch.id, epoch, true); continue; }
+        if (review.status === "defer") { store.notifications.defer(batch.id, epoch, Math.min(review.until, Date.now() + 60_000)); continue; }
         // A frozen prompt may contain sources that were handled while waiting.
         // Rebuild model input too, not just final delivery. Keep original IDs so
         // an uncertain earlier submission still deduplicates across retries.
         const prompt = review.text === undefined ? batch.prompt : reviewedPrompt(review.text);
+        // Review may await a slow refresh while another worker claims or revokes this source.
+        if (!store.notifications.validClaim(batch.id, epoch)) continue;
         if (injectBatch) await injectBatch(wxid(), prompt, batch.messageIds, batch.sourceRevisions);
         else if (inject) await inject(wxid(), prompt, batch.messageIds[0], batch.sourceRevisions);
-        else await send(review.text ?? batch.text, batch.id);
+        else {
+          if (!store.notifications.beginExternal(batch.id, epoch)) continue;
+          external = true;
+          await send(review.text ?? batch.text, batch.id);
+        }
         if (stopped) return;
-        store.notifications.finish(batch.id);
+        store.notifications.finish(batch.id, epoch);
         if (stuckReason) { stuckReason = ""; notified = 0; }
       } catch (error) {
-        store.notifications.defer(batch.id);
+        if (external) store.notifications.unknown(batch.id, epoch);
+        else store.notifications.defer(batch.id, epoch);
         if (stopped) return;
         const reason = describe(error);
-        if (reason !== stuckReason) log(`notification retained for retry, token age ${tokenAge()}: ${reason}`);
+        if (reason !== stuckReason) log(external ? "raw notification outcome unknown; retained claim, no retry" : `notification retained for retry, token age ${tokenAge()}: ${reason}`);
         if (!notified) {
           notified = batch.messageIds.length;
-          onStuck?.(notified, "Teams 提醒尚未确认完成，来源和批次已保留；恢复连接后重试，发送前重新核对处理状态。", batch.text.replace(/\s+/g, " ").slice(0, 80));
+          onStuck?.(notified, external ? "Teams 原文提醒发送结果未知，可能已送达；已停止自动重发，请核实接收端。" : "Teams 提醒尚未确认完成，来源和批次已保留；恢复连接后重试，发送前重新核对处理状态。", batch.text.replace(/\s+/g, " ").slice(0, 80));
         }
         stuckReason = reason;
         // Other urgent batches can still proceed; this batch has a persisted backoff.
@@ -198,7 +212,7 @@ export function startTeamsForward({ dir, store, getToken, rules, sendURL, sendTo
     if (stopped || !undelivered) return;
     const items = await undelivered();
     if (stopped) return;
-    if (!items.length) { if (!stuckReason) notified = 0; return; }
+    if (!items.length) { if (!stuckReason && !store.notifications.uncertain().length) notified = 0; return; }
     if (items.length > notified) {
       notified = items.length;
       const blocked = items.filter(item => item.status === "blocked").length;

@@ -6,7 +6,7 @@ Xiao D is a self-hosted personal AI assistant with an Electron desktop app and a
 
 The project, **Dee**, is built on [Pi Durable](https://github.com/earendil-works/pi). The avatar communicates activity; the durable Agent runtime handles execution. Work can continue after you close the browser, and recoverable tasks resume from persisted state after a server restart.
 
-[简体中文](README.zh-CN.md) · [Getting started](docs/GETTING_STARTED.md) · [Desktop app](apps/desktop/README.md) · [Configuration](docs/CONFIGURATION.md) · [Architecture](docs/ARCHITECTURE.md)
+[简体中文](README.zh-CN.md) · [Getting started](docs/GETTING_STARTED.md) · [Desktop app](apps/desktop/README.md) · [Configuration](docs/CONFIGURATION.md) · [Architecture](docs/ARCHITECTURE.md) · [Resident Agent contracts](docs/RESIDENT_AGENT_CONTRACTS.md)
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B-43853d?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![CI](https://github.com/kingus188/Dee/actions/workflows/v3-ci.yml/badge.svg)](https://github.com/kingus188/Dee/actions/workflows/v3-ci.yml)

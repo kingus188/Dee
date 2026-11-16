@@ -53,7 +53,16 @@ async function guardedWait(runtime: Runtime, context: Context, input: Input, goa
     runtime.signal.addEventListener("abort", stop, { once: true });
     const until = workerId === undefined ? Math.min(goal.wakeAt ?? goal.deadlineAt, goal.deadlineAt) : Math.min(goal.deadlineAt, Date.now() + 300_000);
     const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("委托本轮执行或等待已到截止时间")), Math.max(0, until - Date.now())); });
-    await Promise.race([changed, timeout, checkpoint, work()]);
+    // Promise.race does not cancel an eagerly evaluated work(). Recheck the
+    // committed snapshots before admission so an already-invalid round is free.
+    const admittedWork = Promise.resolve().then(() => {
+      if (runtime.signal.aborted || !current(watch.value?.items.find(item => item.id === input.goalId), input)) throw new Error("委托已修改或取消");
+      if (usages.reduce((total, usage) => total + goalTokens(usage?.value), 0) >= GOAL_TOKEN_LIMIT) throw new Error("委托已达到模型 Token 上限");
+      if (Date.now() >= until) throw new Error("委托本轮执行或等待已到截止时间");
+      if (worker?.value?.checkpoint) return;
+      return work();
+    });
+    await Promise.race([changed, timeout, checkpoint, admittedWork]);
   } finally {
     if (timer) clearTimeout(timer);
     runtime.signal.removeEventListener("abort", stop);

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { ExecutionRun, Goal } from "@assistant/contracts";
 import type { Tx, ConversationId } from "@earendil-works/pi-durable";
 import { BackgroundJobs, Delegations, Executions, Goals } from "@assistant/features";
-import { projectUnifiedRuns } from "../dist/application/unified-runs.js";
+import { projectUnifiedRuns, legacyRunRevision } from "../dist/application/unified-runs.js";
 import { RunReviews, reviewRunInTx, withRunReviews } from "../dist/application/run-reviews.js";
 
 const execution = (extra: Partial<ExecutionRun> = {}): ExecutionRun => ({ id: "background:job", kind: "background", taskId: "job", conversationId: 7, text: "检查报告", status: "done", queuedAt: 1, startedAt: 2, finishedAt: 3, result: "检查完成", error: null, ...extra });
@@ -15,7 +15,7 @@ test("run success remains distinct from human acceptance and delivery", () => {
   assert.equal(run.delivery.status, "unknown"); assert.notEqual(run.id, run.taskId);
   const synced = projectUnifiedRuns(input([execution({ daylightTaskId: "todo", deliveryStatus: "delivered" })]))[0];
   assert.equal(synced.delivery.status, "delivered"); assert.match(synced.delivery.detail!, /不代表外部消息送达/);
-  assert.notEqual(synced.revision, run.revision);
+  assert.equal(synced.revision, run.revision);
 });
 test("cancellation request does not claim confirmed process termination", () => {
   const base = { ...input([execution({ status: "cancelled", result: null })]), background: [{ id: "job", text: "检查报告", status: "cancelled" as const, conversationId: 8, createdAt: 1, result: null, taskId: 11 }] };
@@ -129,4 +129,72 @@ test("Daylight delivery requires a recorded transition, not a successful no-op",
   }
   const legacyReceipt = { replayAction: async () => ({ ok: true }) } as unknown as Store;
   assert.equal(await applyExecutionResult(legacyReceipt, execution({ daylightTaskId: "todo" })), "unknown");
+});
+
+test("schedule result queue progress is independent from execution, Daylight and review fingerprints", () => {
+  const base = input([execution({ kind: "schedule", daylightTaskId: "todo", deliveryStatus: "delivered" })]);
+  const legacy = projectUnifiedRuns(base)[0];
+  assert.equal(legacy.resultDelivery?.status, "unknown");
+  const states = [
+    { status: "pending" as const, phase: "deliver" as const, attempts: 0 },
+    { status: "running" as const, phase: "notify" as const, attempts: 1, rebuilds: 1 },
+    { status: "failed" as const, phase: "notify" as const, attempts: 3, error: "queue unavailable" },
+    { status: "completed" as const, phase: "notify" as const, notification: "queued" as const },
+    { status: "completed" as const, phase: "notify" as const, notification: "skipped" as const },
+    { status: "completed" as const, phase: "notify" as const, notification: "unknown" as const },
+  ];
+  for (const progress of states) {
+    const run = projectUnifiedRuns({ ...base, resultDelivery: { [legacy.id]: progress } })[0];
+    assert.deepEqual(run.resultDelivery, progress);
+    assert.equal(run.status, "succeeded");
+    assert.equal(run.delivery.status, "delivered");
+    assert.equal(run.revision, legacy.revision);
+    const reviewed = withRunReviews([run], { [run.id]: { revision: legacy.revision, decision: "accepted", reviewedAt: 20 } });
+    assert.equal(reviewed[0].review.status, "accepted");
+  }
+  assert.equal(projectUnifiedRuns(input())[0].resultDelivery, undefined);
+});
+
+test("terminated result processor cannot leave schedule delivery falsely running", () => {
+  const base = input([execution({ kind: "schedule" })]);
+  const projected = projectUnifiedRuns({ ...base, resultDelivery: { "background:job": { status: "running", phase: "notify", attempts: 1 } }, resultDeliveryJobs: { "background:job": 90 }, runtime: new Map([[90, { terminal: true }]]) })[0];
+  assert.equal(projected.status, "succeeded");
+  assert.equal(projected.resultDelivery?.status, "unknown");
+  assert.match(projected.resultDelivery!.error!, /最终交付状态未记录/);
+});
+
+
+test("accepted artifacts survive Daylight pending, delivered and failed transitions", async () => {
+  const f = fixture();
+  const original = execution({ daylightTaskId: "todo", deliveryStatus: "pending" });
+  f.docs.set(Executions, { items: [original] });
+  const run = projectUnifiedRuns(input([original]))[0];
+  await reviewRunInTx(f.tx, 7 as ConversationId, { runId: run.id, revision: run.revision, decision: "accepted" });
+  const reviews = (f.docs.get(RunReviews) as { items: Parameters<typeof withRunReviews>[1] }).items;
+  for (const extra of [{ deliveryStatus: "delivered" as const }, { deliveryStatus: "pending" as const, deliveryError: "retry failed" }]) {
+    const changed = projectUnifiedRuns(input([{ ...original, ...extra }]))[0];
+    assert.equal(changed.revision, run.revision);
+    assert.equal(withRunReviews([changed], reviews)[0].review.status, "accepted");
+  }
+  const changed = projectUnifiedRuns(input([{ ...original, result: "different artifact" }]))[0];
+  assert.notEqual(changed.revision, run.revision);
+  assert.equal(withRunReviews([changed], reviews)[0].review.status, "pending");
+});
+
+test("only verifiable current legacy fingerprints migrate, preserving decision time and note", async () => {
+  const f = fixture();
+  const legacy = legacyRunRevision(f.run);
+  const reviews = { [f.run.id]: { revision: legacy, decision: "accepted" as const, note: "original note", reviewedAt: 123 } };
+  f.docs.set(RunReviews, { items: reviews });
+  assert.equal(withRunReviews([f.run], reviews)[0].review.status, "accepted");
+  await assert.rejects(reviewRunInTx(f.tx, 7 as ConversationId, { runId: f.run.id, revision: legacy, decision: "rejected" }), /已验收/);
+  const migrated = await reviewRunInTx(f.tx, 7 as ConversationId, { runId: f.run.id, revision: legacy, decision: "accepted", note: "original note" });
+  assert.equal(reviews[f.run.id].revision, f.run.revision);
+  assert.equal(migrated.review.reviewedAt, 123);
+  assert.equal(migrated.review.note, "original note");
+  const changed = projectUnifiedRuns(input([execution({ daylightTaskId: "changed-target" })]))[0];
+  const unverifiable = { [f.run.id]: { revision: legacy, decision: "accepted" as const, reviewedAt: 123 } };
+  assert.equal(withRunReviews([changed], unverifiable)[0].review.status, "pending");
+  f.docs.set(Executions, { items: [execution({ result: "changed artifact" })] });
+  await assert.rejects(reviewRunInTx(f.tx, 7 as ConversationId, { runId: f.run.id, revision: legacy, decision: "accepted" }), /结果已变化/);
 });

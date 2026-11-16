@@ -17,9 +17,9 @@ test("peer protocol persists admission, rejects conflicting payloads, and resume
   let businessCalls = 0;
   const business = defineExtension({ name: "business", tools: [defineTool({ name: "existing_business", description: "服务器已有业务工具", parameters: Type.Object({}), replay: "safe", execute: async () => { businessCalls++; return { output: [{ type: "text", text: "业务结果" }] }; } })] });
   const options = { dataDir, ...catalog, onReport: (error: unknown) => { throw error; }, resume: false };
-  let peers = createPeerService({ nodeId: "server", configured: () => true });
-  let runtime = await openRuntime({ ...options, extensions: [peers.extension, business] }, ctx);
-  peers.bind(runtime, ctx);
+  let peers = createPeerService({ nodeId: "server", readPolicy: { revision: "test-read-v1", tools: ["existing_business"] }, configured: () => true });
+  let runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension, business] }, ctx);
+
   try {
     const input = { id: randomUUID(), source: desktop, target: "server", task: "查询服务器业务" };
     const queued = await peers.submit(input);
@@ -28,8 +28,8 @@ test("peer protocol persists admission, rejects conflicting payloads, and resume
     assert.deepEqual(await peers.submit(input), queued);
     await assert.rejects(peers.submit({ ...input, task: "不同任务" }), /冲突/);
     await peers.close(); await runtime.harness.close(ctx);
-    peers = createPeerService({ nodeId: "server", configured: () => true });
-    runtime = await openRuntime({ ...options, extensions: [peers.extension, business] }, ctx); peers.bind(runtime, ctx);
+    peers = createPeerService({ nodeId: "server", readPolicy: { revision: "test-read-v1", tools: ["existing_business"] }, configured: () => true });
+    runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension, business] }, ctx);
     const [done, duplicate] = await Promise.all([peers.run(input.id), peers.run(input.id)]);
     assert.equal(done.status, "done"); assert.equal(done.result, "已执行服务器业务");
     assert.deepEqual(done, duplicate);
@@ -42,8 +42,8 @@ test("peer protocol persists admission, rejects conflicting payloads, and resume
     assert.deepEqual(await peers.complete(input.id, { status: "done", result: done.result! }), done);
     await assert.rejects(peers.complete(input.id, { status: "failed", result: "改写结果" }), /冲突/);
     await peers.close(); await runtime.harness.close(ctx);
-    peers = createPeerService({ nodeId: "server", configured: () => true });
-    runtime = await openRuntime({ ...options, extensions: [peers.extension, business] }, ctx); peers.bind(runtime, ctx);
+    peers = createPeerService({ nodeId: "server", readPolicy: { revision: "test-read-v1", tools: ["existing_business"] }, configured: () => true });
+    runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension, business] }, ctx);
     assert.deepEqual(await peers.run(input.id), done);
     assert.equal((await runtime.root.commit(tx => tx.submissionByRequest(child.id, `peer:${input.id}`), ctx))?.id, submissions.id);
     assert.equal(businessCalls, 1);
@@ -52,15 +52,15 @@ test("peer protocol persists admission, rejects conflicting payloads, and resume
     assert.deepEqual(await peers.run(outbound.id), outbound);
     assert.equal((await peers.get(outbound.id))?.conversationId, undefined);
     await peers.close(); await runtime.harness.close(ctx);
-    peers = createPeerService({ nodeId: "server", configured: () => true });
-    runtime = await openRuntime({ ...options, extensions: [peers.extension, business] }, ctx); peers.bind(runtime, ctx);
+    peers = createPeerService({ nodeId: "server", readPolicy: { revision: "test-read-v1", tools: ["existing_business"] }, configured: () => true });
+    runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension, business] }, ctx);
     assert.deepEqual(await peers.get(outbound.id), outbound);
     await assert.rejects(peers.submit({ id: randomUUID(), source: desktop, target: "desktop-" + randomUUID(), task: "旁路" }), /本节点/);
     await assert.rejects(peers.submit({ ...input, id: "bad" }), /ID/);
     await peers.complete(outbound.id, { status: "failed", result: "本机用户拒绝" });
     await peers.close(); await runtime.harness.close(ctx);
-    peers = createPeerService({ nodeId: "server", configured: () => true });
-    runtime = await openRuntime({ ...options, extensions: [peers.extension, business] }, ctx); peers.bind(runtime, ctx);
+    peers = createPeerService({ nodeId: "server", readPolicy: { revision: "test-read-v1", tools: ["existing_business"] }, configured: () => true });
+    runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension, business] }, ctx);
     assert.equal((await peers.get(outbound.id))?.result, "本机用户拒绝");
   } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
 });
@@ -79,8 +79,8 @@ test("interrupted local run reopens the same child and submission", async () => 
     return fauxAssistantMessage("重开完成");
   });
   const options = { dataDir, ...catalog, resume: false, onReport: (_error: unknown) => {} };
-  let peers = createPeerService({ nodeId: "server", configured: () => true });
-  let runtime = await openRuntime({ ...options, extensions: [peers.extension] }, ctx); peers.bind(runtime, ctx);
+  let peers = createPeerService({ nodeId: "server", readPolicy: { revision: "test-read-v1", tools: ["existing_business"] }, configured: () => true });
+  let runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension] }, ctx);
   try {
     const job = await peers.submit({ id: randomUUID(), source: desktop, target: "server", task: "恢复任务" });
     const pending = peers.run(job.id); void pending.catch(() => {});
@@ -90,8 +90,8 @@ test("interrupted local run reopens the same child and submission", async () => 
     const admitted = await runtime.root.commit(tx => tx.submissionByRequest(before.conversationId! as typeof runtime.root.id, `peer:${job.id}`), ctx);
     await peers.close(); await runtime.harness.close(ctx);
     interrupt = false;
-    peers = createPeerService({ nodeId: "server", configured: () => true });
-    runtime = await openRuntime({ ...options, extensions: [peers.extension] }, ctx); peers.bind(runtime, ctx);
+    peers = createPeerService({ nodeId: "server", readPolicy: { revision: "test-read-v1", tools: ["existing_business"] }, configured: () => true });
+    runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension] }, ctx);
     const done = await peers.run(job.id);
     assert.equal(done.conversationId, before.conversationId);
     assert.equal(done.status, "done");
@@ -110,8 +110,8 @@ test("remote transport retries use the same job and reject a mismatched response
     if (attempts === 2) return { ...job, task: "篡改" };
     return { ...job, status: "done", result: "远端已完成" };
   } });
-  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], onReport: error => { throw error; } }, ctx);
-  peers.bind(runtime, ctx);
+  const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, dataDir, ...catalog, extensions: [peers.extension, peers.accessExtension], onReport: error => { throw error; } }, ctx);
+
   try {
     const job = await peers.submit({ id: randomUUID(), source: desktop, target: "server", task: "远端任务" });
     await assert.rejects(peers.run(job.id), /断线/);
@@ -126,8 +126,8 @@ test("remote transport retries use the same job and reject a mismatched response
 test("peer requirements are durable immutable payload and cancellation is confirmed only at target", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "pi-peer-boundaries-"));
   const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, () => fauxAssistantMessage("ok"));
-  const peers = createPeerService({ nodeId: "server", configured: () => true });
-  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], resume: false, onReport: (error: unknown) => { throw error; } }, ctx); peers.bind(runtime, ctx);
+  const peers = createPeerService({ nodeId: "server", readPolicy: { revision: "test-read-v1", tools: ["existing_business"] }, configured: () => true });
+  const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, dataDir, ...catalog, extensions: [peers.extension, peers.accessExtension], resume: false, onReport: (error: unknown) => { throw error; } }, ctx);
   try {
     const input = { id: randomUUID(), source: desktop, target: "server", task: "inspect", workspace: "/project", constraints: "read only", acceptanceCriteria: "report findings" };
     assert.equal((await peers.submit(input)).workspace, "/project");
@@ -158,8 +158,8 @@ test("cancel a dedicated Pi execution waits for stop while preserving one job an
     await new Promise<void>(resolve => options?.signal?.addEventListener("abort", () => resolve(), { once: true }));
     return fauxAssistantMessage("", { stopReason: "aborted" });
   });
-  const peers = createPeerService({ nodeId: "server", configured: () => true });
-  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], resume: false, onReport: (error: unknown) => { throw error; } }, ctx); peers.bind(runtime, ctx);
+  const peers = createPeerService({ nodeId: "server", readPolicy: { revision: "test-read-v1", tools: ["existing_business"] }, configured: () => true });
+  const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, dataDir, ...catalog, extensions: [peers.extension, peers.accessExtension], resume: false, onReport: (error: unknown) => { throw error; } }, ctx);
   try {
     const job = await peers.submit({ id: randomUUID(), source: desktop, target: "server", task: "slow" });
     const run = peers.run(job.id);
@@ -179,7 +179,7 @@ test("unsupported shared/native cancellation stays pending and cannot stop anoth
   const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, () => fauxAssistantMessage("ok"));
   let calls = 0;
   const peers = createPeerService({ nodeId: desktop, configured: () => true, executeSession: async () => { calls++; return { status: "done", result: "unexpected" }; } });
-  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], resume: false, onReport: (error: unknown) => { throw error; } }, ctx); peers.bind(runtime, ctx);
+  const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, dataDir, ...catalog, extensions: [peers.extension, peers.accessExtension], resume: false, onReport: (error: unknown) => { throw error; } }, ctx);
   try {
     const job = await peers.submit({ id: randomUUID(), source: "server", target: desktop, task: "native", targetSession: { agent: "codex", sessionId: randomUUID() } });
     const pending = await peers.requestCancel(job.id);

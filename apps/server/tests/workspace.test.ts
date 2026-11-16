@@ -6,9 +6,9 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { Index, openRuntime } from "@assistant/runtime";
-import { BackgroundJobs, Reminders, Schedules, createTaskCenter } from "@assistant/features";
+import { BackgroundJobs, Reminders, Schedules, Executions, ScheduleResults, createTaskCenter } from "@assistant/features";
 import type { ConversationId } from "@earendil-works/pi-durable";
-import type { WorkspaceActivities, WorkspaceMail } from "@assistant/contracts";
+import type { WorkspaceActivities, WorkspaceMail, Management } from "@assistant/contracts";
 import type { AppContext } from "../dist/application/context.js";
 import { createMailService } from "../dist/mail-service.js";
 import { createWorkspace } from "../dist/application/workspace.js";
@@ -227,4 +227,29 @@ test("attention rechecks visibility after asynchronous management reads", async 
     const result = await workspace.attention();
     assert.ok(!result.items.some(item => item.conversationId === id), change);
   }
+});
+
+
+test("management exposes durable schedule notification progress independently of acceptance", async t => {
+  const { app, api, call } = await fixture(t);
+  const created = await api.dispatch("POST", new URL("/api/conversations/direct", "http://localhost"));
+  const { id } = created.data as { id: ConversationId };
+  await app.root.commit(async tx => {
+    (await tx.doc(Executions, id)).items.push({ id: "schedule:p:1", taskId: "p", kind: "schedule", conversationId: id, text: "review", status: "done", queuedAt: 1, startedAt: 2, finishedAt: 3, result: "report", error: null });
+    (await tx.doc(ScheduleResults, id)).progress = { "schedule:p:1": { status: "running", phase: "notify", attempts: 1, rebuilds: 0 } };
+  }, app.ctx);
+  const read = async () => ((await call(`/api/conversations/${id}/management`)).data as Management).runs![0];
+  const before = await read();
+  assert.equal(before.resultDelivery?.phase, "notify");
+  assert.equal(before.resultDelivery?.attempts, 1);
+  assert.equal(before.delivery.status, "not_applicable");
+  const accepted = await api.dispatch("POST", new URL(`/api/conversations/${id}/runs/review`, "http://localhost"), { runId: before.id, revision: before.revision, decision: "accepted" });
+  assert.equal(accepted.status, 200);
+  await app.root.commit(async tx => {
+    (await tx.doc(ScheduleResults, id)).progress![before.id] = { status: "completed", phase: "notify", notification: "queued", attempts: 1 };
+  }, app.ctx);
+  const after = await read();
+  assert.equal(after.resultDelivery?.notification, "queued");
+  assert.equal(after.revision, before.revision);
+  assert.equal(after.review.status, "accepted");
 });

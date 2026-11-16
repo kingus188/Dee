@@ -17,8 +17,8 @@ test("addressed peer delivery resumes the requested context and returns once to 
     return fauxAssistantMessage("target answer");
   });
   const peers = createPeerService({ nodeId: "server", configured: () => true });
-  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], onReport: () => {} }, ctx);
-  peers.bind(runtime, ctx);
+  const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, dataDir, ...catalog, extensions: [peers.extension, peers.accessExtension], onReport: () => {} }, ctx);
+
   try {
     const target = await runtime.root.commit(async tx => {
       const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
@@ -50,7 +50,7 @@ test("a busy Pi target uses its durable follow-up inbox without steering the run
   let calls = 0;
   const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, async () => { if (++calls === 1) { entered(); await gate; } return fauxAssistantMessage("settled"); });
   const peers = createPeerService({ nodeId: "server", configured: () => true });
-  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], onReport: () => {} }, ctx); peers.bind(runtime, ctx);
+  const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, dataDir, ...catalog, extensions: [peers.extension, peers.accessExtension], onReport: () => {} }, ctx);
   try {
     const target = await runtime.root.commit(async tx => { const child = await tx.createConversation({ ownership: { kind: "ownerless" } }); await configure(tx, child.id, { model: runtime.agentModel }); return child.id; }, ctx);
     const conversation = (await runtime.harness.conversation(target, ctx))!;
@@ -82,7 +82,7 @@ test("status tools never schedule a queued same-node destination from its source
   const id = randomUUID(); let authorizedCalls = 0;
   const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, transcript => transcript.messages.at(-1)?.role === "toolResult" ? fauxAssistantMessage("status observed") : fauxAssistantMessage(fauxToolCall("peer_task_status", { id }), { stopReason: "toolUse" }));
   const peers = createPeerService({ nodeId, configured: () => true, authorized: async () => { authorizedCalls++; return false; }, remote: async () => { throw new Error("unexpected transport"); } });
-  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], onReport: () => {} }, ctx); peers.bind(runtime, ctx);
+  const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, dataDir, ...catalog, extensions: [peers.extension, peers.accessExtension], onReport: () => {} }, ctx);
   try {
     const target = await runtime.root.commit(async tx => { const child = await tx.createConversation({ ownership: { kind: "ownerless" } }); await configure(tx, child.id, { model: runtime.agentModel }); return child.id; }, ctx);
     await peers.submit({ id, source: nodeId, target: nodeId, sourceSession: { agent: "pi", sessionId: `pi-${runtime.root.id}` }, targetSession: { agent: "pi", sessionId: `pi-${target}` }, task: "await approval" });
@@ -96,7 +96,7 @@ test("archiving conversations cannot be addressed by a peer until explicitly res
   const dataDir = await mkdtemp(join(tmpdir(), "dee-peer-archiving-"));
   const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, fauxAssistantMessage("ok"));
   const peers = createPeerService({ nodeId: "server", configured: () => true });
-  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], onReport: () => {} }, ctx); peers.bind(runtime, ctx);
+  const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, dataDir, ...catalog, extensions: [peers.extension, peers.accessExtension], onReport: () => {} }, ctx);
   try {
     const target = await runtime.root.commit(async tx => {
       const child = await tx.createConversation({ ownership: { kind: "ownerless" } });

@@ -23,7 +23,7 @@ test("a completed source turn automatically continues in its original Pi context
   });
   const options = { dataDir, ...catalog, onReport: () => {} };
   let peers = createPeerService({ nodeId: "server", configured: () => true });
-  let runtime = await openRuntime({ ...options, extensions: [peers.extension] }, ctx); peers.bind(runtime, ctx);
+  let runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension] }, ctx);
   try {
     const source = await runtime.root.commit(async tx => { const child = await tx.createConversation({ ownership: { kind: "ownerless" } }); await configure(tx, child.id, { model: runtime.agentModel }); return child.id; }, ctx);
     const conversation = (await runtime.harness.conversation(source, ctx))!;
@@ -41,7 +41,7 @@ test("a completed source turn automatically continues in its original Pi context
     assert.equal(turns.length, 4); assert.equal((await peers.list()).length, 1, "completion receipt creates no new peer job");
     await peers.close(); await runtime.harness.close(ctx);
     peers = createPeerService({ nodeId: "server", configured: () => true });
-    runtime = await openRuntime({ ...options, extensions: [peers.extension] }, ctx); peers.bind(runtime, ctx);
+    runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension] }, ctx);
     await peers.run(job.id); await peers.complete(job.id, { status: "done", result: "continued" });
     assert.equal(turns.length, 4); assert.equal((await peers.list()).length, 1);
   } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
@@ -53,7 +53,7 @@ test("unconfigured source retains its completed job across restart; failed ackno
   const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, () => { turns++; return fauxAssistantMessage("continued"); });
   const options = { dataDir, ...catalog, onReport: () => {} };
   let peers = createPeerService({ nodeId: "server", configured: () => configured });
-  let runtime = await openRuntime({ ...options, extensions: [peers.extension] }, ctx); peers.bind(runtime, ctx);
+  let runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension] }, ctx);
   try {
     const job = await peers.submit({ id: randomUUID(), source: "server", target: "desktop-" + randomUUID(), sourceSession: { agent: "pi", sessionId: `pi-${runtime.root.id}` }, targetSession: { agent: "codex", sessionId: randomUUID() }, task: "remote work" });
     await peers.complete(job.id, { status: "done", result: "remote result" });
@@ -63,7 +63,7 @@ test("unconfigured source retains its completed job across restart; failed ackno
     await peers.close(); await runtime.harness.close(ctx);
     configured = true;
     peers = createPeerService({ nodeId: "server", configured: () => configured });
-    runtime = await openRuntime({ ...options, extensions: [peers.extension] }, ctx); peers.bind(runtime, ctx);
+    runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension] }, ctx);
     await peers.run(job.id);
     await until(async () => (await runtime.root.commit(tx => tx.submissionByRequest(runtime.root.id, `peer-result:${job.id}`), ctx))?.status === "done");
     assert.equal(turns, 1); assert.equal((await peers.get(job.id))!.resultDelivered, true); assert.equal((await peers.get(job.id))!.deliveryError, undefined);
@@ -71,7 +71,7 @@ test("unconfigured source retains its completed job across restart; failed ackno
     await runtime.root.commit(async tx => { const item = (await tx.doc(PeerJobs)).items[0]!; delete item.resultDelivered; }, ctx);
     await peers.close(); await runtime.harness.close(ctx);
     peers = createPeerService({ nodeId: "server", configured: () => true });
-    runtime = await openRuntime({ ...options, extensions: [peers.extension] }, ctx); peers.bind(runtime, ctx);
+    runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension] }, ctx);
     await peers.run(job.id);
     assert.equal(turns, 1); assert.equal((await peers.get(job.id))!.resultDelivered, true);
   } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
@@ -84,7 +84,7 @@ test("busy source receives a follow-up without steering; legacy passive receipt 
   const seen: string[] = [];
   const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, async transcript => { seen.push(JSON.stringify(transcript.messages)); if (++calls === 1) { enter(); await gate; } return fauxAssistantMessage("continued"); });
   const peers = createPeerService({ nodeId: "server", configured: () => true });
-  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], onReport: () => {} }, ctx); peers.bind(runtime, ctx);
+  const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, dataDir, ...catalog, extensions: [peers.extension, peers.accessExtension], onReport: () => {} }, ctx);
   try {
     const initial = await runtime.root.submit({ type: "input", content: "busy original turn" }, ctx); await entered;
     const job = await peers.submit({ id: randomUUID(), source: "server", target: "desktop-" + randomUUID(), sourceSession: { agent: "pi", sessionId: `pi-${runtime.root.id}` }, task: "remote work" });
@@ -110,7 +110,7 @@ test("target completion survives failed source delivery and restart without exec
   const peerOptions = { nodeId, configured: () => true, deliverResult: async () => { if (++admissions === 1) throw new Error("source unavailable"); return true; } };
   const options = { dataDir, ...catalog, onReport: () => {} };
   let peers = createPeerService(peerOptions);
-  let runtime = await openRuntime({ ...options, extensions: [peers.extension] }, ctx); peers.bind(runtime, ctx);
+  let runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension] }, ctx);
   try {
     const job = await peers.submit({ id: randomUUID(), source: nodeId, target: nodeId, sourceSession: { agent: "claude", sessionId: randomUUID() }, targetSession: { agent: "pi", sessionId: `pi-${runtime.root.id}` }, task: "target work" });
     await assert.rejects(peers.run(job.id), /source unavailable/);
@@ -118,7 +118,7 @@ test("target completion survives failed source delivery and restart without exec
     assert.equal((await peers.get(job.id))!.resultDelivered, undefined); assert.ok((await peers.get(job.id))!.deliveryError);
     await peers.close(); await runtime.harness.close(ctx);
     peers = createPeerService(peerOptions);
-    runtime = await openRuntime({ ...options, extensions: [peers.extension] }, ctx); peers.bind(runtime, ctx);
+    runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, ...options, extensions: [peers.extension, peers.accessExtension] }, ctx);
     await peers.run(job.id); await peers.run(job.id);
     assert.equal(targetTurns, 1); assert.equal(admissions, 2); assert.equal((await peers.get(job.id))!.resultDelivered, true); assert.equal((await peers.get(job.id))!.deliveryError, undefined);
   } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
@@ -136,7 +136,7 @@ test("model-initiated relay finishes its initial turn, then continues and querie
     return fauxAssistantMessage(fauxToolCall("send_to_peer_session", { target: "server", agent: "pi", sessionId: targetSession, task: "gated target work" }), { stopReason: "toolUse" });
   });
   const peers = createPeerService({ nodeId: "server", configured: () => true });
-  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension], onReport: () => {} }, ctx); peers.bind(runtime, ctx);
+  const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, dataDir, ...catalog, extensions: [peers.extension, peers.accessExtension], onReport: () => {} }, ctx);
   try {
     const target = await runtime.root.commit(async tx => { const child = await tx.createConversation({ ownership: { kind: "ownerless" } }); await configure(tx, child.id, { model: runtime.agentModel }); return child.id; }, ctx);
     targetSession = `pi-${target}`;

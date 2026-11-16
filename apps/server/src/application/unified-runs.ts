@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { BackgroundJob, ExecutionRun, Goal, UnifiedRun } from "@assistant/contracts";
+import type { BackgroundJob, ExecutionRun, Goal, UnifiedRun, RunResultDelivery } from "@assistant/contracts";
 import type { Delegation } from "@assistant/features";
 
 export type RuntimeObservation = { terminal: boolean; aborted?: boolean };
@@ -9,18 +9,36 @@ type Input = {
   goals: readonly Goal[];
   delegations: readonly Delegation[];
   background: readonly BackgroundJob[];
+  resultDelivery?: Readonly<Record<string, RunResultDelivery>>;
+  resultDeliveryJobs?: Readonly<Record<string, number>>;
   runtime?: ReadonlyMap<number, RuntimeObservation>;
 };
 type RunInput = Omit<UnifiedRun, "revision" | "review"> & { review?: UnifiedRun["review"] };
 function record(input: RunInput): UnifiedRun {
-  const { review, ...result } = input;
-  return { ...result, revision: createHash("sha256").update(JSON.stringify(result)).digest("hex"),
+  const { review, resultDelivery, ...result } = input;
+  const { delivery: _delivery, ...artifact } = result;
+  return { ...result, ...(resultDelivery ? { resultDelivery } : {}), revision: createHash("sha256").update(JSON.stringify(artifact)).digest("hex"),
     review: review ?? { status: ["succeeded", "review"].includes(input.status) && input.result ? "pending" : "not_applicable" } };
+}
+/** Exact old fingerprint only; never reconstruct hypothetical past delivery states. */
+export function legacyRunRevision(run: UnifiedRun): string {
+  const { revision: _revision, review: _review, resultDelivery: _resultDelivery, ...legacy } = run;
+  return createHash("sha256").update(JSON.stringify(legacy)).digest("hex");
 }
 function cancellation(cancelled: boolean, taskId: number | undefined, runtime: Input["runtime"]): UnifiedRun["cancellation"] {
   if (!cancelled) return "not_requested";
   if (taskId === undefined) return "unknown";
   return runtime?.get(taskId)?.terminal ? "confirmed" : "requested";
+}
+
+function scheduleDelivery(input: Input, runId: string): RunResultDelivery {
+  const progress = input.resultDelivery?.[runId];
+  if (!progress) return { status: "unknown" };
+  const jobId = input.resultDeliveryJobs?.[runId];
+  if (["pending", "running"].includes(progress.status) && jobId !== undefined && input.runtime?.get(jobId)?.terminal) {
+    return { ...progress, status: "unknown", error: progress.error ?? "结果处理任务已结束，最终交付状态未记录" };
+  }
+  return { ...progress };
 }
 
 /** Read model over existing durable records. Legacy missing metadata stays unknown, never invented. */
@@ -37,6 +55,7 @@ export function projectUnifiedRuns(input: Input): UnifiedRun[] {
       text: run.text, startedAt: run.startedAt, finishedAt: run.finishedAt,
       result: run.result, error: interrupted ? (run.kind === "schedule" ? "等待结果的计划任务已结束，实际模型执行状态未确认" : "执行进程已结束，未记录完整结果") : run.error, evidence: [],
       cancellation: run.kind === "schedule" && cancelled ? (runtime?.terminal ? "unknown" : "requested") : cancellation(cancelled, runtimeTaskId, input.runtime),
+      ...(run.kind === "schedule" ? { resultDelivery: scheduleDelivery(input, run.id) } : {}),
       delivery: run.daylightTaskId ? { status: run.deliveryError ? "failed" : run.deliveryStatus ?? "unknown", detail: `关联待办 ${run.daylightTaskId} 的结果同步，不代表外部消息送达${run.deliveryError ? `：${run.deliveryError}` : ""}` } : { status: "not_applicable" },
     });
   });
