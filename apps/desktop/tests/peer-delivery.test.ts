@@ -108,7 +108,7 @@ createInterface({input:process.stdin}).on('line',line=>{
     assert.equal((await agent.peerStatus(input.id)).status, "queued", "busy native process retains approved queue intent");
     await agent.close(); agent = await openDesktopAgent(options);
     await until(() => peers.get(input.id), value => value?.status === "failed");
-    assert.match((await peers.get(input.id))!.result!, /尚不支持逐工具验证/);
+    assert.match((await peers.get(input.id))!.result!, /源宿主授权缺失/);
     assert.equal(nativeCalls, 3, "unsupported native peer never starts a target turn");
     assert.ok(!(await agent.snapshot()).messages.some(message => message.text === "peer work"), "background failure never replaces selected source");
     assert.equal((await runtime.root.context(ctx)).entries.filter(entry => entry.kind === "app.peer-result").length, 1);

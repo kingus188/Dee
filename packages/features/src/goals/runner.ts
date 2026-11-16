@@ -51,7 +51,7 @@ async function guardedWait(runtime: Runtime, context: Context, input: Input, goa
       if (worker.value?.checkpoint) ready();
     }
     runtime.signal.addEventListener("abort", stop, { once: true });
-    const until = workerId === undefined ? Math.min(goal.wakeAt ?? goal.deadlineAt, goal.deadlineAt) : Math.min(goal.deadlineAt, Date.now() + 300_000);
+    const until = workerId === undefined ? Math.min(goal.wakeAt ?? goal.deadlineAt, goal.deadlineAt) : Math.min(goal.deadlineAt, (goal.roundStartedAt ?? Date.now()) + 300_000);
     const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("委托本轮执行或等待已到截止时间")), Math.max(0, until - Date.now())); });
     // Promise.race does not cancel an eagerly evaluated work(). Recheck the
     // committed snapshots before admission so an already-invalid round is free.
@@ -113,6 +113,17 @@ export const GoalTask: Task<Input, Checkpoint, string | null, object> = defineTa
       const { workerId, round } = task.state.checkpoint;
       const goal = (await runtime.snapshot(Goals, context))?.items.find(item => item.id === task.input.goalId);
       if (!current(goal, task.input)) { await runtime.commit(async () => finishTask(), context); return; }
+      // Legacy rounds may predate roundStartedAt. Persist the first observed start
+      // once so repeated process recovery cannot renew the per-round time budget.
+      if (goal.roundStartedAt === undefined) {
+        await runtime.commit(async tx => {
+          const latest = (await tx.doc(Goals)).items.find(item => item.id === task.input.goalId);
+          if (current(latest, task.input) && latest.round === round) {
+            latest.roundStartedAt ??= Date.now();
+            goal.roundStartedAt = latest.roundStartedAt;
+          }
+        }, context);
+      }
       const child = await runtime.conversation(workerId, context);
       if (!child) throw new Error("委托执行会话不存在");
       let error: string | undefined;

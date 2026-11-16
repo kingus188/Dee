@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModelCatalog, createPeerService, openRuntime, Index, type Runtime } from "@assistant/runtime";
-import { GOAL_READ_TOOLS, createConversationTools, createAssistant, createDailyReportTools, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway, createMailInbox } from "@assistant/features";
+import { independentTaskAdmitted, GOAL_READ_TOOLS, createConversationTools, createAssistant, createDailyReportTools, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway, createMailInbox } from "@assistant/features";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { WechatChannel } from "@assistant/channel-wechat";
@@ -75,7 +75,7 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     let peerRuntime: Runtime | undefined;
     let conversationReader: ReturnType<typeof createConversationReader> | undefined;
     const readConversations = () => { if (!conversationReader) throw new Error("对话查询尚未就绪"); return conversationReader; };
-    const peers = createPeerService({ nodeId: "server", readPolicy: { revision: "server-read-v1", tools: [...GOAL_READ_TOOLS] }, configured: () => modelConfigured,
+    const peers = createPeerService({ nodeId: "server", independentTask: independentTaskAdmitted, readPolicy: { revision: "server-read-v1", tools: [...GOAL_READ_TOOLS] }, configured: () => modelConfigured,
       devices: async () => (config.password || config.peerToken) && peerRuntime ? (await peerDevices(peerRuntime, ctx)).filter(item => item.online).map(item => item.deviceId) : [],
       remoteSessions: async (node, session) => {
         if (!peerRuntime || !(config.password || config.peerToken)) throw new Error("协作需要设备配对");
@@ -92,6 +92,12 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
         conversationReader = createConversationReader(runtime, ctx, episodeStore!);
         await repairConversationTitles(runtime, ctx);
         await migratePersonalNotes(runtime, personalNotes, ctx);
+        // Recovery is an explicit startup write, never a side effect of GET/views.
+        for (const owner of (await runtime.harness.snapshot(Index, ctx))?.items ?? []) {
+          if (owner.archivedAt || owner.archivingAt) continue;
+          const conversation = await runtime.harness.conversation(owner.id, ctx);
+          if (conversation) await conversation.commit(async tx => { await tasks.recoverResults(tx, owner.id); }, ctx);
+        }
         episodeStore!.reconcileConversations((await runtime.harness.snapshot(Index, ctx))?.items.map(item => item.id) ?? []);
       },
       extensions: [createConversationTools({ search: (caller, query) => readConversations().search(caller, query), list: (caller, query) => readConversations().list(caller, query), read: (caller, query) => readConversations().read(caller, query) }), peers.extension, createDailyReportTools(dailyReports), createDaylight(daylight), createMailInbox(mail), createAssistant(notify, daylight), Delegate, tasks.extension, createPersonal(config.knowledge), createMaterials(materialsRoot), createInvestigator({ repos: parseRepos(config.investigate.repos), dir: join(config.dataDir, "investigations"), agent: config.investigate.agent, codexBin: config.investigate.codexBin, claudeBin: config.investigate.claudeBin, notify }), createEpisodes(episodeStore), createTeamsInbox({ list: query => teamsStore!.list(query), records: rows => teamsStore!.records(rows),

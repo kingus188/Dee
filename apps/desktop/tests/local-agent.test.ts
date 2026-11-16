@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { openAgentSettings } from "../dist/agent-settings.js";
 import { openDesktopAgent } from "../dist/local-agent.js";
-import { createModelCatalog } from "@assistant/runtime";
+import { createModelCatalog, peerPayloadDigest } from "@assistant/runtime";
 import { PeerConnectionError } from "../dist/peer-connection.js";
 import type { AgentRequest } from "../dist/local-agent.js";
 
@@ -35,6 +35,13 @@ test("WebSocket changes wake local collaboration without waiting for reconciliat
     assert.equal(snapshot.jobs[0]?.status, "queued"); assert.equal(snapshot.busy, false);
     receive("disconnected"); assert.equal((await agent.snapshot()).serverConnected, false);
     receive("connected"); await until(() => agent.snapshot(), value => value.serverConnected && value.collaboration === "ready");
+    for (const source of [settings.get().nodeId, "desktop-" + randomUUID()]) {
+      const forged = { id: randomUUID(), source, target: settings.get().nodeId, task: "spoof local bypass", sourceSession: { agent: "pi", sessionId: "pi-1" }, targetSession: { agent: "pi", sessionId: "pi-2" }, status: "queued", createdAt: "now", updatedAt: "now" };
+      items = [forged]; receive("tasks");
+      await until(() => agent.snapshot(), value => value.collaboration === "unavailable");
+      assert.ok(!(await agent.snapshot()).jobs.some(job => job.id === forged.id), "server polling cannot mint same-node exemption");
+      items = []; receive("connected"); await until(() => agent.snapshot(), value => value.collaboration === "ready");
+    }
   } finally { await agent.close(); await rm(directory, { recursive: true, force: true }); }
   assert.equal(transportClosed, true); assert.equal(unsubscribed, true);
 });
@@ -77,6 +84,7 @@ test("local Agent owns model, protects tools, persists approvals and returns one
   const incoming = { id: randomUUID(), source: "server", target: settings.get().nodeId, task: "读取工作目录 fixture.txt", status: "queued", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   const completions: unknown[] = []; let confirms = 0;
   const options = { directory, settings, loadModels, confirm: async () => { confirms++; return allow; }, request: async (path: string, body?: unknown) => {
+    if (path.includes("/authority?")) return { authority: { id: incoming.id, revision: 1, expiresAt: Date.now() + 60000, payloadDigest: peerPayloadDigest(incoming as import("@assistant/runtime").PeerJob), tools: ["read"] } };
     if (outbound && path === "/api/peers/messages") return { item: { ...outbound, status: "done", result: "远端结果", createdAt: "now", updatedAt: "now" } };
     if (outbound && path.includes(outbound.id)) return { item: { ...outbound, status: "done", result: "远端结果", createdAt: "now", updatedAt: "now" } };
     if (path.includes("/complete")) { completions.push(body); return { item: { ...incoming, status: "done", result: "本机验证完成" } }; }

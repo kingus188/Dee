@@ -8,16 +8,14 @@ import { nextOccurrence, normalizeSchedule, scheduleMatches, normalizeRequestId 
 import { nextCalendarOccurrence } from "./calendar.js";
 import { cancelExecution, finishExecution, normalizeDaylightTaskId, recordExecution } from "./executions.js";
 import { detach, finishTask as finish } from "../results.js";
-import { createScheduleResults } from "./schedule-results.js";
-import type { NotifyEvent } from "./notifications.js";
+import type { createExecutionResults } from "./result-delivery.js";
 
 const runId = (input: ScheduleInput) => `schedule:${input.scheduleId}:${input.at}`;
 const submission = (input: ScheduleInput) => ({ type: "input" as const, content: "[计划任务] " + input.text, requestId: runId(input), whenBusy: "followUp" as const,
   entry: { kind: "app.schedule-input", data: { scheduleId: input.scheduleId, at: input.at } } });
 
-import type { ExecutionRun } from "@assistant/contracts";
-export function createSchedules(notifyEvent: NotifyEvent, onSettled: (run: ExecutionRun) => Promise<"delivered" | "not_applicable" | "unknown" | void> = async () => {}) {
-  const { ScheduleResultTask, enqueueResult, recoverResults } = createScheduleResults(notifyEvent, onSettled);
+export function createSchedules(results: ReturnType<typeof createExecutionResults>) {
+  const { enqueueResult, enqueueResults, recoverResults } = results;
   const ScheduleTask: Task<ScheduleInput, ScheduleCheckpoint, string | null, object> = defineTask<ScheduleInput, ScheduleCheckpoint, string | null, object>({
     name: "app.v3.schedule", version: 1,
     initial: () => ({ phase: "sleep" }),
@@ -47,6 +45,7 @@ export function createSchedules(notifyEvent: NotifyEvent, onSettled: (run: Execu
           // One recurring schedule has at most one in-flight occurrence. Skip overlapping
           // ticks without a model call; unrelated and one-shot reminders are not gated.
           if (!admitted && item && (item.calendar || item.everyMinutes > 0)) {
+            const recovered: string[] = [];
             for (const run of executions.filter(run => run.kind === "schedule" && run.taskId === item.id && (run.status === "queued" || run.status === "running"))) {
               // Read the real submission, not the observer task's terminal state. The
               // stable request ID also covers a crash before submissionId was saved.
@@ -58,9 +57,10 @@ export function createSchedules(notifyEvent: NotifyEvent, onSettled: (run: Execu
               run.submissionId = observed.id;
               if (observed.status === "done" || observed.status === "unanswered") {
                 await finishExecution(tx, runtime.conversationId, run.id, observed);
-                await enqueueResult(tx, runtime.conversationId, run.id);
+                recovered.push(run.id);
               }
             }
+            await enqueueResults(tx, runtime.conversationId, recovered);
           }
           if (!admitted && item && (item.calendar || item.everyMinutes > 0) && executions.some(run =>
             run.kind === "schedule" && run.taskId === item.id && (run.status === "queued" || run.status === "running"))) {
@@ -160,5 +160,5 @@ export function createSchedules(notifyEvent: NotifyEvent, onSettled: (run: Execu
     } else throw new Error("当前状态不能执行该操作");
     return detach(item);
   }
-  return { ScheduleTask, ScheduleResultTask, scheduleInTx, manageScheduleInTx };
+  return { ScheduleTask, scheduleInTx, manageScheduleInTx };
 }

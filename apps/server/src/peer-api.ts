@@ -88,6 +88,15 @@ export async function peerApi(context: Runtime & { ctx: Context; peers: PeerServ
       }
       if (method === "GET") return { status: 200, data: await peerArtifacts(context, ctx, job.id, undefined, artifact[2]) };
     }
+    const authority = url.pathname.match(/^\/api\/peers\/tasks\/([a-f0-9-]+)\/authority$/);
+    if (method === "GET" && authority) {
+      if (!PEER_JOB_ID.test(authority[1])) throw new HttpError(400, "任务 ID 必须为 UUID");
+      const device = deviceId(url.searchParams.get("deviceId"));
+      const job = participant(await peers.get(authority[1]), device);
+      if (job.source !== "server" || job.target !== device) throw new HttpError(403, "只能核验服务器发往当前目标的授权");
+      // Only bindings and validity leave the source host, never user messages.
+      return { status: 200, data: { authority: await peers.sourceAuthority(job.id) ?? null } };
+    }
     const match = url.pathname.match(/^\/api\/peers\/tasks\/([^/]+)(\/(?:complete|cancel))?$/);
     if (match) {
       if (!PEER_JOB_ID.test(match[1])) throw new HttpError(400, "任务 ID 必须为 UUID");

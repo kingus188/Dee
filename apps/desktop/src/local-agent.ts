@@ -7,7 +7,7 @@ import { handoffPrompt, prepareHandoff } from "./agent-handoff.js";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createPeerService, openRuntime } from "@assistant/runtime";
 import type { PeerJob, PeerSession, PeerSubmission, PeerSessionInfo, PeerTranscript, Runtime } from "@assistant/runtime";
-import { validPeerSession } from "@assistant/runtime";
+import { sourceAuthorityMatches, validPeerSession } from "@assistant/runtime";
 import type { DesktopAgentSnapshot } from "@assistant/contracts";
 import { configure, defineDoc, defineExtension, defineTool, hook, section, ToolTask } from "@earendil-works/pi-durable";
 import { Type } from "@earendil-works/pi-ai";
@@ -116,6 +116,15 @@ export async function openDesktopAgent(options: {
     return createPeerService({ nodeId, configured,
       readPolicy: { revision: "desktop-read-v1", tools: ["read", "list_local_skills", "read_local_skill"], resourceRoot: peerWorkspaceRoot(options.settings.get().workspace) },
       validateRead: (job, call) => peerReadAllowed(job, call, options.settings.get().workspace),
+      verifySource: async (job, tool) => {
+        if (job.source === nodeId) return true;
+        if (job.source !== "server") return false;
+        // Legacy, shared-session and stripped-proof requests never downgrade
+        // to the old local-only scope. Failure to reach the source is an error.
+        if (job.targetSession) return false;
+        const response = await options.request(`/api/peers/tasks/${job.id}/authority?deviceId=${nodeId}`, undefined, await jobServer(job.id)) as { authority?: unknown };
+        return sourceAuthorityMatches(job, response.authority, tool);
+      },
       report,
       remote: job => requestJob(job.id, job.targetSession && job.sourceSession ? "/api/peers/messages" : "/api/peers/tasks", { id: job.id, source: nodeId, target: "server", task: job.task, sourceSession: job.sourceSession, targetSession: job.targetSession, workspace: job.workspace, constraints: job.constraints, acceptanceCriteria: job.acceptanceCriteria }),
       cancelRemote: job => requestJob(job.id, `/api/peers/tasks/${job.id}/cancel`, { deviceId: nodeId }),
@@ -214,7 +223,8 @@ export async function openDesktopAgent(options: {
     if (!Array.isArray(response.items)) throw new Error("服务器委派列表无效");
     collaboration = "ready"; connectionError = undefined;
     for (const job of response.items) {
-      if (job.target === nodeId && job.source === "server") {
+      if (job.target === nodeId) {
+        if (job.source !== "server") throw new Error("服务器入站任务不能冒充本机或其他设备来源");
         await peers.submit(job);
         if (await jobServer(job.id) !== currentServer) throw new Error("委派任务属于另一台服务器，不能跨服务器传送结果");
         let localJob = await peers.get(job.id);

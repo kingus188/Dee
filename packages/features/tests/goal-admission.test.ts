@@ -6,14 +6,16 @@ import { GoalTask } from "../dist/goals/runner.js";
 import { Goals, GoalWorker, GOAL_TOKEN_LIMIT } from "../dist/goals/documents.js";
 import { normalizeGoal } from "../dist/goals/state.js";
 
-for (const reason of ["cancelled", "revision", "tokens", "deadline", "checkpoint", "aborted"] as const) {
+for (const reason of ["cancelled", "revision", "tokens", "deadline", "checkpoint", "aborted", "round_timeout", "legacy_checkpoint"] as const) {
   test(`goal admission makes zero model submissions for an already ${reason} round`, async () => {
-    const goal = { ...normalizeGoal({ text: "核对资料", criteria: "引用证据" }), id: "goal", conversationId: 1, round: 1, workers: [2], workerConversationId: 2 };
+    const goal = { ...normalizeGoal({ text: "核对资料", criteria: "引用证据" }), id: "goal", conversationId: 1, round: 1, workers: [2], workerConversationId: 2, roundStartedAt: Date.now() as number | undefined };
+    if (reason === "legacy_checkpoint") goal.roundStartedAt = undefined;
     const watched = structuredClone(goal);
     if (reason === "cancelled") watched.status = "cancelled";
     if (reason === "revision") watched.revision++;
     if (reason === "deadline") goal.deadlineAt = Date.now() - 1;
-    const checkpoint = reason === "checkpoint" ? { action: "complete", summary: "已有交付", evidence: ["file:1"] } : null;
+    if (reason === "round_timeout") goal.roundStartedAt = Date.now() - 300_001;
+    const checkpoint = (reason === "checkpoint" || reason === "legacy_checkpoint") ? { action: "complete", summary: "已有交付", evidence: ["file:1"] } : null;
     const usage = { models: { fixture: { totalTokens: reason === "tokens" ? GOAL_TOKEN_LIMIT : 0 } } };
     const worker = { checkpoint };
     let submissions = 0, stopped = 0;
@@ -30,5 +32,6 @@ for (const reason of ["cancelled", "revision", "tokens", "deadline", "checkpoint
     if (reason === "aborted") await assert.rejects(run); else await run();
     assert.equal(submissions, 0);
     assert.equal(stopped, 3);
+    if (reason === "legacy_checkpoint") assert.equal(typeof goal.roundStartedAt, "number");
   });
 }

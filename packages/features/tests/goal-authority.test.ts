@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { createModelCatalog, openRuntime } from "@assistant/runtime";
+import { createModelCatalog, createPeerService, openRuntime } from "@assistant/runtime";
 import type { Runtime } from "@assistant/runtime";
-import { Goals, createTaskCenter, createGoalInTx } from "@assistant/features";
+import { Goals, createTaskCenter, createGoalInTx, independentTaskAdmitted } from "@assistant/features";
 
 async function fixture() {
   const dataDir = await mkdtemp(join(tmpdir(), "dee-goal-authority-"));
@@ -26,13 +26,14 @@ async function fixture() {
     }), { stopReason: "toolUse" });
     return fauxAssistantMessage("已核对工具结果。");
   });
-  const runtime = await openRuntime({ dataDir, models, agentModel, extensions: [createTaskCenter(async () => {}).extension], onReport: error => { throw error; } }, context);
+  const peers = createPeerService({ nodeId: "server", configured: () => true, independentTask: independentTaskAdmitted, readPolicy: { revision: "test", tools: [] } });
+  const runtime = await openRuntime({ beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, context); }, dataDir, models, agentModel, extensions: [createTaskCenter(async () => {}).extension, peers.extension, peers.accessExtension], onReport: error => { throw error; } }, context);
   const conversation = await runtime.harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model: agentModel } }, context);
   async function invoke(prefix: string, name: string, args: Record<string, unknown>) {
     const submission = await conversation.submit({ type: "input", content: prefix + "\nCASE:" + JSON.stringify({ name, args }) }, context);
     assert.equal((await submission.wait(context)).status, "done");
   }
-  return { runtime, conversation, attempted, invoke, close: async () => { await runtime.harness.close(context); await rm(dataDir, { recursive: true, force: true }); } };
+  return { runtime, peers, conversation, attempted, invoke, close: async () => { await peers.close(); await runtime.harness.close(context); await rm(dataDir, { recursive: true, force: true }); } };
 }
 
 async function reviewed(runtime: Runtime, id: string) {
@@ -76,4 +77,13 @@ for (const action of ["resume", "cancel", "accept"] as const) test(`Teams notifi
     await reviewed(f.runtime, before.id);
   } else assert.equal(allowed?.status, action === "cancel" ? "cancelled" : "completed");
   assert.deepEqual(f.attempted, ["control_goal", "control_goal"]);
+});
+
+test("a historical peer turn does not taint a later owner's independent goal", { timeout: 15000 }, async t => {
+  const f = await fixture(); t.after(f.close);
+  const peer = await f.peers.submit({ id: crypto.randomUUID(), source: "desktop-" + crypto.randomUUID(), target: "server", targetSession: { agent: "pi", sessionId: `pi-${f.conversation.id}` }, task: "earlier peer read" });
+  await f.peers.run(peer.id);
+  await f.invoke("本人现在要求核对资料", "start_goal", { text: "独立新目标", criteria: "给出依据" });
+  const goal = (await f.runtime.harness.snapshot(Goals, context))!.items[0]!;
+  assert.equal((await reviewed(f.runtime, goal.id)).status, "review");
 });

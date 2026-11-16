@@ -117,3 +117,24 @@ test("peer API validates routing, persists desktop waiting, and only accepts tar
     await assert.rejects(call("POST", "tasks", { ...input, task: "a".repeat(16_001) }), { status: 400 });
   } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
 });
+
+test("source authority route returns only host-issued bindings and revokes atomically with cancellation", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "dee-source-proof-api-")), device = "desktop-" + randomUUID();
+  const { fauxToolCall } = await import("@earendil-works/pi-ai/providers/faux");
+  const catalog = await createModelCatalog({ api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 }, transcript => transcript.messages.at(-1)?.role === "user" ? fauxAssistantMessage(fauxToolCall("delegate_to_peer", { target: device, task: "read approved files" }), { stopReason: "toolUse" }) : fauxAssistantMessage("queued"));
+  const peers = createPeerService({ nodeId: "server", configured: () => true, devices: async () => [device] });
+  const runtime = await openRuntime({ dataDir, ...catalog, extensions: [peers.extension, peers.accessExtension], beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, onReport: () => {} }, ctx);
+  const context = { ...runtime, ctx, peers, config: { password: "fixture" }, exitIfFatal: () => {}, redact: String };
+  try {
+    await (await runtime.root.submit({ type: "input", content: "PRIVATE USER SOURCE: read desktop files" }, ctx)).wait(ctx);
+    const job = (await peers.list())[0]!;
+    const url = new URL(`http://localhost/api/peers/tasks/${job.id}/authority?deviceId=${device}`);
+    const response = await peerApi(context, "GET", url);
+    assert.ok((response!.data as { authority: unknown }).authority);
+    assert.doesNotMatch(JSON.stringify(response), /PRIVATE USER SOURCE|entryId|taskId|origin/);
+    await peers.requestCancel(job.id);
+    assert.deepEqual((await peerApi(context, "GET", url))!.data, { authority: null });
+    const unproved = await peers.submit({ id: randomUUID(), source: "server", target: device, task: "legacy" });
+    assert.deepEqual((await peerApi(context, "GET", new URL(`http://localhost/api/peers/tasks/${unproved.id}/authority?deviceId=${device}`)))!.data, { authority: null });
+  } finally { await peers.close(); await runtime.harness.close(ctx); await rm(dataDir, { recursive: true, force: true }); }
+});

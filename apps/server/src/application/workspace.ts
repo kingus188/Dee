@@ -74,7 +74,7 @@ export function createWorkspace(
     for (const owner of await visible()) {
       const revision = episodeStore.sourceRevision(`conv:${owner.id}`);
       const conversation = await conversations.getConversation(owner.id);
-      observations.set(owner.id, { revision, data: await management.get(conversation, { retryDelivery: false }) });
+      observations.set(owner.id, { revision, data: await management.get(conversation) });
     }
     const items: AttentionItem[] = [];
     // Async reads must not return a source removed, revoked, archived or rebound in the meantime.

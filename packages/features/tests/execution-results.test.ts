@@ -82,6 +82,13 @@ async function backgroundPhase(f: ReturnType<typeof fixture>, phase: "start" | "
   const handler = phase === "abort" ? f.center.BackgroundTask.definition.abort : f.center.BackgroundTask.definition.phases[phase];
   assert.ok(handler);
   await handler(f.task as unknown as Parameters<typeof handler>[0], f.runtime as unknown as Parameters<typeof handler>[1], context);
+  if (phase === "report") {
+    const run = execution(f);
+    if (run?.status === "done" || run?.status === "failed") {
+      const runtime = { ...f.runtime, snapshot: async () => f.docs.get(features.Executions) };
+      await f.center.ScheduleResultTask.definition.phases.deliver!({ input: { runId: run.id }, state: { checkpoint: { phase: "deliver" } } } as never, runtime as never, context);
+    }
+  }
 }
 
 test("recovered schedule delivery neither counts another occurrence nor creates another execution", async () => {
@@ -396,4 +403,31 @@ test("recovered recurring admission preserves the existing receipt even when the
   assert.deepEqual(execution(f), prior);
   assert.equal(schedule.runs, 1);
   assert.equal(execution(f)?.status, "queued");
+});
+
+test("background settlement reads its answer before creating a result-delivery task", async () => {
+  const f = backgroundFixture();
+  Object.assign(f.task.state, { checkpoint: { phase: "wait", childId: 8 } });
+  let wroteTable = false;
+  const entry = f.tx.entry;
+  f.tx.entry = (async (...args: unknown[]) => { assert.equal(wroteTable, false, "Tx.entry cannot follow createTask"); return (entry as (...args: unknown[]) => unknown)(...args); }) as typeof f.tx.entry;
+  f.tx.createTask = async () => { wroteTable = true; return 99 as never; };
+  await backgroundPhase(f, "wait");
+  assert.equal(wroteTable, true);
+  assert.equal(execution(f)?.status, "done");
+  assert.equal(f.task.state.checkpoint.phase, "report");
+});
+
+test("multiple recovered schedule results finish all table reads before admitting delivery jobs", async () => {
+  const f = fixture();
+  f.docs.get(features.Schedules)!.items[0].everyMinutes = 1;
+  f.docs.set(features.Executions, { items: ["older-a", "older-b"].map(id => ({ id, kind: "schedule", taskId: "plan", status: "running" })) });
+  let wroteTable = false, reads = 0;
+  f.tx.submissionByRequest = async (_owner, id) => { assert.equal(wroteTable, false); reads++; return { id: reads, type: "input", status: "done", requestId: id, answer: 22 } as never; };
+  const entry = f.tx.entry;
+  f.tx.entry = (async (...args: unknown[]) => { assert.equal(wroteTable, false); return (entry as (...args: unknown[]) => unknown)(...args); }) as typeof f.tx.entry;
+  f.tx.createTask = async () => { wroteTable = true; return 99 as never; };
+  await schedulePhase(f, "deliver");
+  assert.equal(reads, 2);
+  assert.equal(f.docs.get(features.Executions)!.items.filter(run => run.status === "done").length, 2);
 });

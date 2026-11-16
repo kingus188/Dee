@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { TeamsStore } from "./teams-store.js";
+import type { TeamsStore, TeamsSyncChange } from "./teams-store.js";
 import { messageText } from "./teams-message-text.js";
 import { isImportant, type ImportantRules } from "./teams-rules.js";
 
@@ -84,7 +84,7 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
   // 单个聊天的增量同步：所需页全部读取成功后才入库并推进它的水位。
   async function syncChat(auth: string, meId: string, chat: Chat, window: { lower: number; newest: number }) {
     const { lower } = window;
-    const accessGeneration = store.triage?.accessGeneration(chat.id);
+    const snapshot = store.syncSnapshot(chat.id);
     let newest = window.newest;
     const messages = new Map<string, GraphMessage>();
     for await (const page of pages<GraphMessage>(auth, `/chats/${encodeURIComponent(chat.id)}/messages?$top=50&$orderby=createdDateTime desc`)) {
@@ -93,27 +93,28 @@ export function createTeamsSync({ dir, store, getToken, rules, fetchImpl = fetch
       if (page.length && page.every(message => Date.parse(message.createdDateTime) < lower)) break;
     }
     signal?.throwIfAborted();
-    if (store.triage && !store.triage.access(chat.id, true, accessGeneration)) throw new Error("Teams 访问状态已变化，停止旧同步并保留水位");
-    // 中断可用消息 ID 安全重放。
+    const changes: TeamsSyncChange[] = [];
+    // Prepare the complete projection before admitting it in one SQLite transaction.
     for (const message of [...messages.values()].sort((a, b) => Date.parse(a.createdDateTime) - Date.parse(b.createdDateTime))) {
       const sender = message.from?.user;
       const time = Date.parse(message.createdDateTime);
       if (message.deletedDateTime) {
-        store.revokeMessage(chat.id, `${chat.id}:${message.id}`);
+        changes.push({ deletedId: `${chat.id}:${message.id}` });
       } else if (message.messageType === "message" && sender?.id) {
         const text = messageText(message), mine = sender.id === meId;
         const id = `${chat.id}:${message.id}`;
         // record atomically fences derived content and replaces edited text.
         const mentionsMe = !!message.mentions?.some(item => item.mentioned?.user?.id === meId);
-        store.record({ id, chatId: chat.id, chatType: chat.chatType, chatTopic: chat.topic ?? undefined,
+        changes.push({ message: { id, chatId: chat.id, chatType: chat.chatType, chatTopic: chat.topic ?? undefined,
           senderId: sender.id, senderName: sender.displayName ?? "未知", direction: mine ? "out" : "in", text,
           notificationPriority: message.importance === "high" || message.importance === "urgent" ? "urgent" : "normal",
           addressedToMe: !mine && (chat.chatType === "oneOnOne" || mentionsMe), sourceUrl: message.webUrl,
           createdAt: new Date(time).toISOString(), important: !mine && isImportant(rules, { chatType: chat.chatType, senderId: sender.id,
-            senderName: sender.displayName, text, mentionsMe }) });
+            senderName: sender.displayName, text, mentionsMe }) } });
       }
       newest = Math.max(newest, time);
     }
+    if (!store.acceptSyncBatch(chat.id, snapshot, changes)) throw new Error("Teams 来源或访问状态已变化，停止旧同步并保留水位");
     const next = { ...marks, [chat.id]: new Date(newest).toISOString() };
     save(markPath, next);
     Object.assign(marks, next);

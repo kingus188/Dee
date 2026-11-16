@@ -2,6 +2,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import type { Extension } from "@earendil-works/pi-durable";
 import { resultText } from "../results.js";
+import { createExecutionResults } from "./result-delivery.js";
 import { createSchedules } from "./schedules.js";
 import { createBackground } from "./background.js";
 import { createReminders } from "./reminders.js";
@@ -19,14 +20,15 @@ export { Delegations } from "./delegation.js";
 export { cancelExecution } from "./executions.js";
 import type { ExecutionRun } from "@assistant/contracts";
 export function createTaskCenter(notifyEvent: NotifyEvent, onSettled: (run: ExecutionRun) => Promise<"delivered" | "not_applicable" | "unknown" | void> = async () => {}) {
- const schedules = createSchedules(notifyEvent, onSettled);
- const background = createBackground(notifyEvent, () => V3, onSettled);
+ const results = createExecutionResults(notifyEvent, onSettled);
+ const schedules = createSchedules(results);
+ const background = createBackground(notifyEvent, () => V3, results.enqueueResult);
  const reminders = createReminders(notifyEvent);
  const { ScheduleTask, scheduleInTx } = schedules;
  const { BackgroundTask, backgroundInTx } = background;
 const V3: Extension = defineExtension({
   name: "v3-task-center",
-  tasks: [ScheduleTask, schedules.ScheduleResultTask, BackgroundTask, GoalTask],
+  tasks: [ScheduleTask, results.ScheduleResultTask, BackgroundTask, GoalTask],
   hooks: goalHooks,
   sections: [goalSection],
   tools: [
@@ -62,5 +64,5 @@ const V3: Extension = defineExtension({
   ],
 });
 
-return { extension: V3, ...schedules, ...background, reminderInTx: reminders.reminderInTx };
+return { extension: V3, ...results, ...schedules, ...background, reminderInTx: reminders.reminderInTx };
 }

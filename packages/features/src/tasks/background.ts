@@ -4,12 +4,12 @@ import type { ConversationId, Extension, Task, Tx } from "@earendil-works/pi-dur
 import { BackgroundJobs, Executions, Parents } from "./documents.js";
 import type { BackgroundJob, BackgroundInput, BackgroundCheckpoint } from "./documents.js";
 import { normalizeRequestId } from "./parameters.js";
-import { cancelExecution, deliverExecution, finishExecution, normalizeDaylightTaskId, recordExecution } from "./executions.js";
+import { cancelExecution, finishExecution, normalizeDaylightTaskId, recordExecution } from "./executions.js";
 import { detach, finishTask as finish } from "../results.js";
 import type { NotifyEvent } from "./notifications.js";
 
-import type { ExecutionRun } from "@assistant/contracts";
-export function createBackground(notifyEvent: NotifyEvent, getExtension: () => Extension, onSettled: (run: ExecutionRun) => Promise<"delivered" | "not_applicable" | "unknown" | void> = async () => {}) {
+import type { createExecutionResults } from "./result-delivery.js";
+export function createBackground(notifyEvent: NotifyEvent, getExtension: () => Extension, enqueueResult: ReturnType<typeof createExecutionResults>["enqueueResult"]) {
   const BackgroundTask: Task<BackgroundInput, BackgroundCheckpoint, string | null, object> = defineTask<BackgroundInput, BackgroundCheckpoint, string | null, object>({
     name: "app.v3.background-agent", version: 1, initial: () => ({ phase: "start" }),
     phases: {
@@ -51,6 +51,8 @@ export function createBackground(notifyEvent: NotifyEvent, getExtension: () => E
             answer = (typeof parts === "string" ? parts : parts.filter(part => part.type === "text").map(part => part.text).join("")).slice(0, 4000);
           }
           const summary = failed ? "后台子 Agent 未完成：" + (("reason" in settled ? settled.reason : undefined) || settled.status) : answer || "任务已完成，没有文字结果";
+          // Task creation writes tables; finish all answer reads first.
+          await enqueueResult(tx, runtime.conversationId, "background:" + task.input.jobId);
           return { status: "running", checkpoint: { phase: "report", summary, failed } };
         }, context);
       },
@@ -64,9 +66,7 @@ export function createBackground(notifyEvent: NotifyEvent, getExtension: () => E
           return cancelled ? finish("已取消") : undefined;
         }, context);
         if (cancelled) return;
-        let completed: ExecutionRun | undefined;
-        await runtime.commit(async tx => { completed = detach((await tx.doc(Executions, runtime.conversationId)).items.find(run => run.id === "background:" + task.input.jobId)); }, context);
-        if (completed) await deliverExecution(completed, onSettled, runtime.signal, work => runtime.commit(async tx => { await work(tx); return undefined; }, context));
+        await runtime.commit(async tx => { await enqueueResult(tx, runtime.conversationId, "background:" + task.input.jobId); }, context);
         const parent = await runtime.conversation(runtime.conversationId, context);
         await parent!.submit({ type: "input", content: "[后台任务结果] " + task.input.text + "\n" + checkpoint.summary, requestId: "background-report:" + task.input.jobId, whenBusy: "followUp",
           entry: { kind: "app.background-report", data: { jobId: task.input.jobId } } }, context);

@@ -6,10 +6,21 @@ import { join } from "node:path";
 import { createTeamsSync, GRAPH } from "../dist/teams-sync.js";
 import { sendTeamsMessage } from "../dist/teams-send.js";
 import { TeamsSendRejectedError } from "@assistant/features";
-import { openTeamsStore, type TeamsStore } from "../dist/teams-store.js";
+import { openTeamsStore, type TeamsStore, type TeamsSyncChange, type TeamsSyncSnapshot } from "../dist/teams-store.js";
 
 const at = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const message = (id: string, createdDateTime: string, mine = false) => ({ id, createdDateTime, messageType: "message", from: { user: { id: mine ? "me" : "peer" } }, body: { content: "text" } });
+
+// Lightweight collectors below exercise paging rather than persistence. Batch
+// transaction/version semantics are covered separately with the real SQLite store.
+const syncDefaults = {
+  syncSnapshot: () => ({ sourceRevision: 0, accessGeneration: 0, syncEpoch: 0 }),
+  triage: { accessGeneration: () => 0, access: () => true, reconcileChats: () => {} },
+  acceptSyncBatch(this: { record?: (message: unknown) => unknown }, _chat: string, _snapshot: TeamsSyncSnapshot, changes: TeamsSyncChange[]) {
+    for (const change of changes) if ("message" in change) this.record?.(change.message);
+    return true;
+  },
+};
 
 test("Graph throttling stops the whole scan, honors Retry-After on manual retries and preserves the watermark", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-06T09:00:00Z") });
@@ -60,7 +71,7 @@ test("单个聊天失败只跳过它：不推进它的水位，其余聊天照�
   await writeFile(join(dir, "teams-forward.json"), JSON.stringify({ c1: old, c2: old }));
   const saved = new Map<string, { id: string; direction: string }>();
   let fail = true, late = false, calls = 0;
-  const store = { record: (m: { id: string; direction: string }) => saved.set(m.id, m), earliestUnrepliedAt: () => null } as unknown as TeamsStore;
+  const store = { ...syncDefaults, record: (m: { id: string; direction: string }) => saved.set(m.id, m), earliestUnrepliedAt: () => null } as unknown as TeamsStore;
   const fetchImpl = (async (url: string) => {
     calls++;
     if (url.includes("/me?")) return Response.json({ id: "me" });
@@ -100,7 +111,7 @@ test("Graph nextLink 不得带令牌访问其他站点，循环分页失败而�
     const dir = await mkdtemp(join(tmpdir(), "pi-teams-pages-"));
     let calls = 0;
     try {
-      const sync = createTeamsSync({ dir, store: { earliestUnrepliedAt: () => null } as unknown as TeamsStore, getToken: async () => "test",
+      const sync = createTeamsSync({ dir, store: { ...syncDefaults, earliestUnrepliedAt: () => null } as unknown as TeamsStore, getToken: async () => "test",
         fetchImpl: (async (url: string) => {
           calls++;
           assert.ok(url.startsWith(GRAPH));
@@ -116,7 +127,7 @@ test("Teams 发送成功用 Graph 返回的真实 ID 和时间立即入库；成
   const original = globalThis.fetch;
   const records: unknown[] = [];
   const sent = message("graph-id", at(0), true);
-  const store = { record: (m: unknown) => records.push(m), recentInChat: () => [{ chatType: "oneOnOne", chatTopic: null }] } as unknown as TeamsStore;
+  const store = { ...syncDefaults, record: (m: unknown) => records.push(m), recentInChat: () => [{ chatType: "oneOnOne", chatTopic: null }] } as unknown as TeamsStore;
   try {
     globalThis.fetch = async () => Response.json(sent, { status: 201 });
     await sendTeamsMessage(async () => "test", "chat", "text", store);
@@ -132,7 +143,7 @@ test("Teams 发送成功用 Graph 返回的真实 ID 和时间立即入库；成
 test("聊天消息里的非法分页地址是安全问题，不能当成单个聊天的故障跳过", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-teams-unsafe-"));
   try {
-    const sync = createTeamsSync({ dir, store: { earliestUnrepliedAt: () => null } as unknown as TeamsStore, getToken: async () => "test",
+    const sync = createTeamsSync({ dir, store: { ...syncDefaults, earliestUnrepliedAt: () => null } as unknown as TeamsStore, getToken: async () => "test",
       fetchImpl: (async (url: string) => Response.json(url.includes("/me?") ? { id: "me" }
         : url.includes("/me/chats?") ? { value: [{ id: "c1", chatType: "oneOnOne" }] }
         : { value: [], "@odata.nextLink": "https://example.com/steal" })) as typeof fetch });
@@ -148,7 +159,7 @@ test("会议聊天的 403 不算故障：其余聊天照常成功，之后不再
   try {
     // 新聊天的水位从进程启动起算，所以预写水位才能收到既有消息。
     await writeFile(join(dir, "teams-forward.json"), JSON.stringify({ c1: at(60) }));
-    const store = { record: (m: { id: string }) => saved.add(m.id), earliestUnrepliedAt: () => null } as unknown as TeamsStore;
+    const store = { ...syncDefaults, record: (m: { id: string }) => saved.add(m.id), earliestUnrepliedAt: () => null } as unknown as TeamsStore;
     const sync = createTeamsSync({ dir, store, getToken: async () => "test",
       fetchImpl: (async (url: string) => {
         if (url.includes("/me?")) return Response.json({ id: "me" });
@@ -174,7 +185,7 @@ test("久无新消息的聊天不再逐个请求；仍有未回复来信的照�
   try {
     // 三个聊天水位都是刚同步过，quiet 和 unreplied 的最后一条消息都在两天前。
     await writeFile(join(dir, "teams-forward.json"), JSON.stringify({ quiet: at(0), unreplied: at(0), busy: at(0) }));
-    const store = { record: () => {},
+    const store = { ...syncDefaults, record: () => {},
       earliestUnrepliedAt: (chatId: string) => chatId === "unreplied" ? at(60 * 48) : null } as unknown as TeamsStore;
     const sync = createTeamsSync({ dir, store, getToken: async () => "test",
       fetchImpl: (async (url: string) => {

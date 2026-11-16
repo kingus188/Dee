@@ -47,3 +47,17 @@ test("peer WebSocket uses scoped credentials and exact routes; health can probe 
   try { assert.deepEqual(await unpaired("/api/info"), { healthy: true }); await assert.rejects(unpaired("/api/peers/devices"), { status: 401 }); }
   finally { unpaired.close(); }
 });
+
+test("source authority uses canonical HTTPS, never LAN fallback or a redirect", async () => {
+  const urls: string[] = []; let canonical = "https://configured.example", fail = false;
+  const request = createAgentRequest({ origin: () => "http://untrusted-lan.example", serverId: () => canonical, username: () => undefined, password: () => undefined, token: () => "t".repeat(43),
+    socket: () => { throw new Error("proof must not use LAN socket"); },
+    fetch: async (url, init) => { urls.push(url); assert.equal(init.redirect, "error"); assert.equal(new Headers(init.headers).get("origin"), new URL(canonical).origin); if (fail) throw new Error("offline"); return Response.json({ authority: null }); },
+  });
+  try {
+    await request("/api/peers/tasks/id/authority?deviceId=desktop-id"); assert.match(urls[0]!, /^https:\/\/configured.example\//);
+    fail = true; await assert.rejects(request("/api/peers/tasks/id/authority"), /offline/); assert.equal(urls.length, 2);
+    canonical = "http://remote.example"; await assert.rejects(request("/api/peers/tasks/id/authority"), /HTTPS/); assert.equal(urls.length, 2);
+    canonical = "http://127.0.0.1:8080"; fail = false; await request("/api/peers/tasks/id/authority"); assert.match(urls.at(-1)!, /^http:\/\/127.0.0.1:8080\//);
+  } finally { request.close(); }
+});

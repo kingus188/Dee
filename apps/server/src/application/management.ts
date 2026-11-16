@@ -3,14 +3,13 @@ import type { Management } from "@assistant/contracts";
 import { Goals, ScheduleResults, Schedules, BackgroundJobs, Executions, Delegations, Reminders, normalizeSchedule, normalizeReminder, cancelExecution } from "@assistant/features";
 import { projectUnifiedRuns, type RuntimeObservation } from "./unified-runs.js";
 import { RunReviews, withRunReviews } from "./run-reviews.js";
-import { applyExecutionResult } from "./execution-outcome.js";
 import { HttpError } from "../errors.js";
 import type { AppContext } from "./context.js";
 import type { createViews } from "./views.js";
 
 export function createManagement(context: AppContext, { simplifyView }: ReturnType<typeof createViews>) {
  const { harness, ctx, tasks } = context;
- async function get(conversation: Conversation, options: { retryDelivery?: boolean } = {}): Promise<Management> {
+ async function get(conversation: Conversation): Promise<Management> {
 			const [schedules, background, reminders, executions, delegations, allGoals, reviews, scheduleResults] = await Promise.all([
 				harness.snapshot(Schedules, conversation.id, ctx),
 				harness.snapshot(BackgroundJobs, conversation.id, ctx),
@@ -43,14 +42,6 @@ export function createManagement(context: AppContext, { simplifyView }: ReturnTy
 				return { ...item, status: "failed" as const };
 			}));
 			const executionItems = (executions?.items ?? []).map(run => ({ ...run }));
-            for (const run of executionItems) {
-              if (options.retryDelivery === false || !run.deliveryError || run.status !== "done" || !run.daylightTaskId) continue;
-              try {
-                const deliveryStatus = await applyExecutionResult(context.daylight, run);
-                await conversation.commit(async tx => { const stored = (await tx.doc(Executions, conversation.id)).items.find(item => item.id === run.id); if (stored) { delete stored.deliveryError; stored.deliveryStatus = deliveryStatus; } }, ctx);
-                delete run.deliveryError; run.deliveryStatus = deliveryStatus;
-              } catch (error) { run.deliveryError = error instanceof Error ? error.message.slice(0, 500) : "关联待办状态同步失败"; }
-            }
             const goals = (allGoals?.items ?? []).filter(goal => goal.conversationId === conversation.id);
             const runtime = new Map<number, RuntimeObservation>();
             const taskIds = [...executionItems.map(item => item.runtimeTaskId), ...backgroundItems.map(item => item.taskId), ...(delegations?.items ?? []).map(item => item.runtimeTaskId), ...goals.map(item => item.taskId), ...Object.values(scheduleResults?.jobs ?? {})];

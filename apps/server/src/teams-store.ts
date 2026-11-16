@@ -14,6 +14,8 @@ export type TeamsMessage = {
   direction: "in" | "out"; text: string; createdAt: string; important: boolean; chatTopic?: string; notificationPriority?: "normal" | "urgent" | "approval";
   addressedToMe?: boolean; sourceUrl?: string;
 };
+export type TeamsSyncSnapshot = { sourceRevision: number; accessGeneration: number; syncEpoch: number };
+export type TeamsSyncChange = { message: TeamsMessage } | { deletedId: string };
 const RETENTION_DAYS = 90;
 const iso = (ms: number) => new Date(ms).toISOString();
 
@@ -110,6 +112,7 @@ export function openTeamsStore(dataDir: string) {
   try { directReplies = createTeamsDirectReplies(db); } catch (error) { db.close(); throw error; }
   try { triage = createTeamsTriageStore(db); } catch (error) { db.close(); throw error; }
   try { notifications = createTeamsNotificationBatches(db, row, () => triage.settings().normalDigestMinutes * 60_000); } catch (error) { db.close(); throw error; }
+  try { db.exec("CREATE TABLE IF NOT EXISTS teams_sync_epochs (chat_id TEXT PRIMARY KEY, epoch INTEGER NOT NULL)"); } catch (error) { db.close(); throw error; }
   return {
     archive,
     notifications,
@@ -117,22 +120,50 @@ export function openTeamsStore(dataDir: string) {
     directReplies,
     sourceRevision: sources.revision,
     sourceAllowed: sources.allowed,
-    revokeMessage(chatId: string, messageId: string) {
+    syncSnapshot(chatId: string): TeamsSyncSnapshot {
+      const value = db.prepare(`SELECT
+        COALESCE((SELECT revision FROM source_lifecycle WHERE source=?),0) AS sourceRevision,
+        COALESCE((SELECT generation FROM teams_chat_access WHERE chat_id=?),0) AS accessGeneration,
+        COALESCE((SELECT epoch FROM teams_sync_epochs WHERE chat_id=?),0) AS syncEpoch`).get(`teams:${chatId}`, chatId, chatId)!;
+      return { sourceRevision: Number(value.sourceRevision), accessGeneration: Number(value.accessGeneration), syncEpoch: Number(value.syncEpoch) };
+    },
+    // One fetched chat snapshot is admitted against the source version observed
+    // before I/O. Projection writes and access proof commit together, or not at all.
+    acceptSyncBatch(chatId: string, snapshot: TeamsSyncSnapshot, changes: TeamsSyncChange[]) {
       db.exec("BEGIN IMMEDIATE");
+      try {
+        if (Number(db.prepare("SELECT epoch FROM teams_sync_epochs WHERE chat_id=?").get(chatId)?.epoch ?? 0) !== snapshot.syncEpoch
+            || !sources.allowed(`teams:${chatId}`, snapshot.sourceRevision) || !triage.access(chatId, true, snapshot.accessGeneration)) {
+          db.exec("ROLLBACK"); return false;
+        }
+        for (const change of changes) {
+          if ("message" in change) {
+            if (change.message.chatId !== chatId) throw new Error("Teams 同步消息目标不一致");
+            this.record(change.message);
+          } else this.revokeMessage(chatId, change.deletedId);
+        }
+        // Even a first insert or unchanged snapshot fences earlier reads, without
+        // invalidating source-bound notifications on every routine refresh.
+        db.prepare("INSERT INTO teams_sync_epochs(chat_id,epoch) VALUES (?,1) ON CONFLICT(chat_id) DO UPDATE SET epoch=epoch+1").run(chatId);
+        db.exec("COMMIT"); return true;
+      } catch (error) { db.exec("ROLLBACK"); throw error; }
+    },
+    revokeMessage(chatId: string, messageId: string) {
+      db.exec("SAVEPOINT teams_message");
       try {
         sources.revoke(`teams:${chatId}`, messageId);
         notifications.cancelSource(messageId);
-        db.exec("COMMIT");
-      } catch (error) { db.exec("ROLLBACK"); throw error; }
+        db.exec("RELEASE teams_message");
+      } catch (error) { db.exec("ROLLBACK TO teams_message; RELEASE teams_message"); throw error; }
     },
     records(rows: TeamsMessageRow[]) {
       return teamsInboxRecords(archive, rows);
     },
     // 重复写入同一条消息无副作用；用户自己发出的消息会把此前该聊天里的未回复来信标为已回复。
     record(message: TeamsMessage) {
-      db.exec("BEGIN IMMEDIATE");
+      db.exec("SAVEPOINT teams_message");
       try {
-        if (!sources.allowed(`teams:${message.chatId}`, undefined, [message.id])) { db.exec("COMMIT"); return; }
+        if (!sources.allowed(`teams:${message.chatId}`, undefined, [message.id])) { db.exec("RELEASE teams_message"); return; }
         const prior = db.prepare("SELECT source_stale,text FROM teams_messages WHERE id=?").get(message.id);
         const latest = archive.message(message.chatId, message.id.slice(message.chatId.length + 1));
         // A sync that started before an archive edit can finish afterwards,
@@ -144,7 +175,7 @@ export function openTeamsStore(dataDir: string) {
             notifications.cancelSource(message.id);
             db.prepare("UPDATE teams_messages SET source_stale=1 WHERE id=?").run(message.id);
           }
-          db.exec("COMMIT"); return;
+          db.exec("RELEASE teams_message"); return;
         }
         if (prior && prior.text !== message.text) {
           sources.invalidate(`teams:${message.chatId}`);
@@ -171,8 +202,8 @@ export function openTeamsStore(dataDir: string) {
         }
         if (candidate) recompute.run(message.chatId);
         else if (inserted.changes) markReplied.run(message.chatId);
-        db.exec("COMMIT");
-      } catch (error) { db.exec("ROLLBACK"); throw error; }
+        db.exec("RELEASE teams_message");
+      } catch (error) { db.exec("ROLLBACK TO teams_message; RELEASE teams_message"); throw error; }
     },
     // 重要且尚未推送的来信（最近 24 小时，最多 100 条，按时间正序）。
     pendingPush() {

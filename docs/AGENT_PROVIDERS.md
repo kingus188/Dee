@@ -59,6 +59,8 @@ peer 目标目前仅支持可逐工具校验的 Pi 只读 scope。目标为 Code
 
 scope 由目标宿主创建，不能从模型参数或配对凭据推导业务写权限。工具执行入口覆盖初次、nested/deferred 和 safe checkpoint 恢复，异步批准后再核对撤销、版本及资源范围。桌面文件读取限制在批准工作区的 canonical 路径内，但不是防本机恶意并发文件系统修改的 OS 沙箱。细节见 [常驻 Agent 执行契约](RESIDENT_AGENT_CONTRACTS.md)。
 
+server→desktop 的新执行授权只支持 server Pi `delegate_to_peer` 发起的新隔离 Pi 会话，固定 15 分钟并逐工具在线核源。旧无源证明及 addressed/shared targetSession 任务不执行；以下已有会话协议的受理/查询能力不表示该目标现在可执行。源核验只走固定 HTTPS/loopback，不使用 LAN 回退；共享配对 token 仍不是独立设备身份。
+
 ## 已有会话协作协议
 
 `source` / `target` 继续使用 `server` 或 `desktop-UUID`。新增的 `sourceSession` / `targetSession` 均为 `{ agent, sessionId }`：`agent` 为 `pi | codex | claude | acp`，Pi 地址为 `pi-<conversationId>`，外部 Agent 地址为 Dee 保存的会话 UUID。外部地址不是 Codex thread ID、Claude session ID 或 ACP session ID；原生标识只在桌面内部传给原 driver，不能从服务器伪造。服务器目标只接受 Pi。

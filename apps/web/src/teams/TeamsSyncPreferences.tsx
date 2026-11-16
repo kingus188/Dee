@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { TeamsSyncSettings } from "@assistant/contracts";
 import { request } from "../api/request.js";
 import { Icon } from "../ui/Icon.js";
+import { TeamsDeliveryIssues } from "./TeamsDeliveryIssues.js";
 import { isTeamsSyncSettings } from "./data.js";
 
 const intervals = [
@@ -47,7 +48,7 @@ export function TeamsSyncPreferences({ settings, active, available, onSaved }: {
     } finally { writing.current = false; setSaving(false); }
   }
 
-  return <details className="teams-sync-preferences">
+  return <><details className="teams-sync-preferences">
     <summary><Icon name="settings-2" />采集与汇总设置<Icon name="chevron-down" /></summary>
     <form onSubmit={event => { event.preventDefault(); void save(); }}>
       <p className="today-note">采集频率与通知投递分开设置。保存这里的设置不会授予自动回复或自动建待办权限。</p>
@@ -65,5 +66,5 @@ export function TeamsSyncPreferences({ settings, active, available, onSaved }: {
       </fieldset>
       {feedback && <p className={feedback.error ? "teams-triage-caution" : "today-note"} role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
     </form>
-  </details>;
+  </details><TeamsDeliveryIssues active={active} /></>;
 }

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { NotificationPriority } from "@assistant/contracts";
+import type { NotificationPriority, TeamsDeliveryIssue } from "@assistant/contracts";
 import { createNotificationPreferences } from "./notification-preferences.js";
 import { notificationDeliveryAt } from "./notification-policy.js";
 import { createSourceLifecycle } from "./source-lifecycle.js";
@@ -100,6 +100,18 @@ export function createTeamsNotificationBatches<T extends TeamsNotice>(db: Databa
     },
     unknown(id: string, epoch: number) {
       db.prepare("UPDATE teams_notification_batches SET status='unknown' WHERE id=? AND status='sending' AND claim_epoch=?").run(id, epoch);
+    },
+    deliveryIssues() {
+      const values = db.prepare("SELECT * FROM teams_notification_batches WHERE status IN ('sending','unknown') ORDER BY created_at,id LIMIT 101").all();
+      const items: TeamsDeliveryIssue[] = values.slice(0, 100).map(value => ({
+        id: String(value.id), state: value.status as "sending" | "unknown", createdAt: Number(value.created_at),
+        sourceCount: unpack(value).messageIds.length, sourceStatus: current(unpack(value)) ? "current" : "invalidated", receipt: "unavailable",
+      }));
+      return { items, truncated: values.length > 100 };
+    },
+    deliveryIssueSource(id: string) {
+      const value = db.prepare("SELECT * FROM teams_notification_batches WHERE id=? AND status IN ('sending','unknown')").get(id);
+      return value ? unpack(value) : undefined;
     },
     uncertain() {
       return db.prepare("SELECT * FROM teams_notification_batches WHERE status IN ('sending','unknown') ORDER BY created_at LIMIT 100").all().map(unpack);

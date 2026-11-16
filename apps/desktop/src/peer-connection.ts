@@ -43,6 +43,20 @@ export function createAgentRequest(options: {
     if (serverId && serverId !== canonical) throw new Error("任务属于之前的服务器，请切回原服务器后继续");
     const target = new URL(path, origin), peer = target.pathname.startsWith("/api/peers/");
     if (target.origin !== origin || !(peer || (target.pathname === "/api/info" && body === undefined))) throw new Error("服务器接口地址无效");
+    if (/^\/api\/peers\/tasks\/[^/]+\/authority$/.test(target.pathname)) {
+      // Proof is fetched only from the configured canonical server, not an
+      // automatically discovered LAN endpoint. No redirect or insecure fallback.
+      const trusted = new URL(canonical);
+      const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(trusted.hostname);
+      if (trusted.protocol !== "https:" && !(trusted.protocol === "http:" && loopback)) throw new Error("源授权核验需要固定 HTTPS 或本机服务器连接");
+      if (body !== undefined) throw new Error("源授权核验只允许读取");
+      const token = options.token(canonical), authorization = token ? `Bearer ${token}` : basicAuth(options.username(), options.password());
+      if (!authorization) throw new PeerConnectionError(401);
+      const proofUrl = new URL(path, trusted.origin);
+      const response = await options.fetch(proofUrl.href, { method: "GET", redirect: "error", signal: AbortSignal.timeout(15000), headers: { origin: trusted.origin, authorization } });
+      if (!response.ok) throw new PeerConnectionError(response.status);
+      return response.json();
+    }
     try { return await connection.request(path, body); }
     catch (error) {
       if (peer) throw error;

@@ -12,6 +12,7 @@ import { createPersonalService } from "./personal.js";
 import { createViews } from "./views.js";
 import { mailApi } from "../mail-api.js";
 import { daylightApi } from "../daylight-api.js";
+import { teamsDeliveryApi } from "../teams-delivery-api.js";
 import { notificationApi } from "../notification-api.js";
 import { teamsTriageApi } from "../teams-triage-api.js";
 import { teamsConversationsApi } from "../teams-conversations-api.js";
@@ -89,6 +90,8 @@ export function createApi(context: AppContext) {
     if (mailResult) return await mailResult;
     const notificationResult = notificationApi(context, method, url, body);
     if (notificationResult) return notificationResult;
+    const deliveryIssueResult = await teamsDeliveryApi(context, method, url, body);
+    if (deliveryIssueResult) return deliveryIssueResult;
     const conversationsResult = await teamsConversationsApi(context, method, url);
     if (conversationsResult) return conversationsResult;
     const replyResult = await teamsConversationReplyApi(context, method, url, body);
