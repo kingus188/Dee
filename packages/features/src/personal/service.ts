@@ -1,3 +1,4 @@
+import { toolInputInTx, UserOriginError, PeerJobs, type ToolOrigin } from "@assistant/runtime";
 import type { MemoryProvenance, MemoryRevision } from '@assistant/contracts';
 import type { ConversationId, Tx } from "@earendil-works/pi-durable";
 // 跨会话记忆和技能。模型只能提交候选，用户批准后才进入提示。
@@ -11,7 +12,7 @@ import { detach } from "../results.js";
 const MEMORY_ITEM_MAX = 280;
 const MEMORY_APPROVED_MAX = 30;
 const MEMORY_PENDING_MAX = 40;
-const MEMORY_PROMPT_CHARS = 1800;
+export const MEMORY_PROMPT_CHARS = 1800;
 const MEMORY_REJECTED_KEEP = 20;
 const SKILL_NAME_MAX = 40;
 const SKILL_DESC_MAX = 180;
@@ -31,21 +32,30 @@ type DecisionDoc<T> = { items: T[]; applied: Record<string, string> };
 type Proposal = { requestId?: unknown; source?: string; approved?: boolean; conversationId?: ConversationId | null; provenance?: MemoryProvenance };
 const emptyProvenance = (): MemoryProvenance => ({ conversationId: null, messageId: null, quote: null, quoteTruncated: false });
 
-export async function memoryProvenanceInTx(tx: Tx, conversationId: ConversationId): Promise<MemoryProvenance> {
-  const { items: entries } = await tx.scanEntries({ conversationId, order: 'descending' }, 100);
-  for (const entry of entries) {
-    // Derived input is a provenance boundary, not permission to borrow an
-    // older user message. New host entry kinds fail closed as well.
-    if (entry.kind !== 'pi.user' && (['app.schedule-input', 'app.background-input', 'app.background-report'].includes(entry.kind)
-      || entry.model?.some(message => message.role === 'user'))) return emptyProvenance();
-    if (entry.kind !== 'pi.user') continue;
-    const text = (entry.model ?? []).filter(message => message.role === 'user').map(message => {
-      const content = message.content;
-      return typeof content === 'string' ? content : (content ?? []).filter(part => part.type === 'text').map(part => part.text).join('\n');
-    }).join('\n');
-    return { conversationId, messageId: String(entry.id), quote: text && !hasSecret(text) ? text.slice(0, 1000) : null, quoteTruncated: !hasSecret(text) && text.length > 1000 };
+export async function memoryProvenanceInTx(tx: Tx, origin: ToolOrigin): Promise<MemoryProvenance> {
+  let entry;
+  try { entry = await toolInputInTx(tx, origin); }
+  catch (error) {
+    // Unknown durable provenance is not a user confirmation. Storage failures
+    // still propagate rather than masquerade as missing evidence.
+    if (error instanceof UserOriginError) return emptyProvenance();
+    throw error;
   }
-  return emptyProvenance();
+  if (entry.kind !== "pi.user" || entry.data && typeof entry.data === "object" && !Array.isArray(entry.data) && entry.data.origin !== undefined) return emptyProvenance();
+  for (const job of (await tx.doc(PeerJobs)).items) {
+    if (job.conversationId !== origin.conversationId) continue;
+    const submission = await tx.submissionByRequest(origin.conversationId, `peer:${job.id}`);
+    if (submission?.type === "input" && "entry" in submission && submission.entry === entry.id) return emptyProvenance();
+  }
+  const conversation = await tx.conversation(origin.conversationId);
+  // Legacy local delegates used pi.user for model-written tasks.
+  if (!conversation || conversation.owner) return emptyProvenance();
+  const text = (entry.model ?? []).filter(message => message.role === "user").map(message => {
+    const content = message.content;
+    return typeof content === "string" ? content : (content ?? []).filter(part => part.type === "text").map(part => part.text).join("\n");
+  }).join("\n");
+  if (!text.trim() || /^(?:\[Teams\b|\[定时提醒\]|<引用>)/i.test(text.trim())) return emptyProvenance();
+  return { conversationId: origin.conversationId, messageId: String(entry.id), quote: text && !hasSecret(text) ? text.slice(0, 1000) : null, quoteTruncated: !hasSecret(text) && text.length > 1000 };
 }
 function reviseMemory(item: MemoryItem) {
   const revision = item.revision ?? 1;
@@ -102,12 +112,6 @@ function count(doc: { items: { status: string }[] }, status: string) {
 	return doc.items.filter((item) => item.status === status).length;
 }
 
-// 已批准记忆的总字数必须装得进提示词预算，否则批准了也不会生效。
-function checkApprovedBudget(doc: DecisionDoc<MemoryItem>, addedChars: number) {
-	const used = doc.items.filter((item) => item.status === "approved").reduce((sum, item) => sum + item.text.length, 0);
-	if (used + addedChars > MEMORY_PROMPT_CHARS) throw new Error("已确认记忆的总字数已满，请先撤回一些");
-}
-
 // 只保留最近的已拒绝条目，避免文档无限增长；同时清掉指向它们的幂等记录。
 function pruneRejected(doc: DecisionDoc<MemoryItem>) {
 	const rejected = doc.items.filter((item) => item.status === "rejected");
@@ -134,7 +138,6 @@ export async function proposeMemoryInTx(tx: Tx, input: Proposal & { text?: unkno
 	const status = input.approved ? "approved" : "pending";
 	if (status === "pending" && count(doc, "pending") >= MEMORY_PENDING_MAX) throw new Error("待确认记忆已满，请先处理");
 	if (status === "approved" && count(doc, "approved") >= MEMORY_APPROVED_MAX) throw new Error("已确认记忆已满，请先撤回一些");
-	if (status === "approved") checkApprovedBudget(doc, text.length);
 	const now = Date.now();
 	const item: MemoryItem = {
 		id: randomUUID(),
@@ -160,7 +163,6 @@ export async function decideMemoryInTx(tx: Tx, id: string, action: string) {
 	if (next === "approved" && item.status !== "approved" && count(doc, "approved") >= MEMORY_APPROVED_MAX) {
 		throw new Error("已确认记忆已满，请先撤回一些");
 	}
-	if (next === "approved" && item.status !== "approved") checkApprovedBudget(doc, item.text.length);
     reviseMemory(item);
 	item.status = next;
 	item.decidedAt = Date.now();
@@ -178,7 +180,6 @@ export async function editMemoryInTx(tx: Tx, id: string, input: unknown, base?: 
 	const text = normalizeMemoryText(input);
 	if (text === item.text) return detach(item);
 	if (doc.items.some((entry) => entry.id !== id && entry.text === text && entry.status !== "rejected")) throw new Error("已有相同记忆");
-	if (item.status === "approved") checkApprovedBudget(doc, text.length - item.text.length);
     reviseMemory(item);
 	item.text = text;
 	return detach(item);

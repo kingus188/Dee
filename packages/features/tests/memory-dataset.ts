@@ -92,15 +92,15 @@ export const scenarios: Scenario[] = [
 		...fill(40, 10, false),
 		{ op: "propose", text: "多一条", error: /待确认记忆已满/ },
 	], finalCounts: { pending: 40 } },
-	{ name: "已批准总字数不超过 1800：恰好放得下，多 1 字则拒绝", steps: [
+	{ name: "已保存批准项允许超过提示预算1800", steps: [
 		{ op: "propose", text: "甲".repeat(280), approved: true, repeat: 6 },
 		{ op: "propose", text: "乙".repeat(120), approved: true, status: "approved" },
-		{ op: "propose", text: "丙", approved: true, error: /总字数已满/ },
-	], finalCounts: { approved: 7 } },
-	{ name: "批准待确认项同样受总字数限制，撤回腾出空间后可批准", steps: [
+		{ op: "propose", text: "丙", approved: true, status: "approved" },
+	], finalCounts: { approved: 8 } },
+	{ name: "批准待确认项不受提示预算限制", steps: [
 		{ op: "propose", text: "甲".repeat(280), approved: true, repeat: 6 },
 		{ op: "propose", text: "乙".repeat(200) },
-		{ op: "decide", ref: 6, action: "approve", error: /总字数已满/ },
+		{ op: "decide", ref: 6, action: "approve", status: "approved" },
 		{ op: "decide", ref: 0, action: "reject", status: "rejected" },
 		{ op: "decide", ref: 6, action: "approve", status: "approved" },
 	], finalCounts: { approved: 6, rejected: 1 } },
@@ -121,11 +121,11 @@ export const scenarios: Scenario[] = [
 		{ op: "decide", ref: 0, action: "reject" },
 		{ op: "edit", ref: 0, text: "再改", error: /记忆不存在/ },
 	] },
-	{ name: "修改已批准项受总字数限制", steps: [
+	{ name: "修改已批准项不受提示总预算限制", steps: [
 		{ op: "propose", text: "甲".repeat(280), approved: true, repeat: 6 },
 		{ op: "propose", text: "乙", approved: true },
 		{ op: "edit", ref: 6, text: "乙".repeat(120), status: "approved" },
-		{ op: "edit", ref: 6, text: "乙".repeat(121), error: /总字数已满/ },
+		{ op: "edit", ref: 6, text: "乙".repeat(121), status: "approved" },
 	] },
 	{ name: "已拒绝条目只保留最近 20 条", steps: [
 		...Array.from({ length: 25 }, (_, i) => [

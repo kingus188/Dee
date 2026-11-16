@@ -56,7 +56,7 @@ if (process.argv[2] === "source-worker") {
       if (message.command === "close") process.disconnect();
     } catch (error) { process.send!({ id: message.id, error: String(error) }); }
   });
-} else for (const revoke of [false, true]) test(`two-process source proof over real WS/HTTP, cancelled during desktop confirmation=${revoke}`, { timeout: 30000 }, async t => {
+} else for (const revoke of [false, true, "cancel-arrived-first"] as const) test(`two-process source proof over real WS/HTTP, cancelled during desktop confirmation=${revoke}`, { timeout: 30000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), "dee-source-transport-"));
   let closeDesktop: (() => Promise<void>) | undefined, closeTransport: (() => void) | undefined, releaseConfirmation: (() => void) | undefined;
   const child = fork(fileURLToPath(import.meta.url), ["source-worker", join(directory, "server")], { stdio: ["ignore", "ignore", "pipe", "ipc"] });
@@ -119,12 +119,28 @@ if (process.argv[2] === "source-worker") {
     assert.equal(results.length, 0);
     await agent.approve(job.id); await until(async () => entered, Boolean);
     if (revoke) await command("cancel", { jobId: job.id });
+    if (revoke === "cancel-arrived-first") {
+      await until(() => agent.peerStatus(job.id), value => !!value.cancellation?.requestedAt);
+      assert.equal(results.length, 0, "target receives cancellation before approval is released");
+    }
     release();
     const final = await until(() => command<{ job: PeerJob; receipts: number }>("get", { jobId: job.id }), value => value.job.status === "done" || value.job.status === "failed");
     if (revoke) {
       assert.ok(final.job.cancellation?.requestedAt);
-      assert.equal(results.length, 1);
-      assert.match(results[0]!, /源宿主授权缺失|范围已撤销|有效只读权限/);
+      if (results.length === 0) {
+        // The pushed cancellation can abort the dedicated submission before a
+        // denied tool result reaches another model turn. Require durable target
+        // confirmation, not merely the absence of model output.
+        const stopped = await until(() => agent.peerStatus(job.id), value => value.status === "failed" && !!value.cancellation?.confirmedAt);
+        assert.ok(stopped.cancellation?.requestedAt);
+        await until(() => agent.snapshot(), value => !value.busy);
+        assert.equal(results.length, 0);
+        const acknowledged = await until(() => command<{ job: PeerJob }>("get", { jobId: job.id }), value => value.job.status === "failed" && !!value.job.cancellation?.confirmedAt);
+        assert.ok(!JSON.stringify([stopped, acknowledged]).includes(secret));
+      } else {
+        assert.equal(results.length, 1);
+        assert.match(results[0]!, /源宿主授权缺失|范围已撤销|有效只读权限/);
+      }
       assert.ok(results.every(value => !value.includes(secret)), "revoked source never exposes file content to model");
     } else {
       assert.equal(final.job.status, "done"); assert.equal(results.length, 1); assert.ok(results[0]!.includes(secret));

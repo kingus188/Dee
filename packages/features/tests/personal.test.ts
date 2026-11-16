@@ -24,7 +24,7 @@ test("提示里的记忆按预算保留较新的条目", () => {
 	assert.deepEqual(selected.map((item) => item.text[0]), ["乙"]);
 });
 
-test("记忆提交去重、限制已批准总字数、并裁剪已拒绝条目", async () => {
+test("记忆提交去重、保存与提示预算分离、并裁剪已拒绝条目", async () => {
 	const doc = { items: [] as any[], applied: {} as Record<string, string> };
 	const tx = { doc: async () => doc } as any;
 	const first = await proposeMemoryInTx(tx, { text: "喜欢简洁回答" });
@@ -32,8 +32,9 @@ test("记忆提交去重、限制已批准总字数、并裁剪已拒绝条目",
 	assert.equal(doc.items.length, 1);
 
 	for (let i = 0; i < 6; i++) await proposeMemoryInTx(tx, { text: String(i).repeat(280), approved: true });
-	await assert.rejects(proposeMemoryInTx(tx, { text: "超预算".repeat(50), approved: true }), /总字数已满/);
-	await assert.rejects(decideMemoryInTx(tx, first.id, "approve").then(() => proposeMemoryInTx(tx, { text: "x".repeat(280), approved: true })), /总字数已满/);
+	await proposeMemoryInTx(tx, { text: "超预算".repeat(50), approved: true });
+	await decideMemoryInTx(tx, first.id, "approve");
+	await proposeMemoryInTx(tx, { text: "x".repeat(280), approved: true });
 
 	for (let i = 0; i < 30; i++) {
 		const item = await proposeMemoryInTx(tx, { text: "拒绝" + i });
@@ -43,7 +44,7 @@ test("记忆提交去重、限制已批准总字数、并裁剪已拒绝条目",
 	assert.ok(doc.items.filter((item) => item.status === "rejected").length <= 20);
 });
 
-test("可以修改记忆，并保持去重与总字数限制", async () => {
+test("可以修改记忆，并保持去重与单条字数限制", async () => {
 	const doc = { items: [] as any[], applied: {} as Record<string, string> };
 	const tx = { doc: async () => doc } as any;
 	const a = await proposeMemoryInTx(tx, { text: "甲", approved: true });
@@ -54,5 +55,5 @@ test("可以修改记忆，并保持去重与总字数限制", async () => {
 	await assert.rejects(editMemoryInTx(tx, a.id, "甲".repeat(281)), /记忆必须/);
 	await assert.rejects(editMemoryInTx(tx, "nope", "x"), /记忆不存在/);
 	for (let i = 0; i < 6; i++) await proposeMemoryInTx(tx, { text: String(i).repeat(280), approved: true }).catch(() => {});
-	await assert.rejects(editMemoryInTx(tx, a.id, "丙".repeat(280)), /总字数已满/);
+	assert.equal((await editMemoryInTx(tx, a.id, "丙".repeat(280))).text.length, 280);
 });

@@ -15,3 +15,28 @@ test("含凭据的摘要被识别；提示词声明内容不可信", () => {
   assert.equal(summaryHasSecret({ summary: "正常内容", openItems: [] }), false);
   assert.match(summaryPrompt("某聊天", "用户：你好"), /不可信/);
 });
+
+test("recall exposes bounded candidates; read_episode explicitly delivers full provenance without asserting adoption", async () => {
+  const { createEpisodes } = await import("@assistant/features");
+  const row = { id: "stable-episode", source: "teams:chat:one", sourceRevision: 4, messageIds: ["chat:one:message-7"], label: "Synthetic", channel: "teams", level: 0 as const, periodStart: "2026-01-01", periodEnd: "2026-01-02", summary: "x".repeat(300), openItems: ["historical item"] };
+  let reads = 0;
+  const extension = createEpisodes({ search: async caller => { assert.equal(caller, 5); return [row]; }, read: async (caller, id) => { assert.equal(caller, 5); reads++; return id === row.id ? row : undefined; }, openItems: () => [] });
+  const api = { conversationId: 5 } as never;
+  const recall = extension.tools!.find(tool => tool.name === "recall")!;
+  const read = extension.tools!.find(tool => tool.name === "read_episode")!;
+  const candidate = JSON.stringify(await recall.execute({ query: "project" }, api, {} as never));
+  assert.equal(reads, 0); assert.match(candidate, /stable-episode/); assert.doesNotMatch(candidate, new RegExp("x".repeat(161)));
+  const full = JSON.stringify(await read.execute({ id: row.id }, api, {} as never));
+  assert.equal(reads, 1); assert.match(full, new RegExp("x".repeat(300))); assert.match(full, /message-7/); assert.match(full, /teams_history/);
+  assert.match(JSON.stringify(await read.execute({ id: "missing" }, api, {} as never)), /不存在、来源已失效/);
+});
+
+test("episode original locators use valid tool arguments and never invent missing message identity", async () => {
+  const { episodeReferences } = await import("../dist/episodes/references.js");
+  const row = { id: "episode", source: "conv:42", sourceRevision: 0, messageIds: ["7"], label: "label", channel: "web", level: 0 as const, periodStart: "2026-01-01", periodEnd: "2026-01-01", summary: "summary", openItems: [] };
+  assert.deepEqual(episodeReferences(row).references, [{ tool: "read_conversation", arguments: { conversationId: 42, beforeEntryId: 8, limit: 1 } }]);
+  assert.equal(episodeReferences(row).verified, false);
+  assert.equal(episodeReferences({ ...row, messageIds: [] }).unavailable, true);
+  assert.deepEqual(episodeReferences({ ...row, source: "teams:chat:one", messageIds: ["chat:one:message:7"] }).references, [{ tool: "teams_history", arguments: { chatId: "chat:one", messageId: "message:7" } }]);
+  assert.equal(episodeReferences({ ...row, messageIds: Array.from({ length: 10 }, (_, index) => String(index + 1)) }).truncated, true);
+});

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { EpisodeRow } from "@assistant/features";
+import type { EpisodeRow, EpisodeRecord } from "@assistant/features";
 import { createSourceLifecycle } from "./source-lifecycle.js";
 import { episodeHasSensitiveData } from "./episode-privacy.js";
 
@@ -11,7 +11,7 @@ const FORGET_OPEN_DAYS = 180; // 带待跟进事项的摘要保留更久
 const iso = (ms: number) => new Date(ms).toISOString();
 
 export type NewEpisode = Omit<EpisodeRow, "level"> & { source: string; level?: 0 | 1; sourceRevision?: number; messageIds?: string[] };
-export type StoredEpisode = EpisodeRow & { id: string; source: string; sourceRevision: number; messageIds: string[] };
+export type StoredEpisode = EpisodeRecord;
 
 // 周一 00:00 所在日期，用于把同一周的摘要归到一起。
 export function weekStart(isoTime: string) {
@@ -33,9 +33,14 @@ export function openEpisodeStore(dataDir: string) {
       CREATE INDEX IF NOT EXISTS episodes_source ON episodes (source, level, period_start);
       CREATE TABLE IF NOT EXISTS episode_cursors (source TEXT PRIMARY KEY, cursor TEXT NOT NULL)`);
     sources = createSourceLifecycle(db);
+    db.exec("BEGIN IMMEDIATE");
     const columns = db.prepare("PRAGMA table_info(episodes)").all() as { name: string }[];
     if (!columns.some(column => column.name === "source_revision")) db.exec("ALTER TABLE episodes ADD COLUMN source_revision INTEGER NOT NULL DEFAULT 0");
     if (!columns.some(column => column.name === "message_ids")) db.exec("ALTER TABLE episodes ADD COLUMN message_ids TEXT NOT NULL DEFAULT '[]'");
+    // Preserve legacy search-based retention timestamps without labeling them as explicit reads.
+    if (!columns.some(column => column.name === "last_exposed_at")) db.exec("ALTER TABLE episodes ADD COLUMN last_exposed_at TEXT");
+    if (!columns.some(column => column.name === "last_read_at")) db.exec("ALTER TABLE episodes ADD COLUMN last_read_at TEXT");
+    db.exec("COMMIT");
     db.exec(`CREATE TEMP VIEW active_episodes AS SELECT e.* FROM episodes e
       WHERE NOT EXISTS (SELECT 1 FROM source_lifecycle s WHERE s.source=e.source
         AND (s.revoked_at IS NOT NULL OR s.revision!=e.source_revision))`);
@@ -47,7 +52,7 @@ export function openEpisodeStore(dataDir: string) {
     sourceRevision: Number(r.source_revision), messageIds: JSON.parse(String(r.message_ids)) as string[],
     periodStart: String(r.period_start), periodEnd: String(r.period_end), summary: String(r.summary), openItems: JSON.parse(String(r.open_items)) as string[],
   });
-  const safe = (episode: StoredEpisode) => !episodeHasSensitiveData([episode.label, episode.summary, ...episode.openItems].join("\n"));
+  const safe = (episode: StoredEpisode) => sources.allowed(episode.source, episode.sourceRevision, episode.messageIds) && !episodeHasSensitiveData([episode.label, episode.summary, ...episode.openItems].join("\n"));
   const add = (episode: NewEpisode) => {
     if (!sources.allowed(episode.source, episode.sourceRevision ?? 0, episode.messageIds)) return false;
     const now = iso(Date.now());
@@ -100,20 +105,44 @@ export function openEpisodeStore(dataDir: string) {
     },
     cursor: (source: string) => (db.prepare("SELECT cursor FROM episode_cursors WHERE source = ?").get(source) as { cursor: string } | undefined)?.cursor,
     setCursor,
-    // 命中的关键词越多越靠前；被回想到的摘要刷新最近使用时间，因此不会被遗忘。
-    search(tokens: string[], limit: number): EpisodeRow[] {
+    peek(id: string) {
+      const value = db.prepare("SELECT * FROM active_episodes WHERE id=?").get(id);
+      const found = value ? row(value) : undefined;
+      return found && safe(found) ? found : undefined;
+    },
+    expose(id: string, expectedRevision: number) {
+      return transaction(() => {
+        const value = db.prepare("SELECT * FROM active_episodes WHERE id=?").get(id);
+        if (!value) return;
+        const found = row(value);
+        if (!safe(found) || found.sourceRevision !== expectedRevision) return;
+        db.prepare("UPDATE episodes SET last_exposed_at=? WHERE id=?").run(iso(Date.now()), id);
+        return found;
+      });
+    },
+    read(id: string, expectedRevision?: number) {
+      return transaction(() => {
+        const value = db.prepare("SELECT * FROM active_episodes WHERE id=?").get(id);
+        if (!value) return;
+        const found = row(value);
+        if (!safe(found) || (expectedRevision !== undefined && expectedRevision !== found.sourceRevision)) return;
+        db.prepare("UPDATE episodes SET last_read_at=? WHERE id=?").run(iso(Date.now()), id);
+        return found;
+      });
+    },
+    // Database matches are not exposure. The permission-filtered host calls expose.
+    search(tokens: string[], limit: number): EpisodeRecord[] {
+      if (!tokens.length || limit <= 0) return [];
       const like = tokens.map((token) => `%${token.replace(/[\\%_]/g, "\\$&")}%`);
       const hit = like.map(() => "(CASE WHEN lower(summary || ' ' || open_items || ' ' || label) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)").join(" + ");
       const rows = db.prepare(`SELECT *, ${hit} AS score FROM active_episodes WHERE score > 0 ORDER BY score DESC, period_end DESC`).iterate(...like);
       const foundRows: StoredEpisode[] = [];
       for (const value of rows) { const found = row(value); if (safe(found)) foundRows.push(found); if (foundRows.length >= limit) break; }
-      const touch = db.prepare("UPDATE episodes SET last_used_at = ? WHERE id = ?");
-      for (const found of foundRows) touch.run(iso(Date.now()), found.id);
       return foundRows;
     },
     openItems(sinceDays: number, limit: number) {
       const rows = db.prepare("SELECT * FROM active_episodes WHERE open_items != '[]' AND period_end >= ? ORDER BY period_end DESC").all(iso(Date.now() - sinceDays * DAY)).map(row).filter(safe);
-      return rows.flatMap((found) => found.openItems.map((text) => ({ label: found.label, text, at: found.periodEnd }))).slice(0, limit);
+      return rows.flatMap((found) => found.openItems.map((text) => ({ label: found.label, text, at: found.periodEnd, episodeId: found.id, source: found.source, sourceRevision: found.sourceRevision, messageIds: found.messageIds }))).slice(0, limit);
     },
     // 早于 before 的单次摘要里，同一来源同一周有两条以上的分组，等待合并为周摘要。
     rollupGroups(before: string): StoredEpisode[][] {
@@ -136,10 +165,10 @@ export function openEpisodeStore(dataDir: string) {
       });
     },
     forget(now = Date.now()) {
-      return Number(db.prepare("DELETE FROM episodes WHERE last_used_at < ? OR (open_items = '[]' AND last_used_at < ?)").run(iso(now - FORGET_OPEN_DAYS * DAY), iso(now - FORGET_DAYS * DAY)).changes);
+      return Number(db.prepare("DELETE FROM episodes WHERE MAX(last_used_at, COALESCE(last_read_at,last_used_at)) < ? OR (open_items = '[]' AND MAX(last_used_at, COALESCE(last_read_at,last_used_at)) < ?)").run(iso(now - FORGET_OPEN_DAYS * DAY), iso(now - FORGET_DAYS * DAY)).changes);
     },
     // 测试和排查用：直接设置最近使用时间。
-    setLastUsed(id: string, at: string) { db.prepare("UPDATE episodes SET last_used_at = ? WHERE id = ?").run(at, id); },
+    setLastUsed(id: string, at: string) { db.prepare("UPDATE episodes SET last_used_at = ?, last_read_at=NULL WHERE id = ?").run(at, id); },
     all: () => db.prepare("SELECT * FROM active_episodes ORDER BY period_start").all().map(row),
     close: () => db.close(),
   };

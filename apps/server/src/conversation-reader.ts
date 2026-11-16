@@ -1,8 +1,8 @@
 import type { ConversationSearchQuery, ConversationSearchResult } from "@assistant/contracts";
 import type { Context } from "@earendil-works/chord";
 import type { ConversationId, EntryId } from "@earendil-works/pi-durable";
-import { Index, conversationStatus, type Runtime, type ConversationItem } from "@assistant/runtime";
-import { WechatState } from "@assistant/channel-wechat";
+import { conversationStatus, type Runtime, type ConversationItem } from "@assistant/runtime";
+import { createPrivateConversationAccess } from "./conversation-access.js";
 import { splitUserContent, withQuote, type ConversationReader, type ConversationQuery, type ConversationRead } from "@assistant/features";
 import { DesktopTranscript } from "./desktop-conversations.js";
 import type { EpisodeStore } from "./episode-store.js";
@@ -21,17 +21,7 @@ const entry = (entryId: number, messageId: string, role: TextEntry["role"], raw:
 };
 
 export function createConversationReader(runtime: Runtime, ctx: Context, sources: Pick<EpisodeStore, "sourceAllowed" | "sourceRevision">) {
-  async function visible(requesterId: number | undefined) {
-    const index = await runtime.harness.snapshot(Index, ctx);
-    const bindings = (await runtime.harness.snapshot(WechatState, ctx))?.bindings ?? {};
-    const bound = new Set(Object.values(bindings).map(binding => Number(binding.conversationId)));
-    const privateItems = (index?.items ?? []).filter(item => item.id !== runtime.root.id
-      && (!item.channel || item.channel === "web" || item.channel === "desktop")
-      && !bound.has(item.id) && sources.sourceAllowed(`conv:${item.id}`));
-    // Unindexed child/internal sessions and external channel callers cannot use this capability.
-    if (requesterId !== undefined && (!validId(requesterId) || !privateItems.some(item => item.id === requesterId && !item.archivedAt && !item.archivingAt))) throw new Error("当前对话不能查询私人对话记录");
-    return privateItems;
-  }
+  const visible = createPrivateConversationAccess(runtime, ctx, sources);
   const reader = {
     async list(requesterId: number, query: ConversationQuery) {
       const limit = pageSize(query.limit);

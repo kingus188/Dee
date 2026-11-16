@@ -17,7 +17,7 @@ async function withStore(run: (store: ReturnType<typeof openEpisodeStore>) => Pr
   try { await run(store); } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
 }
 
-test("检索按命中数排序，回想会刷新最近使用，待跟进事项可列出", () => withStore(store => {
+test("检索按命中数排序，候选曝光不计实际读取，待跟进事项可列出", () => withStore(store => {
   store.add({ ...base, periodStart: ago(3), periodEnd: ago(3), summary: "张三提交了报销单，财务审批中", openItems: ["周五前回复张三"] });
   store.add({ ...base, source: "conv:1", label: "新对话", channel: "web", periodStart: ago(2), periodEnd: ago(2), summary: "讨论了周五评审安排", openItems: [] });
   const hits = store.search(["报销", "审批"], 5);
@@ -32,7 +32,8 @@ test("遗忘：久未使用的摘要被删除，带待跟进事项的保留更�
     store.add({ ...base, periodStart: ago(120), periodEnd: ago(120), summary, openItems: [...openItems] });
   }
   for (const item of store.all()) store.setLastUsed(item.id, ago(100));
-  store.search(["被用到"], 5);
+  const [selected] = store.search(["被用到"], 5);
+  store.read(selected.id, selected.sourceRevision);
   assert.equal(store.forget(), 1, "只有没被用到、也没有待跟进事项的旧细节被遗忘");
   assert.deepEqual(store.all().map(item => item.summary).sort(), ["旧但被用到", "旧承诺"]);
   for (const item of store.all()) store.setLastUsed(item.id, ago(200));
