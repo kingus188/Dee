@@ -33,7 +33,7 @@ test("遗忘：久未使用的摘要被删除，带待跟进事项的保留更�
   }
   for (const item of store.all()) store.setLastUsed(item.id, ago(100));
   const [selected] = store.search(["被用到"], 5);
-  store.read(selected.id, selected.sourceRevision);
+  store.read(selected.id, selected.sourceRevision, { callerId: 1, taskId: 1, callId: "call-1" });
   assert.equal(store.forget(), 1, "只有没被用到、也没有待跟进事项的旧细节被遗忘");
   assert.deepEqual(store.all().map(item => item.summary).sort(), ["旧但被用到", "旧承诺"]);
   for (const item of store.all()) store.setLastUsed(item.id, ago(200));

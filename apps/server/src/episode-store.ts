@@ -12,6 +12,8 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 export type NewEpisode = Omit<EpisodeRow, "level"> & { source: string; level?: 0 | 1; sourceRevision?: number; messageIds?: string[] };
 export type StoredEpisode = EpisodeRecord;
+export type EpisodeCursor = { score: number; periodEnd: string; id: string };
+export type EpisodePage = { items: StoredEpisode[]; next?: EpisodeCursor; scanned: number };
 
 // 周一 00:00 所在日期，用于把同一周的摘要归到一起。
 export function weekStart(isoTime: string) {
@@ -32,6 +34,7 @@ export function openEpisodeStore(dataDir: string) {
         created_at TEXT NOT NULL, last_used_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS episodes_source ON episodes (source, level, period_start);
       CREATE TABLE IF NOT EXISTS episode_cursors (source TEXT PRIMARY KEY, cursor TEXT NOT NULL)`);
+    db.exec("CREATE INDEX IF NOT EXISTS episodes_recent ON episodes(period_end DESC, id ASC)");
     sources = createSourceLifecycle(db);
     db.exec("BEGIN IMMEDIATE");
     const columns = db.prepare("PRAGMA table_info(episodes)").all() as { name: string }[];
@@ -40,6 +43,13 @@ export function openEpisodeStore(dataDir: string) {
     // Preserve legacy search-based retention timestamps without labeling them as explicit reads.
     if (!columns.some(column => column.name === "last_exposed_at")) db.exec("ALTER TABLE episodes ADD COLUMN last_exposed_at TEXT");
     if (!columns.some(column => column.name === "last_read_at")) db.exec("ALTER TABLE episodes ADD COLUMN last_read_at TEXT");
+    if (!columns.some(column => column.name === "read_retired_through")) db.exec("ALTER TABLE episodes ADD COLUMN read_retired_through INTEGER NOT NULL DEFAULT 0");
+    db.exec(`CREATE TABLE IF NOT EXISTS episode_reads (
+      episode_id TEXT NOT NULL, revision INTEGER NOT NULL, caller_id INTEGER NOT NULL,
+      task_id INTEGER NOT NULL, call_id TEXT NOT NULL, observed_at TEXT NOT NULL,
+      PRIMARY KEY (episode_id, revision, caller_id, task_id, call_id));
+      CREATE TRIGGER IF NOT EXISTS episode_reads_cleanup AFTER DELETE ON episodes
+      BEGIN DELETE FROM episode_reads WHERE episode_id=OLD.id; END`);
     db.exec("COMMIT");
     db.exec(`CREATE TEMP VIEW active_episodes AS SELECT e.* FROM episodes e
       WHERE NOT EXISTS (SELECT 1 FROM source_lifecycle s WHERE s.source=e.source
@@ -66,6 +76,38 @@ export function openEpisodeStore(dataDir: string) {
     catch (error) { db.exec("ROLLBACK"); throw error; }
   }
   const setCursor = (source: string, cursor: string) => { db.prepare("INSERT INTO episode_cursors (source, cursor) VALUES (?, ?) ON CONFLICT(source) DO UPDATE SET cursor = excluded.cursor").run(source, cursor); };
+  // LIMIT bounds materialized candidates, not SQLite's scoring/sort work.
+  // Keyset pagination preserves older matches and has an explicit unique tie-break.
+  function candidates(tokens: string[] | undefined, sinceDays: number | undefined, limit: number, cursor?: EpisodeCursor): EpisodePage {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 80) throw new Error("候选页大小应为1～80");
+    if (tokens && (!tokens.length || tokens.length > 8 || tokens.some(token => token.length > 200))) return { items: [], scanned: 0 };
+    const like = tokens?.map(token => `%${token.replace(/[\\%_]/g, "\\$&")}%`) ?? [];
+    const score = like.length ? like.map(() => "(CASE WHEN lower(summary || ' ' || open_items || ' ' || label) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)").join(" + ") : "0";
+    const after = cursor ? "AND (score < ? OR (score = ? AND (period_end < ? OR (period_end = ? AND id > ?))))" : "";
+    const found = db.prepare(`WITH ranked AS (SELECT *, ${score} AS score FROM episodes)
+      SELECT * FROM ranked WHERE ${tokens ? "score > 0" : "open_items != '[]' AND period_end >= ?"} ${after}
+      ORDER BY score DESC, period_end DESC, id ASC LIMIT ?`).all(...like, ...(tokens ? [] : [iso(Date.now() - sinceDays! * DAY)]),
+        ...(cursor ? [cursor.score, cursor.score, cursor.periodEnd, cursor.periodEnd, cursor.id] : []), limit + 1);
+    const page = found.slice(0, limit), last = page.at(-1);
+    return { items: page.map(row).filter(safe), scanned: page.length,
+      ...(found.length > limit && last ? { next: { score: Number(last.score), periodEnd: String(last.period_end), id: String(last.id) } } : {}) };
+  }
+  // Legacy callers expect local privacy filtering before their result limit.
+  // Preserve that contract without restoring an unbounded scan of denied rows.
+  function safeCandidates(tokens: string[] | undefined, sinceDays: number | undefined, limit: number) {
+    if (limit <= 0) return [];
+    if (!Number.isSafeInteger(limit)) throw new Error("候选数量必须是整数");
+    const target = Math.min(limit, 80), found: StoredEpisode[] = [];
+    let cursor: EpisodeCursor | undefined, count = 0;
+    for (let batch = 0; batch < 8; batch++) {
+      const page = candidates(tokens, sinceDays, 10, cursor);
+      found.push(...page.items);
+      count += page.items.reduce((sum, item) => sum + (tokens ? 1 : item.openItems.length), 0);
+      cursor = page.next;
+      if (!cursor || count >= target) break;
+    }
+    return found;
+  }
   return {
     add,
     sourceRevision: sources.revision,
@@ -120,29 +162,55 @@ export function openEpisodeStore(dataDir: string) {
         return found;
       });
     },
-    read(id: string, expectedRevision?: number) {
+    read(id: string, expectedRevision?: number, call?: { callerId: number; taskId: number; callId: string }) {
       return transaction(() => {
         const value = db.prepare("SELECT * FROM active_episodes WHERE id=?").get(id);
         if (!value) return;
         const found = row(value);
         if (!safe(found) || (expectedRevision !== undefined && expectedRevision !== found.sourceRevision)) return;
-        db.prepare("UPDATE episodes SET last_read_at=? WHERE id=?").run(iso(Date.now()), id);
+        found.readEvidence = { kind: "explicit_read", status: "unverified" };
+        // Retired identities stay behind a durable watermark. A late first read
+        // outside this bounded window may return content, but never renew retention.
+        if (call && Number.isSafeInteger(call.callerId) && call.callerId > 0
+          && Number.isSafeInteger(call.taskId) && call.taskId > 0
+          && typeof call.callId === "string" && call.callId.length > 0 && Buffer.byteLength(call.callId, "utf8") <= 256) {
+          if (call.taskId <= Number(value.read_retired_through)) {
+            found.readEvidence.status = "outside_window";
+            return found;
+          }
+          const now = iso(Date.now());
+          const recorded = db.prepare(`INSERT OR IGNORE INTO episode_reads
+            (episode_id,revision,caller_id,task_id,call_id,observed_at) VALUES (?,?,?,?,?,?)`)
+            .run(id, found.sourceRevision, call.callerId, call.taskId, call.callId, now);
+          const evidence = db.prepare("SELECT observed_at FROM episode_reads WHERE episode_id=? AND revision=? AND caller_id=? AND task_id=? AND call_id=?")
+            .get(id, found.sourceRevision, call.callerId, call.taskId, call.callId)!;
+          found.readEvidence = { kind: "explicit_read", status: recorded.changes ? "recorded" : "replayed", observedAt: String(evidence.observed_at) };
+          if (recorded.changes) {
+            const retired = db.prepare("SELECT task_id FROM episode_reads WHERE episode_id=? ORDER BY task_id DESC LIMIT 1 OFFSET 256").get(id);
+            if (retired) {
+              db.prepare("UPDATE episodes SET read_retired_through=MAX(read_retired_through,?) WHERE id=?").run(retired.task_id, id);
+              db.prepare("DELETE FROM episode_reads WHERE episode_id=? AND task_id<=?").run(id, retired.task_id);
+              if (call.taskId <= Number(retired.task_id)) {
+                found.readEvidence = { kind: "explicit_read", status: "outside_window" };
+                return found;
+              }
+            }
+            db.prepare("UPDATE episodes SET last_read_at=MAX(COALESCE(last_read_at,?),?) WHERE id=?").run(now, now, id);
+          }
+        }
         return found;
       });
     },
-    // Database matches are not exposure. The permission-filtered host calls expose.
+    // Database matches are not exposure. Only authorized returned rows are exposed.
+    searchPage: (tokens: string[], limit: number, cursor?: EpisodeCursor) => candidates(tokens, undefined, limit, cursor),
+    openItemsPage: (sinceDays: number, limit: number, cursor?: EpisodeCursor) => candidates(undefined, sinceDays, limit, cursor),
     search(tokens: string[], limit: number): EpisodeRecord[] {
-      if (!tokens.length || limit <= 0) return [];
-      const like = tokens.map((token) => `%${token.replace(/[\\%_]/g, "\\$&")}%`);
-      const hit = like.map(() => "(CASE WHEN lower(summary || ' ' || open_items || ' ' || label) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)").join(" + ");
-      const rows = db.prepare(`SELECT *, ${hit} AS score FROM active_episodes WHERE score > 0 ORDER BY score DESC, period_end DESC`).iterate(...like);
-      const foundRows: StoredEpisode[] = [];
-      for (const value of rows) { const found = row(value); if (safe(found)) foundRows.push(found); if (foundRows.length >= limit) break; }
-      return foundRows;
+      return safeCandidates(tokens, undefined, limit).slice(0, Math.min(limit, 80));
     },
     openItems(sinceDays: number, limit: number) {
-      const rows = db.prepare("SELECT * FROM active_episodes WHERE open_items != '[]' AND period_end >= ? ORDER BY period_end DESC").all(iso(Date.now() - sinceDays * DAY)).map(row).filter(safe);
-      return rows.flatMap((found) => found.openItems.map((text) => ({ label: found.label, text, at: found.periodEnd, episodeId: found.id, source: found.source, sourceRevision: found.sourceRevision, messageIds: found.messageIds }))).slice(0, limit);
+      if (limit <= 0) return [];
+      return safeCandidates(undefined, sinceDays, limit).flatMap(found => found.openItems.map(text => ({ label: found.label, text, at: found.periodEnd,
+        episodeId: found.id, source: found.source, sourceRevision: found.sourceRevision, messageIds: found.messageIds }))).slice(0, Math.min(limit, 80));
     },
     // 早于 before 的单次摘要里，同一来源同一周有两条以上的分组，等待合并为周摘要。
     rollupGroups(before: string): StoredEpisode[][] {

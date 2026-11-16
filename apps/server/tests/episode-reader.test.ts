@@ -17,12 +17,12 @@ async function fixture(t: TestContext) {
   const items: Array<{ id: number; title: string; channel?: string; createdAt: string; archivedAt?: string; archivingAt?: string }> = [2, 3, 4, 5, 6].map(id => ({ id, title: `conversation ${id}`, createdAt: "2026-01-01" }));
   items[1].channel = "teams"; items[2].channel = "wechat"; items[3].channel = "desktop";
   const bound = new Set<number>();
-  let offline = false, canRead = true, probes = 0, onProbe: (() => void) | undefined;
+  let offline = false, canRead = true, probes = 0, onProbe: (() => void | Promise<void>) | undefined;
   const runtime = { root: { id: 1 }, harness: { snapshot: async (doc: unknown) => doc === Index ? { items } : doc === WechatState ? { bindings: Object.fromEntries([...bound].map(id => [id, { conversationId: id }])) } : undefined } } as unknown as Runtime;
-  const reader = createEpisodeReader(runtime, ctx, store, { offline: () => offline, teams: { canReadEpisodeSource: async () => { probes++; onProbe?.(); return canRead; } } });
+  const reader = createEpisodeReader(runtime, ctx, store, { offline: () => offline, teams: { canReadEpisodeSource: async () => { probes++; await onProbe?.(); return canRead; } } });
   for (const [source, channel] of [["conv:2", "web"], ["conv:3", "teams"], ["conv:4", "wechat"], ["conv:5", "desktop"], ["teams:chat", "teams"]]) store.add({ source, channel, label: `project ${source}`, summary: `project summary ${source}`, openItems: [`follow up ${source}`], periodStart: new Date().toISOString(), periodEnd: new Date().toISOString(), messageIds: ["1"] });
   const id = (source: string) => store.all().find(row => row.source === source)!.id;
-  return { reader, store, items, bound, id, directory, probes: () => probes, setOffline: () => { offline = true; }, deny: () => { canRead = false; }, onProbe: (fn: () => void) => { onProbe = fn; } };
+  return { reader, store, items, bound, id, directory, probes: () => probes, setOffline: () => { offline = true; }, deny: () => { canRead = false; }, onProbe: (fn: () => void | Promise<void>) => { onProbe = fn; } };
 }
 
 test("episode candidate, detail and open-item readers apply the same private caller/source boundary", async t => {
@@ -75,7 +75,7 @@ for (const change of ["caller-archive", "caller-bind", "caller-revision", "sourc
 
 for (const method of ["read", "openItems"] as const) test(`${method} rejects a source revoked during the current remote permission probe`, async t => {
   const f = await fixture(t), id = f.id("teams:chat");
-  f.onProbe(() => f.store.revokeSource("teams:chat", "1"));
+  f.onProbe(() => { f.store.revokeSource("teams:chat", "1"); });
   if (method === "read") assert.equal(await f.reader.read(2, id), undefined);
   else assert.ok(!(await f.reader.openItems(2, 30, 10)).some(item => item.source === "teams:chat"));
 });
@@ -100,4 +100,82 @@ test("only authorized returned candidates and displayed open items count as expo
   assert.deepEqual(exposed(), []);
   const shown = await f.reader.openItems(2, 30, 3);
   assert.deepEqual(exposed(), [...new Set(shown.map(item => item.source))].sort());
+});
+
+function addCandidate(store: ReturnType<typeof openEpisodeStore>, source: string, at: string, channel = "web") {
+  store.add({ source, channel, label: "ranked", summary: "ranked history", openItems: ["ranked follow up"], periodStart: at, periodEnd: at, messageIds: ["1"] });
+}
+
+test("ACL-filtered search and open items fill from later bounded pages", async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 20; i++) addCandidate(f.store, "conv:3", `2027-01-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`, "teams");
+  addCandidate(f.store, "conv:5", "2026-12-01T00:00:00.000Z", "desktop");
+  assert.equal(f.store.search(["ranked"], 1)[0].source, "conv:3", "old pre-ACL limit hides the eligible result");
+  const result = await f.reader.search(2, ["ranked"], 1);
+  assert.deepEqual(result.map(row => row.source), ["conv:5"]);
+  assert.deepEqual((await f.reader.openItems(2, 3650, 1)).map(item => item.source), ["conv:5"]);
+});
+
+test("all-denied candidate histories stop at 80 and never expose rejected rows", async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 90; i++) addCandidate(f.store, "conv:3", new Date(Date.UTC(2028, 0, 1, 0, i)).toISOString(), "teams");
+  addCandidate(f.store, "conv:5", "2027-01-01T00:00:00.000Z", "desktop");
+  const result = await f.reader.search(2, ["ranked"], 1) as Awaited<ReturnType<typeof f.reader.search>> & { scan: { scanned: number; limited: boolean } };
+  assert.equal(result.length, 0); assert.deepEqual(result.scan, { scanned: 80, limited: true });
+  assert.equal(f.probes(), 0);
+  const db = new DatabaseSync(join(f.directory, "agent.sqlite"));
+  try { assert.equal(db.prepare("SELECT COUNT(*) AS n FROM episodes WHERE last_exposed_at IS NOT NULL").get()!.n, 0); }
+  finally { db.close(); }
+});
+
+test("remote probe cap does not prevent later local matches", async t => {
+  const f = await fixture(t); f.deny();
+  for (let i = 0; i < 25; i++) addCandidate(f.store, `teams:remote-${i}`, new Date(Date.UTC(2028, 0, 1, 0, i)).toISOString(), "teams");
+  addCandidate(f.store, "conv:5", "2027-01-01T00:00:00.000Z", "desktop");
+  const result = await f.reader.search(2, ["ranked"], 1);
+  assert.deepEqual(result.map(row => row.source), ["conv:5"]);
+  assert.equal(f.probes(), 12);
+});
+
+test("equal rank and date candidates paginate by unique id without duplicates", async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 35; i++) addCandidate(f.store, "conv:5", "2028-01-01T00:00:00.000Z", "desktop");
+  const expected = f.store.all().filter(row => row.label === "ranked").map(row => row.id).sort();
+  const actual: string[] = [];
+  let cursor: import("../dist/episode-store.js").EpisodeCursor | undefined;
+  do { const page = f.store.searchPage(["ranked"], 10, cursor); actual.push(...page.items.map(row => row.id)); cursor = page.next; } while (cursor);
+  assert.deepEqual(actual, expected);
+});
+
+test("later-page permission waits cannot return a revoked earlier-page match", async t => {
+  const f = await fixture(t);
+  addCandidate(f.store, "conv:5", "2030-01-01T00:00:00.000Z", "desktop");
+  for (let i = 0; i < 10; i++) addCandidate(f.store, "conv:3", new Date(Date.UTC(2029, 0, 1, 0, i)).toISOString(), "teams");
+  addCandidate(f.store, "teams:later", "2028-01-01T00:00:00.000Z", "teams");
+  f.onProbe(() => { f.store.revokeSource("conv:5"); });
+  const result = await f.reader.search(2, ["ranked"], 2);
+  assert.ok(!result.some(row => row.source === "conv:5"));
+});
+
+
+test("unresponsive remote permission checks exhaust a finite wait budget without blocking local history", { timeout: 12000 }, async t => {
+  const f = await fixture(t);
+  addCandidate(f.store, "teams:hang", "2029-01-01T00:00:00.000Z", "teams");
+  addCandidate(f.store, "conv:5", "2028-01-01T00:00:00.000Z", "desktop");
+  f.onProbe(() => new Promise<void>(() => {}));
+  const result = await f.reader.search(2, ["ranked"], 1);
+  assert.deepEqual(result.map(row => row.source), ["conv:5"]);
+  assert.equal(f.probes(), 1);
+});
+
+test("legacy wrappers fill after unsafe pages but stop at their fixed candidate budget", async t => {
+  const f = await fixture(t);
+  const addUnsafe = (minute: number) => f.store.add({ source: "conv:5", channel: "desktop", label: "password: synthetic-sensitive-value", summary: "wrapper-match", openItems: ["unsafe item"], periodStart: new Date(Date.UTC(2030, 0, 1, 0, minute)).toISOString(), periodEnd: new Date(Date.UTC(2030, 0, 1, 0, minute)).toISOString() });
+  for (let i = 0; i < 20; i++) addUnsafe(i);
+  f.store.add({ source: "conv:5", channel: "desktop", label: "safe result", summary: "wrapper-match", openItems: ["safe item"], periodStart: "2029-01-01T00:00:00.000Z", periodEnd: "2029-01-01T00:00:00.000Z" });
+  assert.deepEqual(f.store.search(["wrapper-match"], 1).map(row => row.label), ["safe result"]);
+  assert.deepEqual(f.store.openItems(3650, 1).map(row => row.text), ["safe item"]);
+  for (let i = 20; i < 90; i++) addUnsafe(i);
+  assert.deepEqual(f.store.search(["wrapper-match"], 1), []);
+  assert.deepEqual(f.store.openItems(3650, 1), []);
 });

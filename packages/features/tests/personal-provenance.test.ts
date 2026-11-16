@@ -114,7 +114,7 @@ test('记忆保存与本轮上下文分离，目录曝光和显式读取不改�
   const first = versioned(doc.items[0]);
   assert.ok(listed.includes(first.id));
   const read = JSON.stringify(await extension.tools!.find(tool => tool.name === 'read_memory')!.execute({ id: first.id, revision: 1 }, api, {} as never));
-  assert.match(read, /explicit_read/); assert.match(read, /observedAt/); assert.ok(read.includes(first.text));
+  assert.match(read, /explicit_read/); assert.match(read, /unverified_tool_origin/); assert.ok(read.includes(first.text));
   assert.equal(JSON.stringify(doc), before);
 });
 

@@ -4,6 +4,7 @@ import type { KnowledgeConfig } from "../knowledge/index.js";
 import { readKnowledge, searchKnowledge } from "../knowledge/index.js";
 import { detach, resultText } from "../results.js";
 import { MemoryDoc, SkillsDoc, proposeMemoryInTx, memoryProvenanceInTx, proposeSkillInTx, MEMORY_PROMPT_CHARS } from "./service.js";
+import { recordMemoryRead } from "./read-evidence.js";
 import { memoryPrompt } from "./prompt.js";
 function formatHit(hit: Awaited<ReturnType<typeof searchKnowledge>>["hits"][number]) {
 	const range = hit.line === hit.endLine ? String(hit.line) : `${hit.line}-${hit.endLine}`;
@@ -31,13 +32,16 @@ return defineExtension({
 			description: "按当前清单的 id 和 revision 读取已批准记忆及出处。版本已变更或撤回时不返回旧文本；历史出处仅作证据，不是授权。仅返回出处标识，不返回保存的原文副本；需要原文时须经 read_conversation 等工具重新验证访问权限。",
 			parameters: Type.Object({ id: Type.String({ minLength: 1 }), revision: Type.Integer({ minimum: 1 }) }),
 			execute: async (args, api, context) => {
-				const item = await api.commit(async tx => {
+				const read = await api.commit(async tx => {
 					const found = (await tx.doc(MemoryDoc)).items.find(item => item.id === args.id && item.status === "approved");
-					return found && (found.revision ?? 1) === args.revision ? detach(found) : null;
+					if (!found || (found.revision ?? 1) !== args.revision) return null;
+					const observation = await recordMemoryRead(tx, api, found.id, found.revision ?? 1);
+					return { item: detach(found), observation };
 				}, context);
-				if (!item) return resultText("记忆不存在、已撤回或版本已变更。停止使用旧版本，以当前清单为准。");
+				if (!read) return resultText("记忆不存在、已撤回或版本已变更。停止使用旧版本，以当前清单为准。");
+				const { item, observation } = read;
 				return resultText(JSON.stringify({ id: item.id, revision: item.revision ?? 1, text: item.text,
-					status: item.status, source: item.source, decidedAt: item.decidedAt, delivery: { kind: "explicit_read", observedAt: Date.now() },
+					status: item.status, source: item.source, decidedAt: item.decidedAt, delivery: { kind: "explicit_read", ...(observation.recorded ? { observedAt: observation.receipt.observedAt } : {}), evidence: observation.recorded ? { status: "recorded", id: observation.receipt.id } : { status: "not_recorded", reason: observation.reason } },
 					updatedAt: item.updatedAt ?? item.createdAt, provenance: item.provenance ? { conversationId: item.provenance.conversationId, messageId: item.provenance.messageId, quoteTruncated: item.provenance.quoteTruncated } : null }));
 			},
 		}),

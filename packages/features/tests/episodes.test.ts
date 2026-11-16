@@ -20,8 +20,8 @@ test("recall exposes bounded candidates; read_episode explicitly delivers full p
   const { createEpisodes } = await import("@assistant/features");
   const row = { id: "stable-episode", source: "teams:chat:one", sourceRevision: 4, messageIds: ["chat:one:message-7"], label: "Synthetic", channel: "teams", level: 0 as const, periodStart: "2026-01-01", periodEnd: "2026-01-02", summary: "x".repeat(300), openItems: ["historical item"] };
   let reads = 0;
-  const extension = createEpisodes({ search: async caller => { assert.equal(caller, 5); return [row]; }, read: async (caller, id) => { assert.equal(caller, 5); reads++; return id === row.id ? row : undefined; }, openItems: () => [] });
-  const api = { conversationId: 5 } as never;
+  const extension = createEpisodes({ search: async caller => { assert.equal(caller, 5); return [row]; }, read: async (caller, id, call) => { assert.deepEqual(call, { taskId: 1, callId: "call-1" }); assert.equal(caller, 5); reads++; return id === row.id ? row : undefined; }, openItems: () => [] });
+  const api = { conversationId: 5, taskId: 1, callId: "call-1" } as never;
   const recall = extension.tools!.find(tool => tool.name === "recall")!;
   const read = extension.tools!.find(tool => tool.name === "read_episode")!;
   const candidate = JSON.stringify(await recall.execute({ query: "project" }, api, {} as never));
