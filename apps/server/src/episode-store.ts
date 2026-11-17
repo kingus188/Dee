@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { normalizeSourceBefore, sourceTimeRange, verifiedSourceTimeRange, type EpisodeTimeQuery, type EpisodeRow, type EpisodeRecord } from "@assistant/features";
+import { normalizeEpisodeTimeQuery, verifiedSummaryRecordedAt, sourceTimeRange, verifiedSourceTimeRange, type EpisodeTimeQuery, type EpisodeRow, type EpisodeRecord } from "@assistant/features";
 import { createSourceLifecycle } from "./source-lifecycle.js";
 import { episodeHasSensitiveData } from "./episode-privacy.js";
 
@@ -25,6 +25,7 @@ export function weekStart(isoTime: string) {
 // 情景摘要、遗忘与各来源的整理进度，与 Agent 同库（agent.sqlite）。
 export function openEpisodeStore(dataDir: string) {
   const db = new DatabaseSync(join(dataDir, "agent.sqlite"));
+  db.function("episode_recorded_time", { deterministic: true }, value => verifiedSummaryRecordedAt(value) ?? null);
   let sources: ReturnType<typeof createSourceLifecycle>;
   try {
     db.exec(`PRAGMA busy_timeout = 5000;
@@ -61,7 +62,7 @@ export function openEpisodeStore(dataDir: string) {
   const row = (r: Record<string, unknown>): StoredEpisode => ({
     id: String(r.id), source: String(r.source), label: String(r.label), channel: String(r.channel), level: r.level === 1 ? 1 : 0,
     sourceRevision: Number(r.source_revision), messageIds: JSON.parse(String(r.message_ids)) as string[],
-    sourceTimeVerified: r.source_time_verified === 1, summaryRecordedAt: String(r.created_at),
+    sourceTimeVerified: r.source_time_verified === 1, summaryRecordedAt: verifiedSummaryRecordedAt(r.created_at),
     periodStart: String(r.period_start), periodEnd: String(r.period_end), summary: String(r.summary), openItems: JSON.parse(String(r.open_items)) as string[],
   });
   const safe = (episode: StoredEpisode) => sources.allowed(episode.source, episode.sourceRevision, episode.messageIds) && !episodeHasSensitiveData([episode.label, episode.summary, ...episode.openItems].join("\n"));
@@ -86,13 +87,14 @@ export function openEpisodeStore(dataDir: string) {
     if (tokens && (!tokens.length || tokens.length > 8 || tokens.some(token => token.length > 200))) return { items: [], scanned: 0 };
     const like = tokens?.map(token => `%${token.replace(/[\\%_]/g, "\\$&")}%`) ?? [];
     const score = like.length ? like.map(() => "(CASE WHEN lower(summary || ' ' || open_items || ' ' || label) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)").join(" + ") : "0";
-    const sourceBefore = time?.sourceBefore === undefined ? undefined : normalizeSourceBefore(time.sourceBefore);
+    const { sourceBefore, summaryRecordedBefore } = normalizeEpisodeTimeQuery(time);
     const temporal = sourceBefore ? "AND source_time_verified = 1 AND julianday(period_start) <= julianday(period_end) AND julianday(period_end) <= julianday(?)" : "";
+    const recorded = summaryRecordedBefore ? "AND episode_recorded_time(created_at) <= ?" : "";
     const after = cursor ? "AND (score < ? OR (score = ? AND (period_end < ? OR (period_end = ? AND id > ?))))" : "";
     const found = db.prepare(`WITH ranked AS (SELECT *, ${score} AS score FROM episodes)
-      SELECT * FROM ranked WHERE ${tokens ? "score > 0" : "open_items != '[]' AND period_end >= ?"} ${temporal} ${after}
+      SELECT * FROM ranked WHERE ${tokens ? "score > 0" : "open_items != '[]' AND period_end >= ?"} ${temporal} ${recorded} ${after}
       ORDER BY score DESC, period_end DESC, id ASC LIMIT ?`).all(...like, ...(tokens ? [] : [iso(Date.now() - sinceDays! * DAY)]),
-        ...(sourceBefore ? [sourceBefore] : []), ...(cursor ? [cursor.score, cursor.score, cursor.periodEnd, cursor.periodEnd, cursor.id] : []), limit + 1);
+        ...(sourceBefore ? [sourceBefore] : []), ...(summaryRecordedBefore ? [summaryRecordedBefore] : []), ...(cursor ? [cursor.score, cursor.score, cursor.periodEnd, cursor.periodEnd, cursor.id] : []), limit + 1);
     const page = found.slice(0, limit), last = page.at(-1);
     return { items: page.map(row).filter(safe), scanned: page.length,
       ...(found.length > limit && last ? { next: { score: Number(last.score), periodEnd: String(last.period_end), id: String(last.id) } } : {}) };

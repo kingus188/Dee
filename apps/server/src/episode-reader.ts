@@ -1,6 +1,6 @@
 import type { Context } from "@earendil-works/chord";
 import type { Runtime, ConversationItem } from "@assistant/runtime";
-import { normalizeSourceBefore, verifiedSourceTimeRange, type EpisodeReader, type OpenItem } from "@assistant/features";
+import { normalizeSourceBefore, normalizeEpisodeTimeQuery, withinRecordedWindow, verifiedSourceTimeRange, type EpisodeReader, type OpenItem } from "@assistant/features";
 import type { EpisodeStore, StoredEpisode, EpisodePage, EpisodeCursor } from "./episode-store.js";
 import type { TeamsSender } from "./teams-reply-port.js";
 import { verifyEpisodeReadCall } from "./episode-read-evidence.js";
@@ -70,8 +70,8 @@ export function createEpisodeReader(runtime: Runtime, ctx: Context, store: Episo
   }
   return {
     async search(caller, tokens, limit, time) {
-      const sourceBefore = time?.sourceBefore === undefined ? undefined : normalizeSourceBefore(time.sourceBefore);
-      const result = await scan(caller, limit, cursor => store.searchPage(tokens, 10, cursor, { sourceBefore }), async row => row, () => 1);
+      const { sourceBefore, summaryRecordedBefore } = normalizeEpisodeTimeQuery(time);
+      const result = await scan(caller, limit, cursor => store.searchPage(tokens, 10, cursor, { sourceBefore, summaryRecordedBefore }), async row => row, () => 1);
       const rows = result.found.slice(0, limit).flatMap(({ row }) => {
         const exposed = store.expose(row.id, row.sourceRevision);
         return exposed ? [exposed] : [];
@@ -79,10 +79,11 @@ export function createEpisodeReader(runtime: Runtime, ctx: Context, store: Episo
       return Object.assign(rows, { scan: result.scan });
     },
     async read(caller, id, call, time) {
-      const sourceBefore = time?.sourceBefore === undefined ? undefined : normalizeSourceBefore(time.sourceBefore);
+      const { sourceBefore, summaryRecordedBefore } = normalizeEpisodeTimeQuery(time);
       const evidence = await verifyEpisodeReadCall(runtime, ctx, caller, call);
       const row = store.peek(id);
-      const matchesTime = row && (!sourceBefore || (verifiedSourceTimeRange(row) && normalizeSourceBefore(row.periodEnd) <= sourceBefore));
+      const matchesTime = row && (!sourceBefore || (verifiedSourceTimeRange(row) && normalizeSourceBefore(row.periodEnd) <= sourceBefore))
+        && (!summaryRecordedBefore || withinRecordedWindow(row.summaryRecordedAt, summaryRecordedBefore));
       const allowed = await authorized(caller, matchesTime ? [row] : [], async row => row);
       return allowed.length ? store.read(id, allowed[0].row.sourceRevision, evidence) : undefined;
     },

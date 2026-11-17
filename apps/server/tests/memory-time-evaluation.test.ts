@@ -78,7 +78,7 @@ test("固定来源窗口评测不把历史可用性当事实有效性或读取�
     assert.equal(toolTexts.length, 5);
     const rejectedTexts = toolTexts.filter(text => !text.startsWith("{"));
     assert.equal(rejectedTexts.length, 1);
-    assert.match(rejectedTexts[0]!, /不符合来源时间边界/);
+    assert.match(rejectedTexts[0]!, /不符合来源(?:或摘要入库)?时间边界/);
     assert.ok(!rejectedTexts[0]!.includes(TIME_EVAL_ROWS.find(row => row.label === "october-update")!.summary));
     const toolRows = toolTexts.filter(text => text.startsWith("{")).map(text => JSON.parse(text) as { temporal: { sourceBefore: string; withinSourceWindow: boolean; factValidity: string; supersession: string; conflicts: string } });
     assert.equal(toolRows.length, 4);
