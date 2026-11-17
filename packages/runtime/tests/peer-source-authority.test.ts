@@ -12,18 +12,25 @@ import { createModelCatalog, createPeerService, openRuntime, sourceAuthorityMatc
 import { PeerSourceGrants } from "../dist/peer-source-authority.js";
 const model = { api: "faux", apiKey: "", baseUrl: "", model: "", contextWindow: 128000, maxTokens: 8192 };
 
-async function source(t: TestContext) {
+async function source(t: TestContext, sourceAdmission?: import("../dist/peers.js").PeerOptions["sourceAdmission"]) {
   const directory = await mkdtemp(join(tmpdir(), "dee-source-authority-")), desktop = "desktop-" + randomUUID();
-  const catalog = await createModelCatalog(model, transcript => transcript.messages.at(-1)?.role === "user" ? fauxAssistantMessage(fauxToolCall("delegate_to_peer", { target: desktop, task: "read approved workspace", workspace: "/approved" }), { stopReason: "toolUse" }) : fauxAssistantMessage("queued"));
-  let peers = createPeerService({ nodeId: "server", configured: () => true, devices: async () => [desktop] });
+  let statusId: string | undefined;
+  const catalog = await createModelCatalog(model, transcript => transcript.messages.at(-1)?.role === "user" ? fauxAssistantMessage(statusId ? fauxToolCall("peer_task_status", { id: statusId }) : fauxToolCall("delegate_to_peer", { target: desktop, task: "read approved workspace", workspace: "/approved" }), { stopReason: "toolUse" }) : fauxAssistantMessage("queued"));
+  let peers = createPeerService({ nodeId: "server", configured: () => true, devices: async () => [desktop], sourceAdmission });
   let runtime = await openRuntime({ dataDir: directory, ...catalog, extensions: [peers.extension, peers.accessExtension], beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, onReport: () => {} }, ctx);
   t.after(async () => { await peers.close(); await runtime.harness.close(ctx); await rm(directory, { recursive: true, force: true }); });
   await (await runtime.root.submit({ type: "input", content: "Please read the approved desktop workspace." }, ctx)).wait(ctx);
   const job = (await peers.list())[0]!;
   return { get peers() { return peers; }, get runtime() { return runtime; }, desktop, job, directory,
+    async readStatus(id: string) {
+      statusId = id;
+      await (await runtime.root.submit({ type: "input", content: "Read the completed job status." }, ctx)).wait(ctx);
+      const page = await runtime.root.entries({}, 100, undefined, ctx);
+      return JSON.stringify(page.items.filter(entry => entry.kind === "pi.tool-result"));
+    },
     async reopen() {
       await peers.close(); await runtime.harness.close(ctx);
-      peers = createPeerService({ nodeId: "server", configured: () => true, devices: async () => [desktop] });
+      peers = createPeerService({ nodeId: "server", configured: () => true, devices: async () => [desktop], sourceAdmission });
       runtime = await openRuntime({ dataDir: directory, ...catalog, extensions: [peers.extension, peers.accessExtension], beforeToolExecute: peers.guardTool, beforeResume: async value => { peers.bind(value, ctx); }, onReport: () => {} }, ctx);
     },
   };
@@ -88,4 +95,36 @@ test("source ledger restart preserves the original grant, never renews expiry, a
     for (const job of [f.job, cancelled]) { await target.submit(job); assert.equal((await target.run(job.id)).status, "failed"); }
     assert.equal(generations, 0, "expired/revoked persisted authority blocks even initial model execution");
   } finally { await target.close(); await runtime.harness.close(ctx); }
+});
+
+
+test("source host audience admission is checked at issuance and again after restoration", async t => {
+  let admitted = true, checks = 0;
+  const f = await source(t, async (_tx, id) => { checks++; assert.ok(id > 0); return admitted; });
+  assert.ok(await f.peers.sourceAuthority(f.job.id));
+  admitted = false;
+  assert.equal(await f.peers.sourceAuthority(f.job.id), undefined);
+  await f.reopen();
+  assert.equal(await f.peers.sourceAuthority(f.job.id), undefined);
+  assert.ok(checks >= 4);
+});
+test("denied source audience cannot mint a grant or job", async t => {
+  const f = await source(t, async () => false);
+  assert.deepEqual(await f.peers.list(), []);
+});
+
+test("guarded source continuation is a body-free receipt, not a renewed execution grant", async t => {
+  const f = await source(t, async () => true);
+  await f.runtime.root.commit(async tx => { (await tx.doc(PeerSourceGrants)).items.find(item => item.jobId === f.job.id)!.expiresAt = Date.now() - 1; }, ctx);
+  assert.equal(await f.peers.sourceAuthority(f.job.id), undefined);
+  await f.peers.complete(f.job.id, { status: "done", result: "PRIVATE_COMPLETED_BODY" });
+  const entries = await f.runtime.root.entries({}, 100, undefined, ctx);
+  const receipts = entries.items.filter(item => item.kind === "app.peer-result");
+  assert.equal(receipts.length, 1);
+  assert.deepEqual(receipts[0].data, { jobId: f.job.id, status: "done" });
+  assert.doesNotMatch(JSON.stringify(receipts), /PRIVATE_COMPLETED_BODY|read approved workspace|\/approved/);
+  assert.match(JSON.stringify(receipts[0].model), /peer_task_status/);
+  assert.equal((await f.peers.get(f.job.id))!.resultDelivered, true);
+  assert.match(await f.readStatus(f.job.id), /PRIVATE_COMPLETED_BODY/, "execution TTL does not revoke a still-private source's result access");
+  assert.equal(await f.peers.sourceAuthority(f.job.id), undefined, "reading a completed result cannot renew expired execution authority");
 });

@@ -38,6 +38,8 @@ export type PeerOptions = {
   nodeId: string; configured: () => boolean;
   /** Explicit host read capability; absent means no peer tool authority. */
   readPolicy?: PeerReadPolicy;
+  /** Host audience policy; invoked in the root transaction, never inferred from model text. */
+  sourceAdmission?: (tx: import("@earendil-works/pi-durable").Tx, conversationId: number) => Promise<boolean>;
   verifySource?: (job: PeerJob, tool?: string) => Promise<boolean>;
   independentTask?: (tx: import("@earendil-works/pi-durable").Tx, origin: IndependentTaskOrigin) => Promise<boolean>;
   validateRead?: (job: PeerJob, call: { name: string; arguments: unknown }) => Promise<boolean>;
@@ -108,6 +110,11 @@ export function createPeerService(options: PeerOptions): PeerService {
     const { runtime, ctx } = state();
     return runtime.root.commit(async tx => {
       const inputs = origin ? await requireOrigin(tx, origin) : undefined;
+      if (input.source === options.nodeId && options.sourceAdmission) {
+        const sourceId = input.sourceSession?.agent === "pi" ? Number(input.sourceSession.sessionId.slice(3)) : undefined;
+        if (sourceId === undefined || !Number.isSafeInteger(sourceId) || sourceId <= 0 || (origin && sourceId !== origin.conversationId) || !await options.sourceAdmission(tx, sourceId)) throw new PeerError(403, "当前来源会话不能发起私人跨节点任务");
+        if (input.target === options.nodeId && input.targetSession && (input.targetSession.agent !== "pi" || !await options.sourceAdmission(tx, Number(input.targetSession.sessionId.slice(3))))) throw new PeerError(403, "目标会话不属于可读取的私人会话");
+      }
       const doc = await tx.doc(PeerJobs), existing = doc.items.find(job => job.id === input.id);
       if (existing) {
         if (!samePayload(existing, input)) throw new PeerError(409, "任务 ID 与已有内容冲突");
@@ -131,6 +138,7 @@ export function createPeerService(options: PeerOptions): PeerService {
       const job = (await tx.doc(PeerJobs)).items.find(item => item.id === id), grant = (await tx.doc(PeerSourceGrants)).items.find(item => item.jobId === id);
       if (options.nodeId !== "server" || !job || job.source !== "server" || job.target === "server" || job.targetSession || !grant || grant.revoked || grant.expiresAt <= Date.now() || job.cancellation || terminal(job) || grant.payloadDigest !== peerPayloadDigest(job)) return;
       try {
+        if (options.sourceAdmission && !await options.sourceAdmission(tx, grant.origin.conversationId)) return;
         const inputs = await requireOrigin(tx, grant.origin as ToolOrigin);
         if (JSON.stringify(inputs) !== JSON.stringify(grant.inputs)) return;
       } catch { return; }
@@ -214,11 +222,26 @@ export function createPeerService(options: PeerOptions): PeerService {
     if (!result) throw new PeerError(404, "Agent 会话不存在或不可用");
     return result;
   }
+  async function sourceAccessible(job: PeerJob): Promise<boolean> {
+    if (!options.sourceAdmission) return true;
+    if (job.source !== options.nodeId || job.sourceSession?.agent !== "pi") return false;
+    return conversationAccessible(Number(job.sourceSession.sessionId.slice(3)));
+  }
+  async function conversationAccessible(...ids: number[]): Promise<boolean> {
+    if (!options.sourceAdmission) return true;
+    if (ids.some(id => !Number.isSafeInteger(id) || id <= 0)) return false;
+    const { runtime, ctx } = state();
+    return runtime.root.commit(async tx => {
+      for (const id of ids) if (!await options.sourceAdmission!(tx, id)) return false;
+      return true;
+    }, ctx);
+  }
   async function deliverResult(job: PeerJob) {
     if (job.source !== options.nodeId || !job.sourceSession || job.resultDelivered) return;
     const { runtime, ctx } = state();
     let admitted = false;
     try {
+      if (!await sourceAccessible(job)) throw new PeerError(403, "来源会话准入已失效，不能投递协作结果");
       if (job.sourceSession.agent !== "pi") {
         if (!options.deliverResult) throw new PeerError(409, "来源 Agent 不支持接收结果");
         admitted = await options.deliverResult(job) !== false;
@@ -229,7 +252,12 @@ export function createPeerService(options: PeerOptions): PeerService {
         const previous = await runtime.root.commit(tx => tx.submissionByRequest(source.id, requestId), ctx);
         // Older releases used this key for a passive write; its SDK identity cannot change type.
         if (previous?.type === "write") requestId += ":continuation";
-        await source.submit({ type: "input", requestId, whenBusy: "followUp", content: peerContinuation(job), entry: { kind: "app.peer-result", data: { jobId: job.id, source: job.target, targetSession: job.targetSession ?? null, status: job.status, result: job.result ?? "" } } }, ctx);
+        if (!await sourceAccessible(job)) throw new PeerError(403, "来源会话准入已失效，不能投递协作结果");
+        // Audience can change between the policy transaction and SDK submission.
+        // Guarded hosts only enqueue a receipt; private content is fetched through the gated status tool.
+        const content = options.sourceAdmission ? `协作任务 ${job.id} 状态：${job.status}。请通过 peer_task_status 按需读取结果。` : peerContinuation(job);
+        const data: { jobId: string; status: string } | { jobId: string; source: string; targetSession: PeerSession | null; status: string; result: string } = options.sourceAdmission ? { jobId: job.id, status: job.status } : { jobId: job.id, source: job.target, targetSession: job.targetSession ?? null, status: job.status, result: job.result ?? "" };
+        await source.submit({ type: "input", requestId, whenBusy: "followUp", content, entry: { kind: "app.peer-result", data } }, ctx);
         admitted = true;
       }
     } catch (error) {
@@ -398,31 +426,40 @@ export function createPeerService(options: PeerOptions): PeerService {
       : "你现在运行在用户桌面，模型由本机独立配置。本机文件和应用任务留在本机；只有需要服务器业务数据、常驻任务或服务器工具时才 delegate_to_peer(target=server)。不要把所有任务转发。")],
     tools: [defineTool({
       name: "peer_sessions", description: "列出指定节点已有的 Agent/会话地址。远端桌面记录为最近同步的快照，离线不保证可执行。省略 node 查询当前节点。", parameters: Type.Object({ node: Type.Optional(Type.String()) }), replay: "safe",
-      execute: async args => {
+      execute: async (args, api) => {
+        if (!await conversationAccessible(api.conversationId)) throw new PeerError(403, "当前来源会话不能读取协作会话");
         const node = args.node ?? options.nodeId;
         if (node !== "server" && !PEER_DEVICE_ID.test(node)) throw new PeerError(400, "节点 ID 无效");
         const items = node === options.nodeId ? await sessions() : await options.remoteSessions?.(node);
         if (!items) throw new PeerError(409, "远端会话目录不可用");
+        if (!await conversationAccessible(api.conversationId)) throw new PeerError(403, "来源会话准入已失效");
         return { output: [{ type: "text", text: JSON.stringify({ node, items }) }] };
       },
     }), defineTool({
       name: "read_peer_session", description: "读取明确 Agent/会话的最近两百条消息，不切换当前会话，不执行。", parameters: Type.Object({ node: Type.String(), agent: Type.Union([Type.Literal("pi"), Type.Literal("codex"), Type.Literal("claude"), Type.Literal("acp")]), sessionId: Type.String() }), replay: "safe",
-      execute: async args => {
+      execute: async (args, api) => {
+        if (!await conversationAccessible(api.conversationId)) throw new PeerError(403, "当前来源会话不能读取协作会话");
         const session = { agent: args.agent, sessionId: args.sessionId };
         if (!validPeerSession(session)) throw new PeerError(400, "Agent 会话地址无效");
+        const localTarget = args.node === options.nodeId && options.sourceAdmission;
+        if (localTarget && (session.agent !== "pi" || !await conversationAccessible(Number(session.sessionId.slice(3))))) throw new PeerError(403, "目标会话不属于可读取的私人会话");
         const item = args.node === options.nodeId ? await readSession(session) : await options.remoteSessions?.(args.node, session);
         if (!item) throw new PeerError(404, "远端会话不可用");
+        if (!await conversationAccessible(api.conversationId, ...(localTarget ? [Number(session.sessionId.slice(3))] : []))) throw new PeerError(403, "来源或目标会话准入已失效");
         return { output: [{ type: "text", text: JSON.stringify(item) }] };
       },
     }), defineTool({
       name: "send_to_peer_session", description: "向明确节点的已有 Agent/会话异步发送任务，在原上下文排队执行；不打断当前任务、不切换界面。桌面入站仍须用户批准，完成后自动回到本来源会话继续执行；peer_task_status 可查询进度。", parameters: Type.Object({ target: Type.String(), agent: Type.Union([Type.Literal("pi"), Type.Literal("codex"), Type.Literal("claude"), Type.Literal("acp")]), sessionId: Type.String(), task: Type.String({ minLength: 1, maxLength: PEER_TASK_LIMIT }), workspace: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })), constraints: Type.Optional(Type.String({ minLength: 1, maxLength: 8000 })), acceptanceCriteria: Type.Optional(Type.String({ minLength: 1, maxLength: 8000 })) }), replay: "safe",
       execute: async (args, api, callContext) => {
         await requireUserOrigin(api, callContext);
+        if (!await conversationAccessible(api.conversationId)) throw new PeerError(403, "当前来源会话不能发起私人跨节点任务");
+        if (options.sourceAdmission && args.target === options.nodeId && (args.agent !== "pi" || !await conversationAccessible(Number(args.sessionId.slice(3))))) throw new PeerError(403, "目标会话不属于可读取的私人会话");
         if (options.nodeId === "server" && args.target !== "server") throw new PeerError(403, "跨节点源授权只支持新隔离 Pi 会话，请使用 delegate_to_peer");
         const id = await api.memo<string>("peer-session-job", randomUUID(), callContext);
         const job = await submit({ id, source: options.nodeId, sourceSession: { agent: "pi", sessionId: `pi-${api.conversationId}` }, target: args.target, targetSession: { agent: args.agent, sessionId: args.sessionId }, task: args.task, ...peerRequirements(args) });
         // Do not wait on the destination: a relay back to this busy source must be able to queue.
         void run(id).catch(error => { if (options.report) options.report(error); else console.error("协作任务尚未确认，请检查持久化队列状态"); });
+        if (!await sourceAccessible(job)) throw new PeerError(403, "来源会话准入已失效");
         return { output: [{ type: "text", text: JSON.stringify(job) }] };
       },
     }), defineTool({
@@ -444,20 +481,25 @@ export function createPeerService(options: PeerOptions): PeerService {
         const job = await admit({ id, source: options.nodeId, target, task: args.task, ...peerRequirements(args), sourceSession: existing ? existing.sourceSession : { agent: "pi", sessionId: `pi-${api.conversationId}` } }, api);
         // Remote IO may fail after admission; status/retry retains this same job ID.
         if (options.remote) await run(job.id);
-        return { output: [{ type: "text", text: JSON.stringify(await get(job.id)) }] };
+        const current = (await get(job.id))!;
+        if (!await sourceAccessible(current)) throw new PeerError(403, "来源会话准入已失效");
+        return { output: [{ type: "text", text: JSON.stringify(current) }] };
       },
     }), defineTool({ name: "cancel_peer_task", description: "请求停止本来源会话的委派任务。取消请求不代表已停止；离线或不支持精确取消时保留待确认，不换节点执行。", parameters: Type.Object({ id: Type.String({ pattern: PEER_JOB_ID.source }) }), replay: "safe",
       execute: async (args, api) => {
         const job = await get(args.id);
         if (!job || job.source !== options.nodeId || job.sourceSession?.agent !== "pi" || job.sourceSession.sessionId !== `pi-${api.conversationId}`) throw new PeerError(404, "本来源会话没有该协作任务");
-        return { output: [{ type: "text", text: JSON.stringify(await requestCancel(args.id)) }] };
+        const current = await requestCancel(args.id);
+        if (!await sourceAccessible(current)) return { output: [{ type: "text", text: JSON.stringify({ id: args.id, cancelRequested: !!current.cancellation?.requestedAt, cancellationConfirmed: !!current.cancellation?.confirmedAt, resultWithheld: true }) }] };
+        return { output: [{ type: "text", text: JSON.stringify(current) }] };
       },
     }), defineTool({ name: "peer_task_status", description: "查询委派任务的持久化状态与结果，不执行本机入站任务。", parameters: Type.Object({ id: Type.String({ pattern: PEER_JOB_ID.source }) }), replay: "safe",
-      execute: async args => {
+      execute: async (args, api) => {
         const job = await get(args.id);
-        if (!job) throw new PeerError(404, "委派任务不存在");
+        if (!job || job.source !== options.nodeId || job.sourceSession?.agent !== "pi" || job.sourceSession.sessionId !== `pi-${api.conversationId}` || !await sourceAccessible(job)) throw new PeerError(404, "本来源会话没有可访问的协作任务");
         const item = job.source === options.nodeId && (terminal(job) || (job.target !== options.nodeId && options.remote)) ? await run(job.id) : job;
         const targetOnline = options.nodeId === "server" && item.target !== "server" ? (await options.devices?.() ?? []).includes(item.target) : undefined;
+        if (!await sourceAccessible(item)) throw new PeerError(403, "来源会话准入已失效");
         return { output: [{ type: "text", text: JSON.stringify({ ...item, ...(targetOnline === undefined ? {} : { targetOnline }) }) }] };
       },
     })],

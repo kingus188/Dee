@@ -1,3 +1,4 @@
+import { createPrivateConversationAccess, PrivateConversationAccessError } from "../conversation-access.js";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModelCatalog, createPeerService, openRuntime, Index, type Runtime } from "@assistant/runtime";
 import { independentTaskAdmitted, GOAL_READ_TOOLS, createConversationTools, createAssistant, createDailyReportTools, Delegate, createTaskCenter, createNotifier, createPersonal, createMaterials, createInvestigator, parseRepos, createEpisodes, createTeamsInbox, createTeamsReply, createTeamsAway, createMailInbox } from "@assistant/features";
@@ -79,7 +80,10 @@ export async function createApplication(config: AppConfig): Promise<AppContext> 
     const readEpisodes = () => { if (!episodeReader) throw new Error("记忆查询尚未就绪"); return episodeReader; };
     let conversationReader: ReturnType<typeof createConversationReader> | undefined;
     const readConversations = () => { if (!conversationReader) throw new Error("对话查询尚未就绪"); return conversationReader; };
-    const peers = createPeerService({ nodeId: "server", independentTask: independentTaskAdmitted, readPolicy: { revision: "server-read-v1", tools: [...GOAL_READ_TOOLS] }, configured: () => modelConfigured,
+    const peers = createPeerService({ nodeId: "server", sourceAdmission: async (tx, conversationId) => {
+      if (!peerRuntime || !episodeStore) return false;
+      try { await createPrivateConversationAccess(peerRuntime, ctx, episodeStore)(conversationId, tx); return true; } catch (error) { if (error instanceof PrivateConversationAccessError) return false; throw error; }
+    }, independentTask: independentTaskAdmitted, readPolicy: { revision: "server-read-v1", tools: [...GOAL_READ_TOOLS] }, configured: () => modelConfigured,
       devices: async () => (config.password || config.peerToken) && peerRuntime ? (await peerDevices(peerRuntime, ctx)).filter(item => item.online).map(item => item.deviceId) : [],
       remoteSessions: async (node, session) => {
         if (!peerRuntime || !(config.password || config.peerToken)) throw new Error("协作需要设备配对");
