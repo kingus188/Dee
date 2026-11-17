@@ -13,6 +13,7 @@ function fixture() {
   const revoked = new Set<string>(), bound = new Set<number>([6]);
   let changed: (() => void) | undefined;
   let desktop: unknown = null;
+  let beforeSnapshot: ((doc: unknown) => void) | undefined;
   const rows = [
     { id: 5, kind: "pi.assistant", model: [{ role: "assistant", content: [{ type: "thinking", thinking: "hidden" }, { type: "text", text: "answer" }, { type: "toolCall", name: "tool", arguments: { token: "secret" } }], timestamp: 10 }] },
     { id: 4, kind: "pi.tool-result", model: [{ role: "toolResult", content: [{ type: "text", text: "tool secret" }] }] },
@@ -20,7 +21,7 @@ function fixture() {
     { id: 2, kind: "pi.user", model: [{ role: "user", content: "正常".repeat(2000), timestamp: 8 }] },
   ];
   const runtime = { root: { id: 1 }, harness: {
-    snapshot: async (doc: unknown) => doc === Index ? { items } : doc === WechatState ? { bindings: Object.fromEntries([...bound].map(id => [id, { conversationId: id }])) } : doc === DesktopTranscript ? { value: desktop } : undefined,
+    snapshot: async (doc: unknown) => { beforeSnapshot?.(doc); return doc === Index ? { items } : doc === WechatState ? { bindings: Object.fromEntries([...bound].map(id => [id, { conversationId: id }])) } : doc === DesktopTranscript ? { value: desktop } : undefined; },
     conversation: async () => ({ entries: async (query: { maxEntryId?: number }, limit: number) => {
       changed?.();
       const selected = rows.filter(row => query.maxEntryId === undefined || row.id <= query.maxEntryId);
@@ -28,7 +29,7 @@ function fixture() {
     } }),
   } } as unknown as Runtime;
   const reader = createConversationReader(runtime, BACKGROUND_CONTEXT, { sourceAllowed: (source, _rev, messages = []) => !revoked.has(source) && !messages.some(id => revoked.has(`${source}:${id}`)), sourceRevision: () => 0 });
-  return { reader, items, revoked, bound, onRead: (fn: () => void) => { changed = fn; }, desktop: (value: unknown) => { desktop = value; } };
+  return { reader, items, revoked, bound, onSnapshot: (fn: (doc: unknown) => void) => { beforeSnapshot = fn; }, onRead: (fn: () => void) => { changed = fn; }, desktop: (value: unknown) => { desktop = value; } };
 }
 
 test("list filters private registered conversations, legacy status, archive and bounded pagination", async () => {
@@ -158,4 +159,60 @@ test("search continuation advances after an empty scan budget and owner reads or
   assert.equal(second.items[0].entryId, 1);
   const original = await f.reader.readOwner({ conversationId: 7, beforeEntryId: 2, limit: 1 });
   assert.match(original.messages[0].text, /needle$/); assert.equal(original.messages[0].truncated, false);
+});
+
+
+test("exact native lookup never substitutes a neighbour or tool-only record", async () => {
+  const f = fixture();
+  for (const messageId of ["6", "4"]) {
+    const result = await f.reader.read(2, { conversationId: 7, messageId, expectedSourceRevision: 0 });
+    assert.deepEqual(result.messages, []);
+    assert.equal(result.exactMatch?.identityMatched, false);
+    assert.equal(result.exactMatch?.status, "missing_or_unavailable");
+    assert.equal(result.nextBeforeEntryId, null);
+  }
+  const matched = await f.reader.read(2, { conversationId: 7, messageId: "2", expectedSourceRevision: 0 });
+  assert.equal(matched.exactMatch?.identityMatched, true); assert.equal(matched.messages[0].messageId, "2");
+  assert.equal(matched.messages[0].truncated, true); assert.equal(matched.messages[0].text.length, 2000);
+  assert.equal(matched.exactMatch?.summaryTextIdentity, "not_verified");
+  assert.equal(matched.exactMatch?.timestampMeaning, "message_time_not_fact_effective_time");
+});
+
+test("exact mode requires revision binding, rejects pagination and rechecks source changes", async () => {
+  const f = fixture();
+  for (const query of [{ conversationId: 7, messageId: "2" }, { conversationId: 7, messageId: "2", expectedSourceRevision: 0, limit: 1 }, { conversationId: 7, messageId: "2", expectedSourceRevision: 0, beforeEntryId: 3 }, { conversationId: 7, expectedSourceRevision: 0 }]) await assert.rejects(f.reader.read(2, query));
+  await assert.rejects(f.reader.read(2, { conversationId: 7, messageId: "2", expectedSourceRevision: 1 }), /来源修订已变化/);
+  await assert.rejects(f.reader.read(3, { conversationId: 7, messageId: "2", expectedSourceRevision: 0 }), /不能查询/);
+  f.onRead(() => f.revoked.add("conv:7"));
+  await assert.rejects(f.reader.read(2, { conversationId: 7, messageId: "2", expectedSourceRevision: 0 }), /访问范围已变化/);
+});
+
+test("desktop exact lookup uses opaque identity, fails ambiguous identities and rejects snapshot replacement", async () => {
+  const f = fixture();
+  const transcript = { revision: 1, deviceId: "test", sessionId: "test", agent: "pi", messages: [{ id: "opaque-message", role: "user", text: "current text" }] };
+  f.desktop(transcript);
+  const query = { conversationId: 7, messageId: "opaque-message", expectedSourceRevision: 0 };
+  const result = await f.reader.read(2, query);
+  assert.equal(result.exactMatch?.identityMatched, true); assert.equal(result.exactMatch?.desktopRevision, 1);
+  assert.deepEqual((await f.reader.read(2, { ...query, messageId: "1" })).messages, []);
+  f.desktop({ ...transcript, messages: [...transcript.messages, { id: "opaque-message", role: "assistant", text: "another" }] });
+  const ambiguous = await f.reader.read(2, query);
+  assert.equal(ambiguous.exactMatch?.status, "ambiguous"); assert.deepEqual(ambiguous.messages, []);
+  f.desktop(transcript); let snapshots = 0;
+  f.onSnapshot(doc => { if (doc === DesktopTranscript && ++snapshots === 2) f.desktop({ ...transcript, revision: 2 }); });
+  await assert.rejects(f.reader.read(2, query), /原文版本已变化/);
+});
+
+for (const target of [2, 7]) test(`exact reader rechecks audience changed during desktop snapshot for ${target}`, async () => {
+  const f = fixture();
+  f.desktop({ revision: 1, deviceId: "test", sessionId: "test", agent: "pi", messages: [{ id: "opaque", role: "user", text: "private" }] });
+  let snapshots = 0;
+  f.onSnapshot(doc => { if (doc === DesktopTranscript && ++snapshots === 2) f.bound.add(target); });
+  await assert.rejects(f.reader.read(2, { conversationId: 7, messageId: "opaque", expectedSourceRevision: 0 }), /不能查询|访问范围已变化/);
+});
+
+test("exact reader rechecks a message tombstone after the final audience await", async () => {
+  const f = fixture(); let snapshots = 0;
+  f.onSnapshot(doc => { if (doc === WechatState && ++snapshots === 2) f.revoked.add("conv:7:2"); });
+  await assert.rejects(f.reader.read(2, { conversationId: 7, messageId: "2", expectedSourceRevision: 0 }), /访问范围已变化/);
 });

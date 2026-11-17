@@ -34,8 +34,10 @@ test("recall exposes bounded candidates; read_episode explicitly delivers full p
 test("episode original locators use valid tool arguments and never invent missing message identity", async () => {
   const { episodeReferences } = await import("../dist/episodes/references.js");
   const row = { id: "episode", source: "conv:42", sourceRevision: 0, messageIds: ["7"], label: "label", channel: "web", level: 0 as const, periodStart: "2026-01-01", periodEnd: "2026-01-01", summary: "summary", openItems: [] };
-  assert.deepEqual(episodeReferences(row).references, [{ tool: "read_conversation", arguments: { conversationId: 42, beforeEntryId: 8, limit: 1 } }]);
+  assert.deepEqual(episodeReferences(row).references, [{ tool: "read_conversation", arguments: { conversationId: 42, messageId: "7", expectedSourceRevision: 0 } }]);
   assert.equal(episodeReferences(row).verified, false);
+  assert.equal(episodeReferences({ ...row, sourceRevision: undefined }).unavailable, true);
+  assert.deepEqual(episodeReferences({ ...row, messageIds: ["opaque"] }).references, [{ tool: "read_conversation", arguments: { conversationId: 42, messageId: "opaque", expectedSourceRevision: 0 } }]);
   assert.equal(episodeReferences({ ...row, messageIds: [] }).unavailable, true);
   assert.deepEqual(episodeReferences({ ...row, source: "teams:chat:one", messageIds: ["chat:one:message:7"] }).references, [{ tool: "teams_history", arguments: { chatId: "chat:one", messageId: "message:7" } }]);
   assert.equal(episodeReferences({ ...row, messageIds: Array.from({ length: 10 }, (_, index) => String(index + 1)) }).truncated, true);

@@ -1,14 +1,15 @@
 /** Locators only: producing tool arguments does not verify or fetch the originals. */
-export function episodeReferences(row: { source: string; messageIds: readonly string[] }) {
+export function episodeReferences(row: { source: string; messageIds: readonly string[]; sourceRevision?: number }) {
   const references: { tool: string; arguments: Record<string, string | number> }[] = [];
   for (const id of row.messageIds) {
     if (row.source.startsWith("teams:")) {
       const chatId = row.source.slice(6), prefix = chatId + ":";
       if (chatId && id.startsWith(prefix) && id.length > prefix.length) references.push({ tool: "teams_history", arguments: { chatId, messageId: id.slice(prefix.length) } });
-    } else if (/^conv:\d+$/.test(row.source) && /^\d+$/.test(id)) {
-      const conversationId = Number(row.source.slice(5)), entryId = Number(id);
-      if (Number.isSafeInteger(conversationId) && conversationId > 0 && Number.isSafeInteger(entryId + 1) && entryId > 0) {
-        references.push({ tool: "read_conversation", arguments: { conversationId, beforeEntryId: entryId + 1, limit: 1 } });
+    } else if (/^conv:[1-9]\d*$/.test(row.source)) {
+      const conversationId = Number(row.source.slice(5));
+      if (Number.isSafeInteger(conversationId) && id.length > 0 && id.length <= 256 && !/[\u0000-\u001f]/.test(id)
+        && Number.isSafeInteger(row.sourceRevision) && row.sourceRevision! >= 0) {
+        references.push({ tool: "read_conversation", arguments: { conversationId, messageId: id, expectedSourceRevision: row.sourceRevision! } });
       }
     }
   }
