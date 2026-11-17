@@ -16,17 +16,20 @@ test("Agent IPC permits only the current workspace top frame on local or active 
   let window = makeWindow();
   let confirm: (() => Promise<boolean>) | undefined;
   let confirmations = 0;
+  let response = 1, canceled = false;
+  let pendingConfirmation: Promise<{ response: number }> | undefined;
+  const directories: Array<string | null> = [];
   const exported: { registerDesktopAgent?: (options: unknown) => Promise<unknown> } = {};
   const compiled = transpileModule(readFileSync(entry, "utf8"), { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText;
   runInNewContext(compiled, { exports: exported, Error, require(name: string) {
     if (name === "electron") return { dialog: {
-      showMessageBox: async (owner: unknown) => { assert.equal(owner, window); confirmations++; return { response: 1 }; },
-      showOpenDialog: async (owner: unknown) => { assert.equal(owner, window); return { canceled: false, filePaths: ["/workspace"] }; },
+      showMessageBox: async (owner: unknown) => { assert.equal(owner, window); confirmations++; return pendingConfirmation ?? { response }; },
+      showOpenDialog: async (owner: unknown) => { assert.equal(owner, window); return { canceled, filePaths: ["/workspace"] }; },
     } };
     if (name === "./agent-settings.js") return { openAgentSettings: () => ({}) };
     if (name === "./local-agent.js") return { openDesktopAgent: async (options: { confirm(tool: string, args: unknown): Promise<boolean> }) => {
       confirm = () => options.confirm("write", { path: "/workspace/file" });
-      return Object.fromEntries(["snapshot", "newSession", "answerApproval", "send", "approve", "reject", "abort", "chooseWorkspace"].map(name => [name, async () => { calls.push(name); return name; }]));
+      return { chooseKnowledgeDirectory: async (path: string | null) => { directories.push(path); }, ...Object.fromEntries(["snapshot", "newSession", "answerApproval", "send", "approve", "reject", "abort", "chooseWorkspace"].map(name => [name, async () => { calls.push(name); return name; }])) };
     } };
     return nativeRequire(name);
   } });
@@ -62,8 +65,26 @@ test("Agent IPC permits only the current workspace top frame on local or active 
   assert.deepEqual(calls.slice(-9), ["newSession", "answerApproval", "send", "approve", "reject", "abort", "chooseWorkspace", "openConnection", "openServer"]);
   assert.equal(await confirm!(), true);
   assert.equal(confirmations, 1);
+  canceled = true;
+  await invoke("choose-knowledge-directory");
+  assert.equal(directories.length, 0);
+  canceled = false; response = 0;
+  await invoke("choose-knowledge-directory");
+  assert.equal(directories.length, 0);
+  response = 1;
+  await invoke("choose-knowledge-directory");
+  await invoke("clear-knowledge-directory");
+  assert.deepEqual(directories, ["/workspace", null]);
+  let resolveConfirmation!: (value: { response: number }) => void;
+  pendingConfirmation = new Promise(resolve => { resolveConfirmation = resolve; });
+  const choosing = invoke("choose-knowledge-directory");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await invoke("clear-knowledge-directory");
+  resolveConfirmation({ response: 1 });
+  await choosing;
+  assert.deepEqual(directories, ["/workspace", null, null], "clearing invalidates an older confirmation dialog");
   window.destroyed = true;
   await assert.rejects(invoke("snapshot"), /Untrusted/);
   assert.equal(await confirm!(), false);
-  assert.equal(confirmations, 1);
+  assert.equal(confirmations, 4);
 });

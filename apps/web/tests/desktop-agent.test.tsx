@@ -517,3 +517,20 @@ test("picker prevents duplicate switches and keeps the current selection after a
   assert.equal(picker.disabled, false);
   assert.equal(document.querySelector('[aria-label="选择 Pi"]')!.getAttribute("aria-pressed"), "true");
 });
+
+test("资料目录独立显示，选择和清除不改变工作目录", async t => {
+  const state = snapshot(); state.agent = "pi"; state.workspace = "/work";
+  const native = bridge(state);
+  native.chooseKnowledgeDirectory = async () => { state.knowledgeDirectory = "/docs"; };
+  native.clearKnowledgeDirectory = async () => { state.knowledgeDirectory = null; };
+  const { dom, render } = await mount(t);
+  Object.defineProperty(dom.window, "desktopAgent", { value: native }); await render(<DesktopAgent />);
+  const document = dom.window.document;
+  const find = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === text)!;
+  assert.match(document.body.textContent!, /资料目录未开启/);
+  await act(async () => find("选择资料目录").click());
+  assert.match(document.body.textContent!, /资料目录\/docs/);
+  await act(async () => find("清除资料目录").click());
+  assert.match(document.body.textContent!, /资料目录未开启/);
+  assert.equal(state.workspace, "/work");
+});

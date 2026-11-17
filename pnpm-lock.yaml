@@ -205,6 +205,9 @@ importers:
       '@assistant/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@assistant/features':
+        specifier: workspace:*
+        version: link:../../packages/features
       '@assistant/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime

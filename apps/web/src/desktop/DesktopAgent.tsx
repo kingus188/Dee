@@ -30,7 +30,12 @@ export function DesktopAgent({ local }: { local: LocalConversation }) {
   const { bridge, snapshot, action, pending } = local;
   if (!bridge) return null;
   return <>
-    {snapshot && <AgentContext snapshot={snapshot}>
+    {snapshot && <AgentContext snapshot={snapshot} directoryControls={!!bridge.chooseKnowledgeDirectory && !!bridge.clearKnowledgeDirectory}>
+      {bridge.chooseKnowledgeDirectory && bridge.clearKnowledgeDirectory && <div className="desktop-knowledge-directory">
+        <dl className="related-task-fields"><div><dt>资料目录</dt><dd>{snapshot.knowledgeDirectory ?? "未开启"}{snapshot.agent && snapshot.agent !== "pi" ? "（仅 Pi 支持检索）" : ""}</dd></div></dl>
+        <button className="text-button" type="button" disabled={pending.length > 0 || !!local.pollError} onClick={() => void action("knowledge-directory", () => bridge.chooseKnowledgeDirectory!())}>{snapshot.knowledgeDirectory ? "更换资料目录" : "选择资料目录"}</button>
+        {snapshot.knowledgeDirectory && <button className="text-button" type="button" disabled={pending.length > 0 || !!local.pollError} onClick={() => void action("knowledge-directory", () => bridge.clearKnowledgeDirectory!())}>清除资料目录</button>}
+      </div>}
       {snapshot.conversationSync && bridge.setConversationSync && <ConversationSync key={snapshot.conversationSync.sessionId} sync={snapshot.conversationSync} generate={bridge.generateSummaryDraft} cancel={bridge.cancelSummaryDraft} disabled={pending.length > 0 || !!local.pollError} save={async input => {
         if (!await action("conversation-sync", () => bridge.setConversationSync!(input))) throw new Error("Sync preference was not saved. Check the current conversation and try again.");
       }} />}

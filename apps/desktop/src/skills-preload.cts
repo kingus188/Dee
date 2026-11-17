@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("desktopAgent", {
   readPeerSession: (input: unknown) => ipcRenderer.invoke("desktop:agent:read-peer-session", input),
   sendPeer: (input: unknown) => ipcRenderer.invoke("desktop:agent:send-peer", input),
   peerStatus: (id: string) => ipcRenderer.invoke("desktop:agent:peer-status", id),
+  chooseKnowledgeDirectory: () => ipcRenderer.invoke("desktop:agent:choose-knowledge-directory"),
+  clearKnowledgeDirectory: () => ipcRenderer.invoke("desktop:agent:clear-knowledge-directory"),
   chooseWorkspace: () => ipcRenderer.invoke("desktop:agent:choose-workspace"),
   approve: (id: string) => ipcRenderer.invoke("desktop:agent:approve", id),
   reject: (id: string) => ipcRenderer.invoke("desktop:agent:reject", id),

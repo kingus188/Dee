@@ -15,5 +15,5 @@
     "src/**/*.ts",
     "src/**/*.cts"
   ],
-  "references": [{ "path": "../../packages/contracts" }, { "path": "../../packages/runtime" }]
+  "references": [{ "path": "../../packages/contracts" }, { "path": "../../packages/runtime" }, { "path": "../../packages/features" }]
 }

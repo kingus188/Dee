@@ -24,6 +24,7 @@ export async function registerDesktopAgent(options: { ipc: IpcMain; directory: s
     const url = event.senderFrame.url.split("#")[0] ?? "";
     if (url !== options.localUrl && !isAppUrl(url, options.getOrigin())) throw new Error("Untrusted local Agent window");
   }
+  let knowledgeSelection = 0;
   const handlers: Record<string, (input: never) => unknown> = {
     permissions: () => { const current = settings.get(); if (current.agent !== "codex" && current.agent !== "claude") return []; return readAgentPermissions(current.agent, current.agents[current.agent], options.searchPath, options.env); },
     models: async () => {
@@ -68,6 +69,15 @@ export async function registerDesktopAgent(options: { ipc: IpcMain; directory: s
       if (selected.canceled || !selected.filePaths[0]) return;
       await agent.shareArtifact(id, selected.filePaths[0]);
     },
+    "choose-knowledge-directory": async () => {
+      const selection = ++knowledgeSelection;
+      const window = options.getWindow(); if (!window || window.isDestroyed()) throw new Error("桌面窗口已关闭");
+      const selected = await dialog.showOpenDialog(window, { title: "选择只读资料目录", properties: ["openDirectory"] });
+      if (selected.canceled || !selected.filePaths[0] || window.isDestroyed() || options.getWindow() !== window || closing || selection !== knowledgeSelection) return;
+      const confirmation = await dialog.showMessageBox(window, { type: "question", title: "允许检索资料目录", message: selected.filePaths[0], detail: "仅 Pi 支持此检索能力，不会为其他原生 Agent 配置目录。仅按请求检索 Markdown 和文本文件。读取的片段会进入当前模型的会话；使用云模型时可能发送至模型提供商。不会自动扫描或上传整个目录，也不会自动保存为记忆。清除目录可停止后续读取，但不会撤回已进入会话的内容。", buttons: ["取消", "允许只读检索"], defaultId: 0, cancelId: 0, noLink: true });
+      if (confirmation.response === 1 && !window.isDestroyed() && options.getWindow() === window && !closing && selection === knowledgeSelection) await agent.chooseKnowledgeDirectory(selected.filePaths[0]);
+    },
+    "clear-knowledge-directory": () => { knowledgeSelection++; return agent.chooseKnowledgeDirectory(null); },
     "choose-workspace": async () => {
       const window = options.getWindow(); if (!window) throw new Error("桌面窗口已关闭");
       const selected = await dialog.showOpenDialog(window, { title: "选择小 D 的工作目录", properties: ["openDirectory"] });

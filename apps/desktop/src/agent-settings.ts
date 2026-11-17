@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { isAbsolute, join } from "node:path";
 import type { DesktopAgentKind, DesktopAgentSelection, DesktopPiEffort, ExternalAgentConfig } from "@assistant/contracts";
 
-export type AgentSettings = { nodeId: string; workspace: string | null; agent: DesktopAgentKind; permissionDefaultsVersion?: number; piAccess?: "ask" | "full"; piEffort?: DesktopPiEffort | null; piModel?: { provider: string; modelId: string } | null; agents: Record<Exclude<DesktopAgentKind, "pi">, ExternalAgentConfig> };
+export type AgentSettings = { nodeId: string; workspace: string | null; knowledgeDirectory: string | null; knowledgeRevision: number; agent: DesktopAgentKind; permissionDefaultsVersion?: number; piAccess?: "ask" | "full"; piEffort?: DesktopPiEffort | null; piModel?: { provider: string; modelId: string } | null; agents: Record<Exclude<DesktopAgentKind, "pi">, ExternalAgentConfig> };
 function fullAccess(kind: Exclude<DesktopAgentKind, "pi">, config: ExternalAgentConfig): ExternalAgentConfig {
   if (kind === "codex") return { ...config, permission: undefined, sandbox: "danger-full-access", approvalPolicy: "never" };
   if (kind === "claude") return { ...config, permission: undefined, permissionMode: "bypassPermissions" };
@@ -42,17 +42,19 @@ export function validateAgentSelection(input: unknown): DesktopAgentSelection {
 export function openAgentSettings(directory: string) {
   const path = join(directory, "desktop-agent.json");
   const defaultWorkspace = join(directory, "local-agent", "workspace");
-  let settings: AgentSettings = { nodeId: `desktop-${randomUUID()}`, workspace: defaultWorkspace, agent: "pi", agents: { codex: { executable: "codex", args: [] }, claude: { executable: "claude", args: [] }, omp: { executable: "omp", args: [] }, acp: { executable: "", args: [] } } };
+  let settings: AgentSettings = { nodeId: `desktop-${randomUUID()}`, workspace: defaultWorkspace, knowledgeDirectory: null, knowledgeRevision: 0, agent: "pi", agents: { codex: { executable: "codex", args: [] }, claude: { executable: "claude", args: [] }, omp: { executable: "omp", args: [] }, acp: { executable: "", args: [] } } };
   let legacy: Record<string, unknown> = {};
   if (existsSync(path)) {
-    const stored = JSON.parse(readFileSync(path, "utf8")) as { nodeId: unknown; workspace: unknown; model?: unknown; encryptedKey?: unknown; agent?: DesktopAgentKind; permissionDefaultsVersion?: number; piAccess?: "ask" | "full"; agents?: AgentSettings["agents"] };
+    const stored = JSON.parse(readFileSync(path, "utf8")) as { nodeId: unknown; workspace: unknown; knowledgeDirectory?: unknown; knowledgeRevision?: unknown; model?: unknown; encryptedKey?: unknown; agent?: DesktopAgentKind; permissionDefaultsVersion?: number; piAccess?: "ask" | "full"; agents?: AgentSettings["agents"] };
     if (typeof stored.nodeId !== "string" || !/^desktop-[0-9a-f-]{36}$/i.test(stored.nodeId) || (stored.workspace !== null && (typeof stored.workspace !== "string" || !isAbsolute(stored.workspace)))) throw new Error("本机 Agent 配置损坏，原文件已保留");
+    if (stored.knowledgeDirectory != null && (typeof stored.knowledgeDirectory !== "string" || !isAbsolute(stored.knowledgeDirectory) || stored.knowledgeDirectory.length > 4096 || /[\r\n\0]/.test(stored.knowledgeDirectory))) throw new Error("资料目录配置无效");
+    if (stored.knowledgeRevision !== undefined && (!Number.isSafeInteger(stored.knowledgeRevision) || (stored.knowledgeRevision as number) < 0)) throw new Error("资料目录版本无效");
     // Preserve legacy model data for rollback without decrypting or using it.
     legacy = { ...(stored.model !== undefined ? { model: stored.model } : {}), ...(stored.encryptedKey !== undefined ? { encryptedKey: stored.encryptedKey } : {}) };
     const agent = validateAgentSelection({ kind: stored.agent ?? "pi" }).kind;
     for (const kind of ["codex", "claude", "acp", "omp"] as const) if (stored.agents?.[kind]?.executable) settings.agents[kind] = withDefaultAccess(kind, validateAgentSelection({ kind, config: stored.agents[kind] }).config!);
     const { piModel, piEffort, piAccess } = validateAgentSelection({ kind: "pi", piModel: (stored as AgentSettings).piModel, piEffort: (stored as AgentSettings).piEffort, piAccess: stored.piAccess });
-    settings = { ...settings, nodeId: stored.nodeId, workspace: (stored.workspace as string | null) ?? defaultWorkspace, agent, piModel, piEffort, piAccess, permissionDefaultsVersion: stored.permissionDefaultsVersion };
+    settings = { ...settings, nodeId: stored.nodeId, knowledgeDirectory: (stored.knowledgeDirectory as string | null) ?? null, knowledgeRevision: (stored.knowledgeRevision as number) ?? 0, workspace: (stored.workspace as string | null) ?? defaultWorkspace, agent, piModel, piEffort, piAccess, permissionDefaultsVersion: stored.permissionDefaultsVersion };
   }
   const migratePermissions = settings.permissionDefaultsVersion !== 1;
   if (migratePermissions) {
@@ -70,5 +72,11 @@ export function openAgentSettings(directory: string) {
   if (!existsSync(path) || migratePermissions) persist(settings);
   return { get: () => settings,
     selectAgent: (input: unknown) => { const selected = validateAgentSelection(input); persist({ ...settings, agent: selected.kind, ...(selected.piAccess !== undefined ? { piAccess: selected.piAccess } : {}), ...(selected.piEffort !== undefined ? { piEffort: selected.piEffort } : {}), ...(selected.piModel !== undefined ? { piModel: selected.piModel } : {}), agents: selected.kind === "pi" || !selected.config ? settings.agents : { ...settings.agents, [selected.kind]: withDefaultAccess(selected.kind, selected.config) } }); },
+    saveKnowledgeDirectory: (knowledgeDirectory: string | null) => {
+      if (knowledgeDirectory !== null && (typeof knowledgeDirectory !== "string" || !isAbsolute(knowledgeDirectory) || knowledgeDirectory.length > 4096 || /[\r\n\0]/.test(knowledgeDirectory))) throw new Error("资料目录须为有效绝对路径");
+      const knowledgeRevision = settings.knowledgeRevision + 1;
+      if (!Number.isSafeInteger(knowledgeRevision)) throw new Error("资料目录版本已达上限");
+      persist({ ...settings, knowledgeDirectory, knowledgeRevision });
+    },
     saveWorkspace: (workspace: string) => { if (!isAbsolute(workspace)) throw new Error("工作目录须为绝对路径"); persist({ ...settings, workspace }); } };
 }

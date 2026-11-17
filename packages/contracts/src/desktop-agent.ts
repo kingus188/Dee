@@ -76,6 +76,7 @@ export type DesktopAgentSnapshot = {
   piConfigured?: boolean;
   configured: boolean;
   model: { api: string; baseUrl: string; model: string; contextWindow: number; maxTokens: number; hasApiKey: boolean };
+  knowledgeDirectory?: string | null;
   workspace: string | null; nodeId: string; busy: boolean;
   messages: Array<{ id: string; role: "user" | "assistant"; text: string }>;
   jobs: DesktopPeerJob[]; serverConnected: boolean; error?: string;
@@ -102,6 +103,8 @@ export type DesktopAgentBridge = {
   shareArtifact?(id: string): Promise<void>;
   listArtifacts?(id: string): Promise<Array<import("./peer-artifacts.js").PeerArtifact & { downloadUrl: string }>>;
   chooseWorkspace(): Promise<void>;
+  chooseKnowledgeDirectory?(): Promise<void>;
+  clearKnowledgeDirectory?(): Promise<void>;
   approve(id: string): Promise<void>;
   reject(id: string): Promise<void>;
   abort(): Promise<void>;

@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld("desktopAgent", {
   peerStatus: (id: string) => ipcRenderer.invoke("desktop:agent:peer-status", id),
   shareArtifact: (id: string) => ipcRenderer.invoke("desktop:agent:share-artifact", id),
   listArtifacts: (id: string) => ipcRenderer.invoke("desktop:agent:list-artifacts", id),
+  chooseKnowledgeDirectory: () => ipcRenderer.invoke("desktop:agent:choose-knowledge-directory"),
+  clearKnowledgeDirectory: () => ipcRenderer.invoke("desktop:agent:clear-knowledge-directory"),
   chooseWorkspace: () => ipcRenderer.invoke("desktop:agent:choose-workspace"),
   approve: (id: string) => ipcRenderer.invoke("desktop:agent:approve", id),
   reject: (id: string) => ipcRenderer.invoke("desktop:agent:reject", id),

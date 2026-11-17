@@ -2,10 +2,10 @@ import type { DesktopAgentSnapshot } from "@assistant/contracts";
 import { executionProgress } from "./progress.js";
 import { agentNames } from "./AgentPicker.js";
 
-export function AgentContext({ snapshot, children }: { snapshot: DesktopAgentSnapshot; children?: import("react").ReactNode }) {
+export function AgentContext({ snapshot, children, directoryControls = false }: { snapshot: DesktopAgentSnapshot; children?: import("react").ReactNode; directoryControls?: boolean }) {
   const progress = executionProgress(snapshot);
   const capabilities = snapshot.capabilities, handoff = snapshot.handoff;
-  if (!capabilities && !handoff && !snapshot.busy && !snapshot.runs?.length && !snapshot.conversationSync) return null;
+  if (!capabilities && !handoff && !snapshot.busy && !snapshot.runs?.length && !snapshot.conversationSync && !directoryControls) return null;
   return <details className="desktop-agent-context">
     <summary>{handoff ? `${agentNames[handoff.source]} → ${agentNames[handoff.target]} · 上下文交接` : "执行位置与 Agent 能力"}</summary>
     <dl className="related-task-fields">

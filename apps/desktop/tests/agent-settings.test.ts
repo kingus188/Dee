@@ -106,3 +106,26 @@ test("agent selection upgrades old settings, preserves Pi and rejects shell-styl
     assert.throws(() => validateAgentSelection({ kind: "acp", config: { executable: "agent\ncommand", args: [] } }), /可执行文件/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test("knowledge directory is separately opted in and every change invalidates old references", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dee-knowledge-settings-"));
+  try {
+    const settings = openAgentSettings(directory);
+    assert.equal(settings.get().knowledgeDirectory, null);
+    assert.equal(settings.get().knowledgeRevision, 0);
+    settings.saveWorkspace(directory);
+    assert.equal(settings.get().knowledgeDirectory, null);
+    settings.saveKnowledgeDirectory(directory);
+    settings.saveKnowledgeDirectory(null);
+    settings.saveKnowledgeDirectory(directory);
+    const restored = openAgentSettings(directory);
+    assert.equal(restored.get().knowledgeDirectory, directory);
+    assert.equal(restored.get().knowledgeRevision, 3);
+    assert.equal(restored.get().workspace, directory);
+    assert.throws(() => restored.saveKnowledgeDirectory("relative"), /绝对路径/);
+    const legacy = { ...restored.get(), knowledgeDirectory: undefined, knowledgeRevision: undefined };
+    await writeFile(join(directory, "desktop-agent.json"), JSON.stringify(legacy));
+    assert.equal(openAgentSettings(directory).get().knowledgeDirectory, null);
+    assert.equal(openAgentSettings(directory).get().knowledgeRevision, 0);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

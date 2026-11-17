@@ -23,6 +23,7 @@ test("skills preload exposes only named operations and never a generic IPC or fi
     ["answerApproval", "answer-approval", [{ id: "approval", allow: true }]], ["send", "send", [{ text: "hello" }]],
     ["peerSessions", "peer-sessions", ["server"]], ["readPeerSession", "read-peer-session", [{ id: "session" }]],
     ["sendPeer", "send-peer", [{ text: "relay" }]], ["peerStatus", "peer-status", ["peer"]],
+    ["chooseKnowledgeDirectory", "choose-knowledge-directory", []], ["clearKnowledgeDirectory", "clear-knowledge-directory", []],
     ["chooseWorkspace", "choose-workspace", []], ["approve", "approve", ["approval"]], ["reject", "reject", ["approval"]],
     ["abort", "abort", []], ["openServer", "open-server", ["#tasks"]], ["openConnection", "open-connection", []],
   ];
@@ -31,6 +32,8 @@ test("skills preload exposes only named operations and never a generic IPC or fi
     await agent[method]!(...args);
     assert.deepEqual(calls.shift(), [`desktop:agent:${channel}`, ...args]);
   }
+  await agent.chooseKnowledgeDirectory!("/ignored-model-path");
+  assert.deepEqual(calls.shift(), ["desktop:agent:choose-knowledge-directory"]);
   const server = bridges.get("desktopServer")!;
   assert.deepEqual(Object.keys(server), ["platform", "connect", "openSettings", "notificationStatus"]);
   assert.equal(server.platform, "darwin");
